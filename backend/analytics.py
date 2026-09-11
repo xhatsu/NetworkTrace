@@ -65,15 +65,38 @@ def rebuild_rollups(repository: SQLiteRepository) -> int:
 
 def rebuild_topology(repository: SQLiteRepository) -> int:
     with repository.connect() as db:
-        # A parent match supplies direction/evidence. An explicit peer without parent remains inferred.
-        rows = db.execute("""
+        mappings = [dict(m) for m in db.execute("SELECT address,service_name,valid_from_ms,valid_to_ms,confidence FROM address_mappings ORDER BY confidence DESC").fetchall()]
+        client_events = [dict(r) for r in db.execute("""
           SELECT c.timestamp_ms,c.service_name source_service,
-                 COALESCE(c.peer_service,(SELECT m.service_name FROM address_mappings m WHERE m.address IN (c.peer_address,c.url_domain) AND m.valid_from_ms<=c.timestamp_ms AND (m.valid_to_ms IS NULL OR m.valid_to_ms>c.timestamp_ms) ORDER BY m.confidence DESC LIMIT 1)) target_service,
-                 c.peer_service explicit_peer,c.duration_us,
-                 c.status_code,c.parent_id,p.transaction_id parent_match
+                 c.peer_service,c.peer_address,c.url_domain,
+                 c.duration_us,c.status_code,c.parent_id,p.transaction_id parent_match
           FROM events c LEFT JOIN events p ON p.trace_id=c.trace_id AND p.transaction_id=c.parent_id
-          WHERE c.span_kind='client' AND (c.peer_service IS NOT NULL OR EXISTS (SELECT 1 FROM address_mappings m WHERE m.address IN (c.peer_address,c.url_domain) AND m.valid_from_ms<=c.timestamp_ms AND (m.valid_to_ms IS NULL OR m.valid_to_ms>c.timestamp_ms)))
-        """)
+          WHERE c.span_kind='client'
+        """).fetchall()]
+
+    def resolve_target(peer_svc: Any, peer_addr: Any, url_domain: Any, ts_ms: int) -> str | None:
+        if peer_svc:
+            return str(peer_svc)
+        for m in mappings:
+            if m["address"] in (peer_addr, url_domain) and m["valid_from_ms"] <= ts_ms and (m["valid_to_ms"] is None or m["valid_to_ms"] > ts_ms):
+                return str(m["service_name"])
+        return None
+
+    rows = []
+    for r in client_events:
+        target_svc = resolve_target(r["peer_service"], r["peer_address"], r["url_domain"], r["timestamp_ms"])
+        if not target_svc:
+            continue
+        rows.append({
+            "timestamp_ms": r["timestamp_ms"],
+            "source_service": r["source_service"],
+            "target_service": target_svc,
+            "explicit_peer": r["peer_service"],
+            "duration_us": r["duration_us"],
+            "status_code": r["status_code"],
+            "parent_id": r["parent_id"],
+            "parent_match": r["parent_match"],
+        })
     grouped: dict[tuple, list[Any]] = defaultdict(list)
     for row in rows:
         bucket = row["timestamp_ms"] - row["timestamp_ms"]%60_000

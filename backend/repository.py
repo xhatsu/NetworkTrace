@@ -9,6 +9,8 @@ from typing import Any, Iterator, Protocol
 
 from .config import settings
 from .histogram import Histogram, merged_percentiles
+from backend.app.repositories.db_context import get_connection, db_transaction
+from backend.app.repositories.clickhouse_migrator import run_clickhouse_migrations
 
 
 class TraceRepository(Protocol):
@@ -17,44 +19,20 @@ class TraceRepository(Protocol):
 
 
 class SQLiteRepository:
-    def __init__(self, path: Path | str = settings.db_path):
-        self.path = Path(path)
-        self.path.parent.mkdir(parents=True, exist_ok=True)
+    def __init__(self, path: Path | str | None = None):
+        self._custom_path = str(path) if path else None
+        self.path = Path(path) if path else settings.db_path
 
-    def connect(self) -> sqlite3.Connection:
-        connection = sqlite3.connect(self.path, timeout=15, isolation_level=None)
-        connection.row_factory = sqlite3.Row
-        connection.execute("PRAGMA journal_mode=WAL")
-        connection.execute("PRAGMA synchronous=NORMAL")
-        connection.execute("PRAGMA busy_timeout=15000")
-        connection.execute("PRAGMA temp_store=MEMORY")
-        connection.execute("PRAGMA cache_size=-64000")
-        connection.execute("PRAGMA mmap_size=268435456")
-        connection.execute("PRAGMA foreign_keys=ON")
-        return connection
+    def connect(self) -> Any:
+        return get_connection(self._custom_path)
 
     @contextmanager
-    def transaction(self) -> Iterator[sqlite3.Connection]:
-        connection = self.connect()
-        try:
-            connection.execute("BEGIN IMMEDIATE")
+    def transaction(self) -> Iterator[Any]:
+        with db_transaction(self._custom_path) as connection:
             yield connection
-            connection.commit()
-        except Exception:
-            connection.rollback()
-            raise
-        finally:
-            connection.close()
 
     def migrate(self) -> None:
-        migration_dir = Path(__file__).parent / "migrations"
-        with self.connect() as connection:
-            connection.execute("CREATE TABLE IF NOT EXISTS schema_migrations(version TEXT PRIMARY KEY, applied_at_ms INTEGER NOT NULL)")
-            for path in sorted(migration_dir.glob("*.sql")):
-                if connection.execute("SELECT 1 FROM schema_migrations WHERE version=?", (path.name,)).fetchone():
-                    continue
-                connection.executescript(path.read_text())
-                connection.execute("INSERT INTO schema_migrations VALUES (?,?)", (path.name, int(time.time() * 1000)))
+        run_clickhouse_migrations(self._custom_path)
 
     @staticmethod
     def _where(start_ms: int, end_ms: int, filters: dict[str, str | None], alias: str = "") -> tuple[str, list[Any]]:

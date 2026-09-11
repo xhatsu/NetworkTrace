@@ -253,27 +253,35 @@ def import_documents(repository: SQLiteRepository, documents: Iterable[dict[str,
     def flush() -> None:
         if not batch: return
         with repository.transaction() as db:
-            before = db.total_changes
-            db.executemany(f"INSERT OR IGNORE INTO events({','.join(EVENT_COLUMNS)}) VALUES ({','.join('?' for _ in EVENT_COLUMNS)})", [[event[c] for c in EVENT_COLUMNS] for event in batch])
-            result.inserted += db.total_changes - before
-            dirty={event["timestamp_ms"]-event["timestamp_ms"]%60_000 for event in batch}
-            db.executemany("INSERT INTO dirty_buckets(bucket_ms,reason,created_at_ms) VALUES (?,'import-or-late-arrival',?) ON CONFLICT(bucket_ms) DO UPDATE SET reason=excluded.reason,created_at_ms=excluded.created_at_ms",[(bucket,int(time.time()*1000)) for bucket in dirty])
-            service_inventory: dict[str, tuple[dict[str, Any], int, int]] = {}
-            account_inventory: dict[tuple[str, str], tuple[dict[str, Any], int, int]] = {}
-            for event in batch:
-                existing=service_inventory.get(event["service_name"])
-                if existing is None: service_inventory[event["service_name"]]=(event,event["timestamp_ms"],event["timestamp_ms"])
-                else: service_inventory[event["service_name"]]=(existing[0],min(existing[1],event["timestamp_ms"]),max(existing[2],event["timestamp_ms"]))
-                if event["account_username"]:
-                    key=(event["account_username"],event["account_namespace"])
-                    existing_account=account_inventory.get(key)
-                    if existing_account is None: account_inventory[key]=(event,event["timestamp_ms"],event["timestamp_ms"])
-                    else: account_inventory[key]=(existing_account[0],min(existing_account[1],event["timestamp_ms"]),max(existing_account[2],event["timestamp_ms"]))
-            for event,first_seen,last_seen in service_inventory.values():
-                db.execute("INSERT INTO services(name,environment,service_group,service_module,first_seen_ms,last_seen_ms) VALUES (?,?,?,?,?,?) ON CONFLICT(name) DO UPDATE SET first_seen_ms=MIN(first_seen_ms,excluded.first_seen_ms),last_seen_ms=MAX(last_seen_ms,excluded.last_seen_ms),environment=excluded.environment,service_group=excluded.service_group,service_module=excluded.service_module", (event["service_name"],event["environment"],event["service_group"],event["service_module"],first_seen,last_seen))
-            for event,first_seen,last_seen in account_inventory.values():
-                db.execute("INSERT INTO accounts(username,namespace,first_seen_ms,last_seen_ms) VALUES (?,?,?,?) ON CONFLICT(username,namespace) DO UPDATE SET first_seen_ms=MIN(first_seen_ms,excluded.first_seen_ms),last_seen_ms=MAX(last_seen_ms,excluded.last_seen_ms)", (event["account_username"],event["account_namespace"],first_seen,last_seen))
-        result.duplicates += len(batch) - (result.inserted - (result.read - len(batch) - result.rejected - result.duplicates))
+            uids = [event["event_uid"] for event in batch]
+            existing_uids = set()
+            if uids:
+                in_ph = ",".join(["?"] * len(uids))
+                rows = db.execute(f"SELECT event_uid FROM events WHERE event_uid IN ({in_ph})", uids).fetchall()
+                existing_uids = {r[0] for r in rows}
+            new_events = [e for e in batch if e["event_uid"] not in existing_uids]
+            if new_events:
+                db.executemany(f"INSERT INTO events({','.join(EVENT_COLUMNS)}) VALUES ({','.join('?' for _ in EVENT_COLUMNS)})", [[event[c] for c in EVENT_COLUMNS] for event in new_events])
+                result.inserted += len(new_events)
+                dirty={event["timestamp_ms"]-event["timestamp_ms"]%60_000 for event in new_events}
+                now_ms = int(time.time() * 1000)
+                db.executemany("INSERT INTO dirty_buckets(bucket_ms,reason,created_at_ms) VALUES (?,?,?)", [(bucket, 'import-or-late-arrival', now_ms) for bucket in dirty])
+                service_inventory: dict[str, tuple[dict[str, Any], int, int]] = {}
+                account_inventory: dict[tuple[str, str], tuple[dict[str, Any], int, int]] = {}
+                for event in new_events:
+                    existing=service_inventory.get(event["service_name"])
+                    if existing is None: service_inventory[event["service_name"]]=(event,event["timestamp_ms"],event["timestamp_ms"])
+                    else: service_inventory[event["service_name"]]=(existing[0],min(existing[1],event["timestamp_ms"]),max(existing[2],event["timestamp_ms"]))
+                    if event["account_username"]:
+                        key=(event["account_username"],event["account_namespace"])
+                        existing_account=account_inventory.get(key)
+                        if existing_account is None: account_inventory[key]=(event,event["timestamp_ms"],event["timestamp_ms"])
+                        else: account_inventory[key]=(existing_account[0],min(existing_account[1],event["timestamp_ms"]),max(existing_account[2],event["timestamp_ms"]))
+                for event,first_seen,last_seen in service_inventory.values():
+                    db.execute("INSERT INTO services(name,environment,service_group,service_module,first_seen_ms,last_seen_ms) VALUES (?,?,?,?,?,?)", (event["service_name"],event["environment"],event["service_group"],event["service_module"],first_seen,last_seen))
+                for event,first_seen,last_seen in account_inventory.values():
+                    db.execute("INSERT INTO accounts(username,namespace,first_seen_ms,last_seen_ms) VALUES (?,?,?,?)", (event["account_username"],event["account_namespace"],first_seen,last_seen))
+            result.duplicates += len(batch) - len(new_events)
         batch.clear()
     for offset, raw in enumerate(documents):
         result.read += 1
