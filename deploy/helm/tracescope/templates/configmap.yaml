@@ -1,0 +1,21 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "tracescope.fullname" . }}-config
+  labels:
+    {{- include "tracescope.labels" . | nindent 4 }}
+data:
+  OTEL_RETENTION_DAYS: {{ .Values.config.retentionDays | quote }}
+  OTEL_CLICKHOUSE_HOST: {{ include "tracescope.clickhouseHost" . | quote }}
+  OTEL_CLICKHOUSE_PORT: {{ .Values.clickhouse.port | quote }}
+  OTEL_CLICKHOUSE_DATABASE: {{ .Values.clickhouse.database | quote }}
+  OTEL_CLICKHOUSE_USER: {{ .Values.clickhouse.user | quote }}
+  OTEL_CLICKHOUSE_SECURE: {{ .Values.clickhouse.secure | quote }}
+  OTEL_RUN_MIGRATIONS: "false"
+  OTEL_DEMO_MODE: {{ .Values.config.demoMode | quote }}
+  OTEL_CORS_ORIGINS: {{ .Values.config.corsOrigins | quote }}
+  OTEL_INGEST_QUEUE_CAPACITY: {{ .Values.config.highTpsWriter.queueCapacity | quote }}
+  OTEL_INGEST_COALESCE_MS: {{ .Values.config.highTpsWriter.coalesceMs | quote }}
+  OTEL_INGEST_TRANSACTION_RECORDS: {{ .Values.config.highTpsWriter.transactionRecords | quote }}
+  OTEL_INGEST_COMMIT_TIMEOUT_SECONDS: {{ .Values.config.highTpsWriter.commitTimeoutSeconds | quote }}
+  OTEL_INTERNAL_REQUEST_TIMEOUT_SECONDS: {{ .Values.config.highTpsWriter.internalRequestTimeoutSeconds | quote }}

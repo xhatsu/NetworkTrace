@@ -1,0 +1,177 @@
+# Default values for tracescope Helm chart.
+# Supports both:
+# 1. Distributed topology (default: independent ingest, agent-stats, storage, ui, clickhouse)
+# 2. Consolidated/Merged topology:
+#    - Set ui.enabled: false to merge UI into the storage API pod.
+#    - Set agentStats.enabled: false to merge agent telemetry into the ingest pod.
+#    - Set clickhouse.enabled: false to use an external ClickHouse cluster.
+
+global:
+  imageRegistry: ""
+  imagePullSecrets: []
+
+nameOverride: ""
+fullnameOverride: ""
+
+# -----------------------------------------------------------------------------
+# ClickHouse Database (Columnar Storage)
+# -----------------------------------------------------------------------------
+clickhouse:
+  enabled: true
+  image:
+    repository: clickhouse/clickhouse-server
+    tag: "24.8"
+    pullPolicy: IfNotPresent
+  persistence:
+    enabled: true
+    storageClass: ""
+    size: 5Gi
+    accessModes:
+      - ReadWriteOnce
+  resources:
+    requests:
+      cpu: 300m
+      memory: 1Gi
+    limits:
+      cpu: "2"
+      memory: 2Gi
+  host: ""
+  port: 8123
+  database: tracescope
+  user: default
+  password: ""
+  secure: false
+
+# -----------------------------------------------------------------------------
+# Application & Analytics Workload (StatefulSet: exactly 1 replica)
+# Runs migrate (initContainer), api (main), and analytics-worker (sidecar).
+# All 3 containers share the unified app image below.
+# -----------------------------------------------------------------------------
+app:
+  replicaCount: 1
+  image:
+    repository: xhatsu101/tracescope
+    tag: app-0.2.0
+    pullPolicy: IfNotPresent
+  resources:
+    requests:
+      cpu: 300m
+      memory: 512Mi
+    limits:
+      cpu: "1.5"
+      memory: 1.5Gi
+  worker:
+    interval: 60
+    resources:
+      requests:
+        cpu: 150m
+        memory: 256Mi
+      limits:
+        cpu: "1"
+        memory: 1Gi
+  migrations:
+    enabled: true
+
+# -----------------------------------------------------------------------------
+# Ingestion Workload (Stateless Deployment)
+# -----------------------------------------------------------------------------
+ingest:
+  replicaCount: 3
+  image:
+    repository: xhatsu101/tracescope
+    tag: ingest-0.2.0
+    pullPolicy: IfNotPresent
+  autoscaling:
+    enabled: true
+    minReplicas: 3
+    maxReplicas: 12
+    targetCPUUtilizationPercentage: 75
+  resources:
+    requests:
+      cpu: 200m
+      memory: 384Mi
+    limits:
+      cpu: "2"
+      memory: 2Gi
+
+# -----------------------------------------------------------------------------
+# Agent Stats Workload (Stateless Deployment)
+# Default: false (merged into Storage API for optimal cluster management).
+# Set enabled: true if you want an isolated, independently scalable agent-stats pool.
+# -----------------------------------------------------------------------------
+agentStats:
+  enabled: false
+  replicaCount: 2
+  image:
+    repository: xhatsu101/tracescope
+    tag: app-0.1.0
+    pullPolicy: IfNotPresent
+  autoscaling:
+    enabled: true
+    minReplicas: 2
+    maxReplicas: 6
+    targetCPUUtilizationPercentage: 80
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      cpu: "1"
+      memory: 1Gi
+
+# -----------------------------------------------------------------------------
+# UI Workload (Stateless Nginx Deployment)
+# Default: false (merged directly into the Storage API pod, saving 2 pods and
+# eliminating extra Nginx config drift; the API pod natively serves / and /assets).
+# Set enabled: true if you want a dedicated standalone Nginx edge for static assets.
+# -----------------------------------------------------------------------------
+ui:
+  enabled: false
+  replicaCount: 2
+  image:
+    repository: xhatsu101/tracescope
+    tag: app-0.1.0
+    pullPolicy: IfNotPresent
+  resources:
+    requests:
+      cpu: 50m
+      memory: 64Mi
+    limits:
+      cpu: 500m
+      memory: 256Mi
+
+# -----------------------------------------------------------------------------
+# Secrets & Ingestion Configuration
+# -----------------------------------------------------------------------------
+secrets:
+  existingSecret: ""
+  internalApiToken: "tracescope-internal-token-change-in-production"
+  apiKey: ""
+
+config:
+  retentionDays: 30
+  demoMode: false
+  corsOrigins: "http://localhost:30102,http://tracescope.local"
+  highTpsWriter:
+    queueCapacity: 256
+    coalesceMs: 5
+    transactionRecords: 50000
+    commitTimeoutSeconds: 65
+    internalRequestTimeoutSeconds: 70
+
+# -----------------------------------------------------------------------------
+# Ingress Configuration
+# -----------------------------------------------------------------------------
+ingress:
+  enabled: true
+  className: nginx
+  annotations:
+    nginx.ingress.kubernetes.io/proxy-body-size: "16m"
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "70"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "70"
+  host: tracescope.local
+  tls: []
+
+podDisruptionBudget:
+  enabled: true
+  minAvailable: 1

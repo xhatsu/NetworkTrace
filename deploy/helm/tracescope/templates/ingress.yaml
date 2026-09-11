@@ -1,0 +1,112 @@
+{{- if .Values.ingress.enabled }}
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {{ include "tracescope.fullname" . }}
+  labels:
+    {{- include "tracescope.labels" . | nindent 4 }}
+  {{- with .Values.ingress.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  {{- if .Values.ingress.className }}
+  ingressClassName: {{ .Values.ingress.className }}
+  {{- end }}
+  rules:
+    - host: {{ .Values.ingress.host | quote }}
+      http:
+        paths:
+          - path: /api/v1/ingest
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ include "tracescope.fullname" . }}-ingest
+                port:
+                  number: 30103
+          - path: /api/ingest
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ include "tracescope.fullname" . }}-ingest
+                port:
+                  number: 30103
+          - path: /api/v1/ingestion/status
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ include "tracescope.fullname" . }}-ingest
+                port:
+                  number: 30103
+          - path: /v1/traces
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ include "tracescope.fullname" . }}-ingest
+                port:
+                  number: 30103
+          - path: /v1/metrics
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ include "tracescope.fullname" . }}-ingest
+                port:
+                  number: 30103
+          - path: /v1/logs
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ include "tracescope.fullname" . }}-ingest
+                port:
+                  number: 30103
+          - path: /api/agent/stats
+            pathType: Prefix
+            backend:
+              service:
+                {{- if .Values.agentStats.enabled }}
+                name: {{ include "tracescope.fullname" . }}-agent-stats
+                port:
+                  number: 30104
+                {{- else }}
+                name: {{ include "tracescope.fullname" . }}-api
+                port:
+                  number: 30102
+                {{- end }}
+          - path: /api
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ include "tracescope.fullname" . }}-api
+                port:
+                  number: 30102
+          - path: /assets
+            pathType: Prefix
+            backend:
+              service:
+                {{- if .Values.ui.enabled }}
+                name: {{ include "tracescope.fullname" . }}-ui
+                port:
+                  number: 80
+                {{- else }}
+                name: {{ include "tracescope.fullname" . }}-api
+                port:
+                  number: 30102
+                {{- end }}
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                {{- if .Values.ui.enabled }}
+                name: {{ include "tracescope.fullname" . }}-ui
+                port:
+                  number: 80
+                {{- else }}
+                name: {{ include "tracescope.fullname" . }}-api
+                port:
+                  number: 30102
+                {{- end }}
+  {{- if .Values.ingress.tls }}
+  tls:
+    {{- toYaml .Values.ingress.tls | nindent 4 }}
+  {{- end }}
+{{- end }}

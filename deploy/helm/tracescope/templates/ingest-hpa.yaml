@@ -1,0 +1,23 @@
+{{- if .Values.ingest.autoscaling.enabled }}
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: {{ include "tracescope.fullname" . }}-ingest
+  labels:
+    {{- include "tracescope.labels" . | nindent 4 }}
+    app.kubernetes.io/component: ingest
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: {{ include "tracescope.fullname" . }}-ingest
+  minReplicas: {{ .Values.ingest.autoscaling.minReplicas }}
+  maxReplicas: {{ .Values.ingest.autoscaling.maxReplicas }}
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: {{ .Values.ingest.autoscaling.targetCPUUtilizationPercentage }}
+{{- end }}

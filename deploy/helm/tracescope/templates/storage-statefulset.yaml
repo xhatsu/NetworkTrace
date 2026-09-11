@@ -1,0 +1,146 @@
+{{- $appValues := default .Values.storage .Values.app -}}
+{{- $appImg := default dict $appValues.image -}}
+{{- $apiImg := default dict (dig "api" "image" nil $appValues) -}}
+{{- $workerImg := default dict (dig "worker" "image" nil $appValues) -}}
+{{- $migImg := default dict (dig "migrations" "image" nil $appValues) -}}
+{{- $defaultRepo := default "xhatsu101/tracescope" (default $appImg.repository $apiImg.repository) -}}
+{{- $defaultTag := default "app-0.2.0" (default $appImg.tag $apiImg.tag) -}}
+{{- $defaultPullPolicy := default "IfNotPresent" (default $appImg.pullPolicy $apiImg.pullPolicy) -}}
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: {{ include "tracescope.fullname" . }}-app
+  labels:
+    {{- include "tracescope.labels" . | nindent 4 }}
+    app.kubernetes.io/component: app
+spec:
+  serviceName: {{ include "tracescope.fullname" . }}-app
+  replicas: {{ $appValues.replicaCount }}
+  podManagementPolicy: OrderedReady
+  updateStrategy:
+    type: RollingUpdate
+  selector:
+    matchLabels:
+      {{- include "tracescope.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: app
+  template:
+    metadata:
+      labels:
+        {{- include "tracescope.labels" . | nindent 8 }}
+        app.kubernetes.io/component: app
+    spec:
+      terminationGracePeriodSeconds: 90
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        fsGroup: 10001
+        seccompProfile:
+          type: RuntimeDefault
+      {{- if $appValues.migrations.enabled }}
+      initContainers:
+        - name: migrate
+          image: "{{ default $defaultRepo $migImg.repository }}:{{ default $defaultTag $migImg.tag }}"
+          imagePullPolicy: {{ default $defaultPullPolicy $migImg.pullPolicy }}
+          command: ["python", "-m", "backend.cli", "migrate"]
+          envFrom:
+            - configMapRef:
+                name: {{ include "tracescope.fullname" . }}-config
+            - secretRef:
+                name: {{ include "tracescope.secretName" . }}
+          env:
+            - name: OTEL_RUN_MIGRATIONS
+              value: "true"
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: "1"
+              memory: 512Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+      {{- end }}
+      containers:
+        - name: api
+          image: "{{ default $defaultRepo $apiImg.repository }}:{{ default $defaultTag $apiImg.tag }}"
+          imagePullPolicy: {{ default $defaultPullPolicy $apiImg.pullPolicy }}
+          ports:
+            - name: http
+              containerPort: 8000
+          envFrom:
+            - configMapRef:
+                name: {{ include "tracescope.fullname" . }}-config
+            - secretRef:
+                name: {{ include "tracescope.secretName" . }}
+          env:
+            - name: OTEL_RUN_MIGRATIONS
+              value: "false"
+          startupProbe:
+            httpGet:
+              path: /livez
+              port: http
+            periodSeconds: 2
+            failureThreshold: 30
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: http
+            periodSeconds: 10
+            timeoutSeconds: 3
+            failureThreshold: 3
+          livenessProbe:
+            httpGet:
+              path: /livez
+              port: http
+            periodSeconds: 20
+            timeoutSeconds: 3
+            failureThreshold: 3
+          resources:
+            {{- toYaml (default (dig "api" "resources" (dict "requests" (dict "cpu" "300m" "memory" "512Mi") "limits" (dict "cpu" "1.5" "memory" "1.5Gi")) $appValues) $appValues.resources) | nindent 12 }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+        - name: analytics-worker
+          image: "{{ default $defaultRepo $workerImg.repository }}:{{ default $defaultTag $workerImg.tag }}"
+          imagePullPolicy: {{ default $defaultPullPolicy $workerImg.pullPolicy }}
+          command: ["python", "-m", "backend.worker"]
+          args: ["--interval", {{ $appValues.worker.interval | quote }}]
+          envFrom:
+            - configMapRef:
+                name: {{ include "tracescope.fullname" . }}-config
+            - secretRef:
+                name: {{ include "tracescope.secretName" . }}
+          env:
+            - name: OTEL_RUN_MIGRATIONS
+              value: "false"
+          livenessProbe:
+            exec:
+              command: ["/bin/sh", "-c", "kill -0 1"]
+            initialDelaySeconds: 30
+            periodSeconds: 20
+            failureThreshold: 3
+          resources:
+            {{- toYaml $appValues.worker.resources | nindent 12 }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: tmp
+          emptyDir: {}

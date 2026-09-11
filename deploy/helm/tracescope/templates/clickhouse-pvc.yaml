@@ -1,0 +1,18 @@
+{{- if and .Values.clickhouse.enabled .Values.clickhouse.persistence.enabled }}
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ include "tracescope.fullname" . }}-clickhouse-data
+  labels:
+    {{- include "tracescope.labels" . | nindent 4 }}
+    app.kubernetes.io/component: clickhouse
+spec:
+  accessModes:
+    {{- toYaml .Values.clickhouse.persistence.accessModes | nindent 4 }}
+  resources:
+    requests:
+      storage: {{ .Values.clickhouse.persistence.size }}
+  {{- if .Values.clickhouse.persistence.storageClass }}
+  storageClassName: {{ .Values.clickhouse.persistence.storageClass | quote }}
+  {{- end }}
+{{- end }}

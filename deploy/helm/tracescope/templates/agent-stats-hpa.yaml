@@ -1,0 +1,23 @@
+{{- if and .Values.agentStats.enabled .Values.agentStats.autoscaling.enabled }}
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: {{ include "tracescope.fullname" . }}-agent-stats
+  labels:
+    {{- include "tracescope.labels" . | nindent 4 }}
+    app.kubernetes.io/component: agent-stats
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: {{ include "tracescope.fullname" . }}-agent-stats
+  minReplicas: {{ .Values.agentStats.autoscaling.minReplicas }}
+  maxReplicas: {{ .Values.agentStats.autoscaling.maxReplicas }}
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: {{ .Values.agentStats.autoscaling.targetCPUUtilizationPercentage }}
+{{- end }}

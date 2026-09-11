@@ -1,0 +1,94 @@
+{{- if .Values.agentStats.enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "tracescope.fullname" . }}-agent-stats
+  labels:
+    {{- include "tracescope.labels" . | nindent 4 }}
+    app.kubernetes.io/component: agent-stats
+spec:
+  {{- if not .Values.agentStats.autoscaling.enabled }}
+  replicas: {{ .Values.agentStats.replicaCount }}
+  {{- end }}
+  strategy:
+    type: RollingUpdate
+  selector:
+    matchLabels:
+      {{- include "tracescope.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: agent-stats
+  template:
+    metadata:
+      labels:
+        {{- include "tracescope.labels" . | nindent 8 }}
+        app.kubernetes.io/component: agent-stats
+    spec:
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: kubernetes.io/hostname
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector:
+            matchLabels:
+              {{- include "tracescope.selectorLabels" . | nindent 14 }}
+              app.kubernetes.io/component: agent-stats
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: agent-stats
+          image: "{{ .Values.agentStats.image.repository }}:{{ .Values.agentStats.image.tag }}"
+          imagePullPolicy: {{ .Values.agentStats.image.pullPolicy }}
+          command:
+            - uvicorn
+            - backend.agent_stats_main:app
+            - --host
+            - 0.0.0.0
+            - --port
+            - "8000"
+          ports:
+            - name: http
+              containerPort: 8000
+          envFrom:
+            - configMapRef:
+                name: {{ include "tracescope.fullname" . }}-config
+            - secretRef:
+                name: {{ include "tracescope.secretName" . }}
+          env:
+            - name: OTEL_RUN_MIGRATIONS
+              value: "false"
+          startupProbe:
+            httpGet:
+              path: /livez
+              port: http
+            periodSeconds: 2
+            failureThreshold: 20
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: http
+            periodSeconds: 10
+            timeoutSeconds: 3
+            failureThreshold: 3
+          livenessProbe:
+            httpGet:
+              path: /livez
+              port: http
+            periodSeconds: 20
+            timeoutSeconds: 3
+            failureThreshold: 3
+          resources:
+            {{- toYaml .Values.agentStats.resources | nindent 12 }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: tmp
+          emptyDir: {}
+{{- end }}

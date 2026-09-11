@@ -1,0 +1,23 @@
+{{- if .Values.clickhouse.enabled }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "tracescope.fullname" . }}-clickhouse
+  labels:
+    {{- include "tracescope.labels" . | nindent 4 }}
+    app.kubernetes.io/component: clickhouse
+spec:
+  type: ClusterIP
+  selector:
+    {{- include "tracescope.selectorLabels" . | nindent 4 }}
+    app.kubernetes.io/component: clickhouse
+  ports:
+    - name: http
+      port: 8123
+      targetPort: http
+      protocol: TCP
+    - name: native
+      port: 9000
+      targetPort: native
+      protocol: TCP
+{{- end }}

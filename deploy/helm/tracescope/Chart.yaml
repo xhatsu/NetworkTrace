@@ -1,0 +1,17 @@
+apiVersion: v2
+name: tracescope
+description: TraceScope Behavioral Observability & OTel Transaction Analytics Platform
+type: application
+version: 0.2.0
+appVersion: "0.2.0"
+icon: https://raw.githubusercontent.com/tracescope/tracescope/main/docs/logo.png
+keywords:
+  - opentelemetry
+  - observability
+  - tracing
+  - apm
+  - security
+  - behavioral-analytics
+home: https://github.com/tracescope/tracescope
+maintainers:
+  - name: TraceScope Core Team
