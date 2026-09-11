@@ -1,0 +1,19 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: tracescope
+resources:
+  - 00-namespace.yaml
+  - 10-configmap.yaml
+  - 20-pvc.yaml
+  - 25-clickhouse-statefulset.yaml
+  - 26-clickhouse-service.yaml
+  - 30-storage-statefulset.yaml
+  - 31-api-service.yaml
+  - 32-ingest-deployment.yaml
+  - 33-ingest-service.yaml
+  - 37-storage-service.yaml
+  - 40-ingress.yaml
+  - 41-pdb.yaml
+  - 42-hpa.yaml
+commonLabels:
+  app.kubernetes.io/part-of: tracescope

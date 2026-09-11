@@ -1,0 +1,100 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: tracescope
+  namespace: tracescope
+  labels:
+    app.kubernetes.io/name: tracescope
+  annotations:
+    # Ingest bodies are bounded at 10 MiB by OTEL_MAX_INGEST_BYTES; the edge
+    # proxy must accept at least that plus framing overhead.
+    nginx.ingress.kubernetes.io/proxy-body-size: "16m"
+    # A durable ingest commit can take up to OTEL_INGEST_COMMIT_TIMEOUT_SECONDS
+    # (65s) before it answers.
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "70"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "70"
+spec:
+  ingressClassName: nginx
+  rules:
+    # The single public entrypoint preserves the existing API surface exactly:
+    # same paths, same host header, same JSON contracts. Workloads are split
+    # behind it by path (longest-prefix wins in nginx).
+    - host: tracescope.local
+      http:
+        paths:
+          # ---- traffic-log ingestion -> tracescope-ingest -------------------
+          - path: /api/v1/ingest
+            pathType: Prefix
+            backend:
+              service:
+                name: tracescope-ingest
+                port:
+                  number: 30103
+          - path: /api/ingest
+            pathType: Prefix
+            backend:
+              service:
+                name: tracescope-ingest
+                port:
+                  number: 30103
+          # Live writer queue/commit counters must come from the ingest pod that
+          # actually owns the IngestWriter.
+          - path: /api/v1/ingestion/status
+            pathType: Prefix
+            backend:
+              service:
+                name: tracescope-ingest
+                port:
+                  number: 30103
+          - path: /v1/traces
+            pathType: Prefix
+            backend:
+              service:
+                name: tracescope-ingest
+                port:
+                  number: 30103
+          - path: /v1/metrics
+            pathType: Prefix
+            backend:
+              service:
+                name: tracescope-ingest
+                port:
+                  number: 30103
+          - path: /v1/logs
+            pathType: Prefix
+            backend:
+              service:
+                name: tracescope-ingest
+                port:
+                  number: 30103
+          # ---- agent lifecycle/health -> tracescope-api --------------------
+          - path: /api/agent/stats
+            pathType: Prefix
+            backend:
+              service:
+                name: tracescope-api
+                port:
+                  number: 30102
+          # ---- analytics APIs -> tracescope-api -----------------------------
+          - path: /api
+            pathType: Prefix
+            backend:
+              service:
+                name: tracescope-api
+                port:
+                  number: 30102
+          # ---- SPA static assets and frontend -> tracescope-api -------------
+          - path: /assets
+            pathType: Prefix
+            backend:
+              service:
+                name: tracescope-api
+                port:
+                  number: 30102
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: tracescope-api
+                port:
+                  number: 30102

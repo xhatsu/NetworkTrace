@@ -1,0 +1,42 @@
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: tracescope-app
+  namespace: tracescope
+  labels:
+    app.kubernetes.io/name: tracescope
+    app.kubernetes.io/component: app
+spec:
+  # The app pod is the primary application workload. minAvailable: 1
+  # blocks voluntary eviction (node drain) during operations.
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: tracescope
+      app.kubernetes.io/component: app
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: tracescope-ingest
+  namespace: tracescope
+spec:
+  minAvailable: 2
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: tracescope
+      app.kubernetes.io/component: ingest
+---
+
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: tracescope-clickhouse
+  namespace: tracescope
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: tracescope
+      app.kubernetes.io/component: clickhouse
+

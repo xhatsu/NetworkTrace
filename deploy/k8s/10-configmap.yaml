@@ -1,0 +1,31 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: tracescope-config
+  namespace: tracescope
+  labels:
+    app.kubernetes.io/name: tracescope
+data:
+  # --- storage -------------------------------------------------------------
+  # Only the storage-owner pod mounts the ReadWriteOnce claim. Edge workloads
+  # use an authenticated internal HTTP boundary and never open this path.
+  OTEL_RETENTION_DAYS: "30"
+  # --- ClickHouse configuration --------------------------------------------
+  OTEL_CLICKHOUSE_HOST: "tracescope-clickhouse"
+  OTEL_CLICKHOUSE_PORT: "8123"
+  OTEL_CLICKHOUSE_DATABASE: "tracescope"
+  OTEL_CLICKHOUSE_USER: "default"
+  OTEL_CLICKHOUSE_SECURE: "false"
+  # --- schema ownership ----------------------------------------------------
+  # The storage pod init container overrides this to true. Runtime containers
+  # leave it false so a rollout cannot race schema changes.
+  OTEL_RUN_MIGRATIONS: "false"
+  # --- behaviour -----------------------------------------------------------
+  OTEL_DEMO_MODE: "false"
+  OTEL_CORS_ORIGINS: "http://localhost:30102,http://tracescope.local"
+  # --- high-TPS ingest writer ---------------------------------------------
+  OTEL_INGEST_QUEUE_CAPACITY: "256"
+  OTEL_INGEST_COALESCE_MS: "5"
+  OTEL_INGEST_TRANSACTION_RECORDS: "50000"
+  OTEL_INGEST_COMMIT_TIMEOUT_SECONDS: "65"
+  OTEL_INTERNAL_REQUEST_TIMEOUT_SECONDS: "70"

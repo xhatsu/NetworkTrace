@@ -1,0 +1,19 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: tracescope-app
+  namespace: tracescope
+  labels:
+    app.kubernetes.io/name: tracescope
+    app.kubernetes.io/component: app
+spec:
+  clusterIP: None
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: tracescope
+    app.kubernetes.io/component: app
+  ports:
+    - name: internal-http
+      port: 8000
+      targetPort: http
+      protocol: TCP

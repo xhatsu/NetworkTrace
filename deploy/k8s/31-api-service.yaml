@@ -1,0 +1,20 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: tracescope-api
+  namespace: tracescope
+  labels:
+    app.kubernetes.io/name: tracescope
+    app.kubernetes.io/component: api
+spec:
+  # ClusterIP keeps the historical external port 30102 at the Ingress edge;
+  # the in-cluster port is also 30102 for symmetry with the live deployment.
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: tracescope
+    app.kubernetes.io/component: app
+  ports:
+    - name: http
+      port: 30102
+      targetPort: http
+      protocol: TCP

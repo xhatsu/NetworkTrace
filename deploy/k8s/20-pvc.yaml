@@ -1,0 +1,17 @@
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: clickhouse-data
+  namespace: tracescope
+  labels:
+    app.kubernetes.io/name: tracescope
+    app.kubernetes.io/component: clickhouse
+spec:
+  # ClickHouse storage volume for primary transaction logs and column parts.
+  # ReadWriteOnce block storage is used for optimal I/O throughput.
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 5Gi
+
