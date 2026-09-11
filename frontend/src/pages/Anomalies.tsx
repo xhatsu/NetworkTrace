@@ -53,21 +53,21 @@ export function AnomaliesPage() {
       title="Structural & Metric Anomalies"
       description="Transparent Wilson score confidence intervals and MAD baseline comparisons against matching minute-of-week distributions."
       actions={
-        <div className="flex items-center rounded-lg border border-[rgba(255,255,255,0.08)] bg-white/[0.03] p-0.5">
+        <div className="flex items-center rounded-lg border border-[rgba(255,255,255,0.14)] bg-white/[0.04] p-0.5">
           {[
-            { label: "All", val: "" },
-            { label: "Open", val: "open" },
-            { label: "Acknowledged", val: "acknowledged" },
-            { label: "Resolved", val: "resolved" },
-            { label: "Suppressed", val: "suppressed" },
-          ].map(({ label, val }) => (
+            { label: "All", val: "", activeClass: "bg-gradient-to-r from-violet-600 to-indigo-600 text-white" },
+            { label: "Open", val: "open", activeClass: "bg-rose-600 text-white shadow-[0_0_8px_rgba(244,63,94,0.6)]" },
+            { label: "Acknowledged", val: "acknowledged", activeClass: "bg-amber-600 text-white shadow-[0_0_8px_rgba(245,158,11,0.6)]" },
+            { label: "Resolved", val: "resolved", activeClass: "bg-emerald-600 text-white shadow-[0_0_8px_rgba(16,185,129,0.6)]" },
+            { label: "Suppressed", val: "suppressed", activeClass: "bg-purple-600 text-white shadow-[0_0_8px_rgba(168,85,247,0.6)]" },
+          ].map(({ label, val, activeClass }) => (
             <button
               key={label}
               onClick={() => setStatus(val)}
               className={`rounded-md px-2.5 py-1 text-xs font-medium transition ${
                 status === val
-                  ? "bg-white/[0.12] text-white shadow-sm"
-                  : "text-[#8b949e] hover:text-[#f0f3f6]"
+                  ? `${activeClass} shadow-sm font-semibold`
+                  : "text-[#c4bdd9] hover:text-white"
               }`}
             >
               {label}
@@ -109,87 +109,123 @@ export function AnomaliesPage() {
                 </tr>
               </thead>
               <tbody>
-                {q.data?.items.map((a) => (
-                  <tr
-                    key={a.id}
-                    onClick={() =>
-                      nav(`/anomalies/${a.id}?${queryString(filters)}`)
-                    }
-                    className="cursor-pointer border-b border-[rgba(255,255,255,0.04)] transition hover:bg-white/[0.03]"
-                  >
-                    <td className="px-4 py-3">
-                      <span
-                        className={`inline-flex items-center gap-1 rounded px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider ${
-                          a.severity === "critical"
-                            ? "border border-rose-500/30 bg-rose-500/10 text-rose-400"
-                            : a.severity === "high"
-                              ? "border border-amber-500/30 bg-amber-500/10 text-amber-400"
-                              : "border border-indigo-500/30 bg-indigo-500/10 text-indigo-400"
-                        }`}
-                      >
-                        {a.severity}
-                      </span>
-                    </td>
-                    <td className="px-4 font-mono">
-                      <div className="text-xs font-semibold text-[#f0f3f6]">{a.entity_id || a.target_service || a.caller_service || "Service"}</div>
-                      <div className="text-[10px] text-[#8b949e]">
-                        {(a.anomaly_type || "").replaceAll("_", " ")}
-                      </div>
-                    </td>
-                    <td className="px-4 font-mono text-[10px] text-[#8b949e]">
-                      {new Date(a.last_detected_ms || a.detected_at || Date.now()).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                      <span className="block text-[9px] text-[#6e7681]">
-                        {new Date(a.last_detected_ms || a.detected_at || Date.now()).toLocaleDateString()}
-                      </span>
-                    </td>
-                    <td className="px-4 font-mono text-xs tabular-nums font-medium text-[#f0f3f6]">
-                      {n(a.current_value || 0)} {a.unit || ""}
-                    </td>
-                    <td className="px-4 font-mono text-xs tabular-nums text-[#8b949e]">
-                      {a.baseline_value == null
-                        ? "—"
-                        : `${n(a.normal_low ?? a.baseline_value)}–${n(a.normal_high ?? a.baseline_value)} ${a.unit || ""}`}
-                    </td>
-                    <td className="px-4 font-mono text-xs tabular-nums text-[#f43f5e]">
-                      {(a.absolute_difference || 0) > 0 ? "+" : ""}
-                      {n(a.absolute_difference ?? Math.abs((a.current_value || 0) - (a.baseline_value || 0)))}
-                    </td>
-                    <td className="px-4 font-mono text-xs tabular-nums">
-                      {a.percent_change == null && a.delta_percentage == null ? (
-                        <span className="text-[#6e7681]">n/a</span>
-                      ) : (
-                        (() => {
-                          const pct = Number(a.percent_change ?? a.delta_percentage ?? 0);
-                          return (
-                            <span className={pct > 0 ? "text-[#f43f5e]" : "text-[#10b981]"}>
-                              {pct > 0 ? "+" : ""}
-                              {pct.toFixed(0)}%
+                {q.data?.items.map((a) => {
+                  const detectorType = a.anomaly_type || "";
+                  const detectorBadgeColor = detectorType.includes("spike")
+                    ? "text-sky-300 bg-sky-500/15 border-sky-500/30"
+                    : detectorType.includes("drop")
+                      ? "text-indigo-300 bg-indigo-500/15 border-indigo-500/30"
+                      : detectorType.includes("latency") || detectorType.includes("slow")
+                        ? "text-violet-300 bg-violet-500/15 border-violet-500/30"
+                        : detectorType.includes("cascading") || detectorType.includes("error")
+                          ? "text-rose-300 bg-rose-500/15 border-rose-500/30"
+                          : detectorType.includes("relationship") || detectorType.includes("edge")
+                            ? "text-amber-300 bg-amber-500/15 border-amber-500/30"
+                            : detectorType.includes("operation")
+                              ? "text-emerald-300 bg-emerald-500/15 border-emerald-500/30"
+                              : "text-[#c4bdd9] bg-white/[0.05] border-white/10";
+
+                  const statusClasses: Record<string, string> = {
+                    open: "border-rose-500/40 bg-rose-500/15 text-rose-300",
+                    acknowledged: "border-amber-500/40 bg-amber-500/15 text-amber-300",
+                    resolved: "border-emerald-500/40 bg-emerald-500/15 text-emerald-300",
+                    suppressed: "border-purple-500/40 bg-purple-500/15 text-purple-300",
+                  };
+                  const statusStyle = statusClasses[a.status || "open"] || "border-rose-500/40 bg-rose-500/15 text-rose-300";
+
+                  return (
+                    <tr
+                      key={a.id}
+                      onClick={() =>
+                        nav(`/anomalies/${a.id}?${queryString(filters)}`)
+                      }
+                      className="cursor-pointer border-b border-[rgba(255,255,255,0.08)] transition hover:bg-white/[0.05]"
+                    >
+                      <td className="px-4 py-3">
+                        <span
+                          className={`inline-flex items-center gap-1 rounded px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider ${
+                            a.severity === "critical"
+                              ? "border border-rose-500/40 bg-rose-500/15 text-rose-300"
+                              : a.severity === "high"
+                                ? "border border-amber-500/40 bg-amber-500/15 text-amber-300"
+                                : "border border-violet-500/40 bg-violet-500/15 text-violet-300"
+                          }`}
+                        >
+                          {a.severity}
+                        </span>
+                      </td>
+                      <td className="px-4 font-mono">
+                        <div className="text-xs font-semibold text-[#f5f3fa] flex items-center gap-1.5 flex-wrap">
+                          <span>{a.entity_id || a.target_service || a.caller_service || "Service"}</span>
+                          {a.source_ip && (
+                            <span className="rounded border border-cyan-500/40 bg-cyan-500/15 px-1.5 py-0.2 text-[9px] text-cyan-300 font-medium">
+                              IP: {a.source_ip}
                             </span>
-                          );
-                        })()
-                      )}
-                    </td>
-                    <td className="px-4 font-mono text-xs tabular-nums text-[#8b949e]">
-                      {n(a.current_samples ?? 0)} / {n(a.baseline_samples ?? 0)}
-                    </td>
-                    <td className="px-4 font-mono text-xs tabular-nums text-[#8b949e]">
-                      {a.persistence_buckets || 1} bucket{(a.persistence_buckets || 1) > 1 ? "s" : ""}
-                    </td>
-                    <td className="px-4">
-                      <span className="rounded bg-white/[0.04] px-1.5 py-0.5 text-[10px] text-[#8b949e]">
-                        {a.entity_type || (a.target_service ? "service" : "operation")}
-                      </span>
-                    </td>
-                    <td className="px-4">
-                      <span className="chip uppercase text-[10px]">{a.status || "open"}</span>
-                    </td>
-                  </tr>
-                ))}
+                          )}
+                        </div>
+                        <div className="mt-1">
+                          <span className={`inline-block rounded border px-1.5 py-0.2 text-[9px] font-medium uppercase tracking-wide ${detectorBadgeColor}`}>
+                            {(a.anomaly_type || "").replaceAll("_", " ")}
+                          </span>
+                        </div>
+                      </td>
+                      <td className="px-4 font-mono text-[10px] text-[#c4bdd9]">
+                        {new Date(a.last_detected_ms || a.detected_at || Date.now()).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                        <span className="block text-[9px] text-[#9e96b8]">
+                          {new Date(a.last_detected_ms || a.detected_at || Date.now()).toLocaleDateString()}
+                        </span>
+                      </td>
+                      <td className="px-4 font-mono text-xs tabular-nums font-medium text-[#f5f3fa]">
+                        {n(a.current_value || 0)} {a.unit || ""}
+                      </td>
+                      <td className="px-4 font-mono text-xs tabular-nums text-[#c4bdd9]">
+                        {a.baseline_value == null
+                          ? "—"
+                          : `${n(a.normal_low ?? a.baseline_value)}–${n(a.normal_high ?? a.baseline_value)} ${a.unit || ""}`}
+                      </td>
+                      <td className="px-4 font-mono text-xs tabular-nums text-[#fb7185] font-semibold">
+                        {(a.absolute_difference || 0) > 0 ? "+" : ""}
+                        {n(a.absolute_difference ?? Math.abs((a.current_value || 0) - (a.baseline_value || 0)))}
+                      </td>
+                      <td className="px-4 font-mono text-xs tabular-nums">
+                        {a.percent_change == null && a.delta_percentage == null ? (
+                          <span className="text-[#9e96b8]">n/a</span>
+                        ) : (
+                          (() => {
+                            const pct = Number(a.percent_change ?? a.delta_percentage ?? 0);
+                            return (
+                              <span className={pct > 0 ? "text-[#fb7185] font-semibold" : "text-[#34d399] font-semibold"}>
+                                {pct > 0 ? "+" : ""}
+                                {pct.toFixed(0)}%
+                              </span>
+                            );
+                          })()
+                        )}
+                      </td>
+                      <td className="px-4 font-mono text-xs tabular-nums text-[#c4bdd9]">
+                        {n(a.current_samples ?? 0)} / {n(a.baseline_samples ?? 0)}
+                      </td>
+                      <td className="px-4 font-mono text-xs tabular-nums text-[#c4bdd9]">
+                        {a.persistence_buckets || 1} bucket{(a.persistence_buckets || 1) > 1 ? "s" : ""}
+                      </td>
+                      <td className="px-4">
+                        <span className="rounded border border-indigo-500/30 bg-indigo-500/10 px-1.5 py-0.5 text-[10px] text-indigo-300 font-medium">
+                          {a.entity_type || (a.target_service ? "service" : "operation")}
+                        </span>
+                      </td>
+                      <td className="px-4">
+                        <span className={`inline-block rounded border px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider ${statusStyle}`}>
+                          {a.status || "open"}
+                        </span>
+                      </td>
+                    </tr>
+                  );
+                })}
                 {!q.data?.items.length && (
                   <tr>
                     <td
                       colSpan={11}
-                      className="p-12 text-center text-xs text-[#8b949e]"
+                      className="p-12 text-center text-xs text-[#c4bdd9]"
                     >
                       No anomalies detected matching this lifecycle filter.
                     </td>
@@ -302,20 +338,20 @@ export function AnomalyDetailPage() {
       }
     >
       {/* What Changed Compared With Normal Explainability Card */}
-      <div className="rounded-xl border border-indigo-500/30 bg-indigo-950/20 p-5 backdrop-blur-sm">
+      <div className="rounded-xl border border-violet-500/40 bg-violet-950/20 p-5 backdrop-blur-sm">
         <div className="flex items-center gap-2 mb-2">
-          <ShieldAlert className="text-indigo-400" size={18} />
-          <h3 className="text-sm font-semibold uppercase tracking-wider text-indigo-200">
+          <ShieldAlert className="text-violet-400" size={18} />
+          <h3 className="text-sm font-semibold uppercase tracking-wider text-violet-200">
             What Changed Compared With Normal?
           </h3>
         </div>
-        <p className="text-xs text-[#c9d1d9] leading-relaxed">
+        <p className="text-xs text-[#f5f3fa] leading-relaxed">
           {a.explanation}
         </p>
 
-        <div className="mt-4 grid grid-cols-1 gap-4 lg:grid-cols-2 pt-3 border-t border-[rgba(255,255,255,0.06)]">
-          <div className="rounded-lg border border-[rgba(255,255,255,0.06)] bg-white/[0.02] p-3.5 text-xs">
-            <span className="text-[10px] font-semibold uppercase tracking-wider text-amber-400 flex items-center gap-1.5">
+        <div className="mt-4 grid grid-cols-1 gap-4 lg:grid-cols-2 pt-3 border-t border-[rgba(255,255,255,0.12)]">
+          <div className="rounded-lg border border-[rgba(255,255,255,0.12)] bg-white/[0.04] p-3.5 text-xs">
+            <span className="text-[10px] font-semibold uppercase tracking-wider text-amber-300 flex items-center gap-1.5">
               <AlertTriangle size={12} /> Probable Incident Origin
             </span>
             <div className="mt-2 flex items-baseline gap-2">
@@ -323,36 +359,36 @@ export function AnomalyDetailPage() {
                 {a.root_cause?.origin_service || a.entity_id}
               </span>
               {a.root_cause?.confidence_score != null && (
-                <span className="text-[10px] font-mono text-[#8b949e]">
+                <span className="text-[10px] font-mono text-[#c4bdd9]">
                   (confidence: {(Number(a.root_cause.confidence_score) * 100).toFixed(0)}%)
                 </span>
               )}
             </div>
-            <p className="mt-1 text-[11px] text-[#8b949e]">
+            <p className="mt-1 text-[11px] text-[#c4bdd9]">
               {a.root_cause?.reason || "Observed baseline deviation originated on this service component."}
             </p>
           </div>
 
-          <div className="rounded-lg border border-[rgba(255,255,255,0.06)] bg-white/[0.02] p-3.5 text-xs">
-            <span className="text-[10px] font-semibold uppercase tracking-wider text-rose-400 flex items-center gap-1.5">
+          <div className="rounded-lg border border-[rgba(255,255,255,0.12)] bg-white/[0.04] p-3.5 text-xs">
+            <span className="text-[10px] font-semibold uppercase tracking-wider text-rose-300 flex items-center gap-1.5">
               <AlertOctagon size={12} /> Incident Blast Radius
             </span>
             <div className="mt-2 space-y-1.5 text-[11px]">
               <div className="flex items-center justify-between">
-                <span className="text-[#8b949e]">Upstream Callers:</span>
-                <span className="font-mono text-[#f0f3f6]">
+                <span className="text-[#c4bdd9]">Upstream Callers:</span>
+                <span className="font-mono text-[#f5f3fa]">
                   {a.blast_radius?.direct_callers?.length ? a.blast_radius.direct_callers.join(", ") : "None detected"}
                 </span>
               </div>
               <div className="flex items-center justify-between">
-                <span className="text-[#8b949e]">Affected Principals:</span>
-                <span className="font-mono text-indigo-300">
+                <span className="text-[#c4bdd9]">Affected Principals:</span>
+                <span className="font-mono text-violet-300">
                   {a.blast_radius?.affected_principals?.length ? a.blast_radius.affected_principals.join(", ") : "None identified"}
                 </span>
               </div>
               <div className="flex items-center justify-between">
-                <span className="text-[#8b949e]">Impacted Operations:</span>
-                <span className="font-mono text-[#f0f3f6]">
+                <span className="text-[#c4bdd9]">Impacted Operations:</span>
+                <span className="font-mono text-[#f5f3fa]">
                   {a.blast_radius?.affected_operations?.length || 1} operations
                 </span>
               </div>
@@ -406,7 +442,7 @@ export function AnomalyDetailPage() {
         <div className="h-[340px] p-4">
           <ResponsiveContainer>
             <ComposedChart data={chartData}>
-              <CartesianGrid stroke="rgba(255,255,255,0.05)" vertical={false} />
+              <CartesianGrid stroke="rgba(255,255,255,0.08)" vertical={false} />
               <XAxis
                 dataKey="timestamp_ms"
                 tickFormatter={(v) =>
@@ -415,26 +451,26 @@ export function AnomalyDetailPage() {
                     minute: "2-digit",
                   })
                 }
-                stroke="#484f58"
+                stroke="#766e92"
               />
-              <YAxis stroke="#484f58" />
+              <YAxis stroke="#766e92" />
               <Tooltip {...chartTooltip} />
               <ReferenceArea
                 x1={a.window_start_ms}
                 x2={a.window_end_ms}
-                fill="#f43f5e"
-                fillOpacity={0.15}
+                fill="#fb7185"
+                fillOpacity={0.2}
               />
               <Area
                 dataKey={metric}
-                stroke="#818cf8"
-                fill="#6366f1"
-                fillOpacity={0.15}
+                stroke="#a78bfa"
+                fill="#8b5cf6"
+                fillOpacity={0.2}
                 name="Actual Observed"
               />
               <Line
                 dataKey="expected"
-                stroke="#10b981"
+                stroke="#34d399"
                 strokeDasharray="4 4"
                 strokeWidth={1.5}
                 dot={false}
@@ -465,32 +501,17 @@ export function AnomalyDetailPage() {
               />
               <Fact k="Current Samples" v={n(a.current_samples)} />
               <Fact k="Baseline Samples" v={n(a.baseline_samples)} />
+              {a.source_ip && <Fact k="Source IP" v={a.source_ip} />}
+              {a.principal_name && <Fact k="Principal" v={a.principal_name} />}
             </div>
           </div>
         </Panel>
 
         <Panel
           title="Evidence & Diagnostic Limitations"
-          subtitle="Contributing dimensions and explicit limitations"
+          subtitle="Verified diagnostic evidence and baseline limitations"
         >
           <div className="p-5 space-y-4">
-            {Boolean(a.contributors && a.contributors.length > 0) && (
-              <div>
-                <div className="text-[10px] font-semibold uppercase tracking-wider text-[#8b949e] mb-2">
-                  Contributing Factors
-                </div>
-                <div className="space-y-2">
-                  {(a.contributors || []).map((c, i) => (
-                    <pre
-                      key={i}
-                      className="overflow-auto rounded-lg border border-[rgba(255,255,255,0.08)] bg-black/40 p-3 font-mono text-[11px] text-[#c9d1d9]"
-                    >
-                      {JSON.stringify(c, null, 2)}
-                    </pre>
-                  ))}
-                </div>
-              </div>
-            )}
 
             <div>
               <div className="text-[10px] font-semibold uppercase tracking-wider text-[#8b949e] mb-2">

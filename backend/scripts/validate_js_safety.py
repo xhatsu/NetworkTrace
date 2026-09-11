@@ -13,6 +13,18 @@ def check_payload(endpoint, data):
         if not isinstance(data, dict) or not isinstance(data.get("items"), list):
             errors.append("Expected 'items' array for service users")
 
+    elif endpoint == "/api/agent/stats":
+        if not isinstance(data, dict) or not isinstance(data.get("items"), list):
+            errors.append("Expected 'items' array for fleet agent stats")
+
+    elif endpoint.startswith("/api/agent/stats/") and endpoint.endswith("/history"):
+        if not isinstance(data, dict) or not isinstance(data.get("items"), list):
+            errors.append("Expected 'items' array for agent history")
+
+    elif endpoint.startswith("/api/agent/stats/"):
+        if not isinstance(data, dict):
+            errors.append("Expected dict root for agent node detail")
+
     elif endpoint.startswith("/api/v1/anomalies/") and endpoint.endswith("/users"):
         if not isinstance(data, dict) or not isinstance(data.get("items"), list):
             errors.append("Expected 'items' array for anomaly users")
@@ -79,7 +91,7 @@ def check_payload(endpoint, data):
         if not isinstance(data, dict):
             errors.append("Expected dict for anomaly detail")
         else:
-            for req_list in ["contributors", "limitations", "trace_ids"]:
+            for req_list in ["limitations", "trace_ids"]:
                 val = data.get(req_list)
                 if not isinstance(val, list):
                     errors.append(f"Anomaly detail '{req_list}' must be list, got {type(val).__name__}")

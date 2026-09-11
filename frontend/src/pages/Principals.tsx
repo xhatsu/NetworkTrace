@@ -71,16 +71,16 @@ export function PrincipalsPage() {
       actions={
         <div className="flex items-center gap-2">
           <div className="relative">
-            <Search className="absolute left-2.5 top-2 text-[#8b949e]" size={13} />
+            <Search className="absolute left-2.5 top-2 text-[#9e96b8]" size={13} />
             <input
               type="text"
               placeholder="Search principals..."
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
-              className="h-8 rounded-lg border border-[rgba(255,255,255,0.08)] bg-white/[0.02] pl-8 pr-3 text-xs text-[#f0f3f6] placeholder:text-[#6e7681] focus:border-indigo-500/50 focus:outline-none"
+              className="h-8 rounded-lg border border-[rgba(255,255,255,0.14)] bg-white/[0.04] pl-8 pr-3 text-xs text-[#f5f3fa] placeholder:text-[#9e96b8] focus:border-violet-400 focus:outline-none"
             />
           </div>
-          <div className="chip font-mono text-[10px] text-emerald-400 border-emerald-500/20">
+          <div className="chip font-mono text-[10px] text-emerald-300 border-emerald-500/30">
             <span>In-Memory Sanitized</span>
           </div>
         </div>
@@ -98,7 +98,7 @@ export function PrincipalsPage() {
           <div className="overflow-auto scrollbar">
             <table className="w-full min-w-[900px] text-left">
               <thead>
-                <tr className="border-b border-[rgba(255,255,255,0.06)] bg-white/[0.01] text-[11px] font-semibold uppercase tracking-wider text-[#8b949e]">
+                <tr className="border-b border-[rgba(255,255,255,0.12)] bg-white/[0.02] text-[11px] font-semibold uppercase tracking-wider text-[#9e96b8]">
                   <th className="px-4 py-3">Principal Name</th>
                   <th className="px-4 py-3 text-right">Total Requests</th>
                   <th className="px-4 py-3 text-right">Error Rate</th>
@@ -108,40 +108,40 @@ export function PrincipalsPage() {
                   <th className="px-4 py-3 text-right">Action</th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-[rgba(255,255,255,0.04)] text-xs">
+              <tbody className="divide-y divide-[rgba(255,255,255,0.08)] text-xs">
                 {filteredItems.map((p) => (
                   <tr
                     key={p.principal_name}
                     onClick={() => nav(`/principals/${encodeURIComponent(p.principal_name)}?${queryString(filters)}`)}
-                    className="cursor-pointer transition hover:bg-white/[0.03]"
+                    className="cursor-pointer transition hover:bg-white/[0.05]"
                   >
-                    <td className="px-4 py-3 font-medium text-[#f0f3f6]">
+                    <td className="px-4 py-3 font-medium text-[#f5f3fa]">
                       <div className="flex items-center gap-2">
-                        <div className="grid h-7 w-7 place-items-center rounded bg-indigo-500/10 text-indigo-400">
+                        <div className="grid h-7 w-7 place-items-center rounded bg-violet-500/15 text-violet-300">
                           <KeyRound size={13} />
                         </div>
-                        <span className="font-mono text-indigo-300">{p.principal_name}</span>
+                        <span className="font-mono text-violet-300 font-medium">{p.principal_name}</span>
                       </div>
                     </td>
-                    <td className="px-4 py-3 text-right font-mono text-[#c9d1d9]">
+                    <td className="px-4 py-3 text-right font-mono text-[#f5f3fa]">
                       {n(p.total_requests)}
                     </td>
                     <td className="px-4 py-3 text-right font-mono">
-                      <span className={p.error_rate > 0.05 ? "text-rose-400 font-semibold" : p.error_rate > 0 ? "text-amber-400" : "text-emerald-400"}>
+                      <span className={p.error_rate > 0.05 ? "text-rose-300 font-semibold" : p.error_rate > 0 ? "text-amber-300 font-medium" : "text-emerald-300"}>
                         {pct(p.error_rate)}
                       </span>
                     </td>
-                    <td className="px-4 py-3 text-right font-mono text-[#c9d1d9]">
+                    <td className="px-4 py-3 text-right font-mono text-[#c4bdd9]">
                       {Number(p.p95_latency || 0).toFixed(1)} ms
                     </td>
-                    <td className="px-4 py-3 text-right font-mono text-[#8b949e]">
+                    <td className="px-4 py-3 text-right font-mono text-[#c4bdd9]">
                       {p.target_count || 1}
                     </td>
-                    <td className="px-4 py-3 text-right font-mono text-[#8b949e]">
+                    <td className="px-4 py-3 text-right font-mono text-[#c4bdd9]">
                       {p.operation_count || 1}
                     </td>
                     <td className="px-4 py-3 text-right">
-                      <span className="inline-flex items-center gap-1 text-[11px] text-indigo-400 hover:text-indigo-300">
+                      <span className="inline-flex items-center gap-1 text-[11px] text-violet-300 hover:text-white">
                         View Profile <ExternalLink size={11} />
                       </span>
                     </td>
@@ -149,7 +149,7 @@ export function PrincipalsPage() {
                 ))}
                 {filteredItems.length === 0 && (
                   <tr>
-                    <td colSpan={7} className="px-4 py-8 text-center text-xs text-[#8b949e]">
+                    <td colSpan={7} className="px-4 py-8 text-center text-xs text-[#c4bdd9]">
                       No principals found matching query.
                     </td>
                   </tr>

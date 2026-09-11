@@ -72,12 +72,12 @@ export function ServicesPage() {
       description="Observed service nodes with environment segmentation, functional group ownership, and telemetry freshness."
       actions={
         <div className="relative w-72">
-          <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-[#8b949e]" />
+          <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-cyan-400" />
           <input
             value={filterQuery}
             onChange={(e) => setFilterQuery(e.target.value)}
             placeholder="Filter by name, group, module…"
-            className="w-full rounded-lg border border-[rgba(255,255,255,0.08)] bg-white/[0.03] pl-9 pr-3 py-1.5 text-xs text-[#f0f3f6] placeholder:text-[#6e7681] focus:border-indigo-500/60 focus:bg-white/[0.06] focus:outline-none"
+            className="w-full rounded-lg border border-[rgba(255,255,255,0.14)] bg-white/[0.04] pl-9 pr-3 py-1.5 text-xs text-[#f5f3fa] placeholder:text-[#9e96b8] focus:border-cyan-400 focus:bg-white/[0.08] focus:outline-none"
           />
         </div>
       }
@@ -90,47 +90,63 @@ export function ServicesPage() {
           subtitle="Click any service to inspect latency tails, operation breakdown, and callers"
         >
           <div className="grid gap-2.5 p-4 sm:grid-cols-2 lg:grid-cols-3">
-            {filteredItems.map((s) => (
-              <button
-                key={s.name}
-                onClick={() =>
-                  nav(
-                    `/services/${encodeURIComponent(s.name)}?${queryString(filters)}`,
-                  )
-                }
-                className="group relative flex flex-col justify-between rounded-lg border border-[rgba(255,255,255,0.06)] bg-white/[0.02] p-4 text-left transition hover:border-indigo-500/40 hover:bg-white/[0.04] hover:shadow-md"
-              >
-                <div>
-                  <div className="flex items-start justify-between gap-2">
-                    <div className="flex items-center gap-2.5 min-w-0">
-                      <div className="grid h-8 w-8 shrink-0 place-items-center rounded-lg border border-[rgba(255,255,255,0.08)] bg-white/[0.03] text-indigo-400 group-hover:text-indigo-300">
-                        <Box size={16} />
-                      </div>
-                      <div className="min-w-0">
-                        <div className="truncate text-xs font-semibold text-[#f0f3f6] group-hover:text-indigo-300 transition">
-                          {s.name}
-                        </div>
-                        <div className="truncate text-[10px] text-[#8b949e]">
-                          {s.service_group} · {s.service_module}
-                        </div>
-                      </div>
-                    </div>
-                    <ArrowRight size={13} className="text-[#6e7681] group-hover:text-white transition group-hover:translate-x-0.5" />
-                  </div>
-                </div>
+            {filteredItems.map((s, idx) => {
+              const iconColors = [
+                "border-sky-500/35 bg-sky-500/15 text-sky-300",
+                "border-violet-500/35 bg-violet-500/15 text-violet-300",
+                "border-emerald-500/35 bg-emerald-500/15 text-emerald-300",
+                "border-amber-500/35 bg-amber-500/15 text-amber-300",
+                "border-rose-500/35 bg-rose-500/15 text-rose-300",
+                "border-cyan-500/35 bg-cyan-500/15 text-cyan-300",
+                "border-indigo-500/35 bg-indigo-500/15 text-indigo-300",
+              ];
+              const iconStyle = iconColors[idx % iconColors.length];
+              const envStyle = s.environment === "production"
+                ? "border-emerald-500/35 bg-emerald-500/15 text-emerald-300"
+                : "border-amber-500/35 bg-amber-500/15 text-amber-300";
 
-                <div className="mt-4 flex items-center justify-between border-t border-[rgba(255,255,255,0.04)] pt-3 text-[10px]">
-                  <span className="rounded bg-white/[0.04] px-1.5 py-0.5 font-mono text-[#8b949e]">
-                    {s.environment}
-                  </span>
-                  <span className="text-[#6e7681]">
-                    Active {new Date(s.last_seen_ms).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                  </span>
-                </div>
-              </button>
-            ))}
+              return (
+                <button
+                  key={s.name}
+                  onClick={() =>
+                    nav(
+                      `/services/${encodeURIComponent(s.name)}?${queryString(filters)}`,
+                    )
+                  }
+                  className="group relative flex flex-col justify-between rounded-lg border border-[rgba(255,255,255,0.12)] bg-[#1a172a] p-4 text-left transition hover:border-violet-500/50 hover:bg-[#221e38] hover:shadow-panel"
+                >
+                  <div>
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="flex items-center gap-2.5 min-w-0">
+                        <div className={`grid h-8 w-8 shrink-0 place-items-center rounded-lg border ${iconStyle}`}>
+                          <Box size={16} />
+                        </div>
+                        <div className="min-w-0">
+                          <div className="truncate text-xs font-semibold text-[#f5f3fa] group-hover:text-cyan-300 transition">
+                            {s.name}
+                          </div>
+                          <div className="truncate text-[10px] text-violet-300/80">
+                            {s.service_group} · {s.service_module}
+                          </div>
+                        </div>
+                      </div>
+                      <ArrowRight size={13} className="text-[#9e96b8] group-hover:text-white transition group-hover:translate-x-0.5" />
+                    </div>
+                  </div>
+
+                  <div className="mt-4 flex items-center justify-between border-t border-[rgba(255,255,255,0.08)] pt-3 text-[10px]">
+                    <span className={`rounded border px-1.5 py-0.5 font-mono ${envStyle}`}>
+                      {s.environment}
+                    </span>
+                    <span className="text-[#c4bdd9]">
+                      Active {new Date(s.last_seen_ms).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                    </span>
+                  </div>
+                </button>
+              );
+            })}
             {filteredItems.length === 0 && (
-              <div className="col-span-full py-12 text-center text-xs text-[#8b949e]">
+              <div className="col-span-full py-12 text-center text-xs text-[#c4bdd9]">
                 No services match "{filterQuery}".
               </div>
             )}

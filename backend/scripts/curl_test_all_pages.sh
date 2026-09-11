@@ -16,6 +16,7 @@ SVC_NAME=$(curl -s "$BASE_URL/api/v1/services?limit=1" | python3 -c "import sys,
 P_NAME=$(curl -s "$BASE_URL/api/v1/principals?limit=1" | python3 -c "import sys, json; d=json.load(sys.stdin); print(d['items'][0]['principal_name'] if d.get('items') else 'mobile_storefront_app')")
 USER_NAME=$(curl -s "$BASE_URL/api/v1/users?limit=1" | python3 -c "import sys, json; d=json.load(sys.stdin); print(d['items'][0]['principal_name'] if d.get('items') else 'mobile_storefront_app')")
 TR_ID=$(curl -s "$BASE_URL/api/v1/traces?limit=1" | python3 -c "import sys, json; d=json.load(sys.stdin); print(d['items'][0]['trace_id'] if d.get('items') else '')")
+NODE_NAME=$(curl -s "$BASE_URL/api/agent/stats" | python3 -c "import sys, json; d=json.load(sys.stdin); print(d['items'][0]['node'] if d.get('items') else 'demo-agent-01')")
 
 echo "Dynamic sample IDs:"
 echo "  - Anomaly ID:    $ANOM_ID"
@@ -23,6 +24,7 @@ echo "  - Service Name:  $SVC_NAME"
 echo "  - Principal:     $P_NAME"
 echo "  - User profile:  $USER_NAME"
 echo "  - Trace ID:      $TR_ID"
+echo "  - Agent Node:    $NODE_NAME"
 echo "----------------------------------------------------------------"
 
 test_page() {
@@ -94,6 +96,10 @@ test_page "/traces" "Distributed Traces List"
 if [ -n "$TR_ID" ]; then
   test_page "/traces/$TR_ID" "Trace Waterfall Inspector"
 fi
+test_page "/agent-stats" "Agent Fleet Overview"
+if [ -n "$NODE_NAME" ]; then
+  test_page "/agent-stats/$NODE_NAME" "Agent Node Time-Series Dashboard"
+fi
 
 echo ""
 echo "--- Scanning All Backing API Endpoints (JavaScript Data Contract) ---"
@@ -120,6 +126,11 @@ test_api "/api/v1/anomalies/$ANOM_ID/users" "Anomaly Related Users"
 test_api "/api/v1/traces" "Traces List"
 if [ -n "$TR_ID" ]; then
   test_api "/api/v1/traces/$TR_ID" "Trace Multi-Tier Spans"
+fi
+test_api "/api/agent/stats" "Agent Fleet Stats"
+if [ -n "$NODE_NAME" ]; then
+  test_api "/api/agent/stats/$NODE_NAME" "Agent Node Latest Status"
+  test_api "/api/agent/stats/$NODE_NAME/history" "Agent Node Time-Series History"
 fi
 
 echo ""

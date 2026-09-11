@@ -83,6 +83,9 @@ export type Anomaly = {
   delta_percentage?: number | null;
   target_service?: string;
   caller_service?: string;
+  principal_name?: string;
+  source_ip?: string;
+  operation?: string;
   detected_at?: string | number;
   severity: string;
   status: string;
@@ -90,7 +93,6 @@ export type Anomaly = {
   explanation: string;
   rule?: string;
   limitations?: string[];
-  contributors?: unknown[];
   trace_ids?: string[];
   root_cause?: {
     origin_service: string;

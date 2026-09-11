@@ -581,8 +581,15 @@ function TopologyCanvas({
       x.beginPath();
       x.moveTo(a.x, a.y);
       x.lineTo(b.x, b.y);
-      x.strokeStyle = edge.failure_rate > 0.03 ? "#f43f5e" : "#30363d";
-      x.lineWidth = Math.min(6, 1 + Math.sqrt(edge.requests) / 7);
+      x.strokeStyle =
+        edge.failure_rate > 0.03
+          ? "#f43f5e"
+          : edge.avg_ms > 300
+            ? "#f59e0b"
+            : edge.evidence === "inferred"
+              ? "#818cf8"
+              : "#0284c7";
+      x.lineWidth = Math.min(6, 1.2 + Math.sqrt(edge.requests) / 7);
       x.setLineDash(edge.evidence === "inferred" ? [6, 5] : []);
       x.stroke();
       x.setLineDash([]);
@@ -605,26 +612,27 @@ function TopologyCanvas({
       x.globalAlpha = muted ? 0.16 : 1;
       x.beginPath();
       x.arc(p.x, p.y, radius, 0, Math.PI * 2);
-      x.fillStyle =
-        selected && "aggregate" in selected && selected.id === node.id
-          ? "#6366f1"
-          : node.aggregate
-            ? "#1c212b"
-            : "#161b22";
+
+      const isSelected = selected && "aggregate" in selected && selected.id === node.id;
+      x.fillStyle = isSelected
+        ? "#7c3aed"
+        : node.aggregate
+          ? "#1e1b4b"
+          : node.group?.toLowerCase().includes("gateway") || node.group?.toLowerCase().includes("ingress")
+            ? "#083344"
+            : "#1e1638";
       x.fill();
-      x.strokeStyle =
-        selected && "aggregate" in selected && selected.id === node.id
-          ? "#a5b4fc"
-          : node.aggregate
-            ? "#6366f1"
-            : "rgba(255,255,255,0.16)";
-      x.lineWidth = 1.5;
+      x.strokeStyle = isSelected
+        ? "#c4b5fd"
+        : node.aggregate
+          ? "#818cf8"
+          : node.group?.toLowerCase().includes("gateway") || node.group?.toLowerCase().includes("ingress")
+            ? "#06b6d4"
+            : "#8b5cf6";
+      x.lineWidth = isSelected ? 2.5 : 1.8;
       x.stroke();
-      x.fillStyle =
-        selected && "aggregate" in selected && selected.id === node.id
-          ? "#ffffff"
-          : "#f0f3f6";
-      x.font = `${node.aggregate ? "600" : "500"} 11px Inter, system-ui, sans-serif`;
+      x.fillStyle = isSelected ? "#ffffff" : "#f5f3fa";
+      x.font = `${node.aggregate ? "600" : "500"} 13px Inter, system-ui, sans-serif`;
       x.textAlign = "center";
       x.fillText(
         node.label.length > 18 ? node.label.slice(0, 16) + "…" : node.label,
@@ -632,8 +640,8 @@ function TopologyCanvas({
         p.y + 4,
       );
       if (node.aggregate) {
-        x.fillStyle = "#818cf8";
-        x.font = "600 10px JetBrains Mono";
+        x.fillStyle = "#a78bfa";
+        x.font = "600 12px JetBrains Mono";
         x.fillText(String(node.members.length), p.x, p.y + 42);
       }
     }

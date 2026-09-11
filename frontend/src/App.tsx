@@ -36,6 +36,7 @@ import { TopologyPage } from "./pages/Topology";
 import { AnomaliesPage, AnomalyDetailPage } from "./pages/Anomalies";
 import { TracesPage, TraceDetailPage } from "./pages/Traces";
 import { UsersPage, UserDetailPage, UserChangesPage, UserGraphPage, UserAnalyticsPage } from "./pages/UserIntelligence";
+import { AgentStatsPage, AgentNodeDetailPage } from "./pages/AgentStats";
 
 const now = new Date();
 const defaultEnd = new Date(now.getTime() + 60_000).toISOString();
@@ -58,61 +59,131 @@ export const useFilters = () => useContext(FilterContext);
 
 function SideNav() {
   const groups = [
-    { label: "", links: [[LayoutDashboard, "Overview", "/"]] },
-    { label: "Observability", links: [[GitBranch, "Topology", "/topology"], [AlertOctagon, "Anomalies", "/anomalies"], [Boxes, "Services", "/services"], [Activity, "Traces", "/traces"]] },
-    { label: "User Intelligence", links: [[UserRoundSearch, "Users", "/users"], [GitCompareArrows, "User Changes", "/user-changes"], [Network, "User Graph", "/user-graph"], [ChartNoAxesCombined, "User Analytics", "/user-analytics"]] },
+    {
+      label: "User Intelligence",
+      accent: "cyan" as const,
+      headerClass: "text-cyan-400",
+      dotClass: "bg-cyan-400 shadow-[0_0_8px_rgba(6,182,212,0.8)]",
+      activeClass: "bg-cyan-500/15 border border-cyan-500/35 text-white font-semibold shadow-sm",
+      pillClass: "bg-cyan-400 shadow-[0_0_10px_rgba(34,211,238,0.9)]",
+      iconActiveClass: "text-cyan-300",
+      focusRing: "focus-visible:ring-cyan-400",
+      hoverClass: "hover:bg-cyan-500/10 hover:text-cyan-100",
+      links: [
+        [UserRoundSearch, "Users", "/users"],
+        [GitCompareArrows, "User Changes", "/user-changes"],
+        [Network, "User Graph", "/user-graph"],
+        [ChartNoAxesCombined, "User Analytics", "/user-analytics"],
+      ],
+    },
+    {
+      label: "Observability",
+      accent: "violet" as const,
+      headerClass: "text-violet-400",
+      dotClass: "bg-violet-400 shadow-[0_0_8px_rgba(139,92,246,0.8)]",
+      activeClass: "bg-violet-500/15 border border-violet-500/35 text-white font-semibold shadow-sm",
+      pillClass: "bg-violet-400 shadow-[0_0_10px_rgba(167,139,250,0.9)]",
+      iconActiveClass: "text-violet-300",
+      focusRing: "focus-visible:ring-violet-400",
+      hoverClass: "hover:bg-violet-500/10 hover:text-violet-100",
+      links: [
+        [LayoutDashboard, "Overview", "/"],
+        [GitBranch, "Topology", "/topology"],
+        [AlertOctagon, "Anomalies", "/anomalies"],
+        [Boxes, "Services", "/services"],
+        [Activity, "Traces", "/traces"],
+      ],
+    },
+    {
+      label: "Infrastructure",
+      accent: "amber" as const,
+      headerClass: "text-amber-400",
+      dotClass: "bg-amber-400 shadow-[0_0_8px_rgba(245,158,11,0.8)]",
+      activeClass: "bg-amber-500/15 border border-amber-500/35 text-white font-semibold shadow-sm",
+      pillClass: "bg-amber-400 shadow-[0_0_10px_rgba(251,191,36,0.9)]",
+      iconActiveClass: "text-amber-300",
+      focusRing: "focus-visible:ring-amber-400",
+      hoverClass: "hover:bg-amber-500/10 hover:text-amber-100",
+      links: [
+        [Radio, "Agent Fleet", "/agent-stats"],
+      ],
+    },
   ] as const;
 
   return (
-    <aside className="fixed inset-y-0 left-0 z-30 hidden w-[184px] flex-col border-r border-[rgba(255,255,255,0.06)] bg-[#090b0e] py-4 md:flex">
+    <aside className="fixed inset-y-0 left-0 z-30 hidden w-[184px] flex-col border-r border-[rgba(255,255,255,0.12)] bg-[#161424] py-4 md:flex">
       {/* Brand mark */}
       <div className="mb-6 flex items-center gap-2 px-4">
-        <div className="grid h-10 w-10 place-items-center rounded-xl bg-gradient-to-br from-indigo-500 to-indigo-700 text-white shadow-[0_0_20px_-3px_rgba(99,102,241,0.5)]">
+        <div className="grid h-10 w-10 place-items-center rounded-xl bg-gradient-to-br from-cyan-500 via-indigo-600 to-violet-600 text-white shadow-[0_0_20px_-3px_rgba(6,182,212,0.5)]">
           <Activity size={20} strokeWidth={2.5} />
         </div>
-        <div><div className="text-xs font-semibold">TraceScope</div><div className="text-[9px] uppercase tracking-wider text-[#6e7681]">Intelligence</div></div>
+        <div>
+          <div className="text-xs font-semibold text-[#f5f3fa] tracking-tight">TraceScope</div>
+          <div className="text-[9px] uppercase tracking-wider text-cyan-400/90 font-medium">Intelligence</div>
+        </div>
       </div>
 
       {/* Nav items */}
       <nav className="flex w-full flex-1 flex-col gap-4 px-2">
-        {groups.map((group) => <div key={group.label||"overview"}>
-          {group.label && <div className="mb-1 px-2 text-[9px] font-semibold uppercase tracking-[.12em] text-[#59616b]">{group.label}</div>}
-          <div className="space-y-1">{group.links.map(([Icon, label, to]) => (
-          <NavLink
-            key={to}
-            to={to}
-            end={to === "/"}
-            aria-label={label}
-            className={({ isActive }) =>
-              `group relative flex h-9 w-full items-center gap-2.5 rounded-lg px-2.5 text-[11px] font-medium transition duration-150 ${
-                isActive
-                  ? "bg-white/[0.08] text-white shadow-sm"
-                  : "text-[#8b949e] hover:bg-white/[0.04] hover:text-[#c9d1d9]"
-              }`
-            }
-          >
-            {({ isActive }) => (
-              <>
-                {isActive && (
-                  <span className="absolute left-0 h-5 w-0.5 rounded-r-full bg-indigo-500 shadow-[0_0_8px_#6366f1]" />
-                )}
-                <Icon size={18} className={isActive ? "text-indigo-400" : "text-[#8b949e] group-hover:text-[#c9d1d9]"} />
-                <span>{label}</span>
-              </>
+        {groups.map((group) => (
+          <div key={group.label || "overview"}>
+            {group.label && (
+              <div className={`mb-1.5 flex items-center gap-1.5 px-2 text-[9px] font-semibold uppercase tracking-[.12em] ${group.headerClass}`}>
+                <span className={`h-1.5 w-1.5 rounded-full ${group.dotClass}`} />
+                <span>{group.label}</span>
+              </div>
             )}
-          </NavLink>
-        ))}</div></div>)}
+            <div className="space-y-1">
+              {group.links.map(([Icon, label, to]) => (
+                <NavLink
+                  key={to}
+                  to={to}
+                  end={to === "/"}
+                  aria-label={label}
+                  className={({ isActive }) =>
+                    `group relative flex h-9 w-full items-center gap-2.5 rounded-lg px-2.5 text-[11px] font-medium transition duration-150 focus-visible:outline-none focus-visible:ring-2 ${group.focusRing} focus-visible:ring-offset-1 focus-visible:ring-offset-[#161424] ${
+                      isActive
+                        ? group.activeClass
+                        : `text-[#c4bdd9] ${group.hoverClass}`
+                    }`
+                  }
+                >
+                  {({ isActive }) => (
+                    <>
+                      {isActive && (
+                        <span className={`absolute left-0 h-5 w-1 rounded-r-full ${group.pillClass}`} />
+                      )}
+                      <Icon
+                        size={18}
+                        className={
+                          isActive
+                            ? group.iconActiveClass
+                            : "text-[#a59ebf] group-hover:text-white transition-colors"
+                        }
+                      />
+                      <span>{label}</span>
+                    </>
+                  )}
+                </NavLink>
+              ))}
+            </div>
+          </div>
+        ))}
       </nav>
 
       {/* Database/Storage status */}
-      <div className="flex items-center gap-2 px-4 text-[10px] text-[#6e7681]">
+      <div className="flex items-center gap-2 px-4 text-[10px] text-[#9e96b8]">
         <div
           title="SQLite Store · WAL mode"
-          className="grid h-8 w-8 place-items-center rounded-lg border border-[rgba(255,255,255,0.08)] bg-white/[0.02] text-[#8b949e]"
+          className="relative grid h-8 w-8 place-items-center rounded-lg border border-emerald-500/30 bg-emerald-500/10 text-emerald-300"
         >
           <Database size={14} />
+          <span className="absolute -top-0.5 -right-0.5 h-2 w-2 rounded-full bg-emerald-400 shadow-[0_0_6px_rgba(52,211,153,0.9)]" />
         </div>
-        SQLite · WAL
+        <div className="flex flex-col">
+          <span className="text-[#f5f3fa] font-medium leading-none">SQLite WAL</span>
+          <span className="text-[9px] text-emerald-400 mt-0.5">Online</span>
+        </div>
       </div>
     </aside>
   );
@@ -149,13 +220,13 @@ function FilterBar() {
   );
 
   return (
-    <div className="border-b border-[rgba(255,255,255,0.06)] bg-[#090b0e]/95 px-4 py-2.5 backdrop-blur-md md:px-8">
+    <div className="border-b border-[rgba(255,255,255,0.12)] bg-[#161424]/95 px-4 py-2.5 backdrop-blur-md md:px-8">
       <div className="flex flex-wrap items-center justify-between gap-3">
         {/* Left: Branding, Status & Global Search */}
         <div className="flex items-center gap-3">
           <div className="flex items-center gap-2">
-            <span className="text-sm font-semibold tracking-tight text-[#f0f3f6]">TraceScope</span>
-            <span className="inline-flex items-center gap-1.5 rounded-full border border-emerald-500/20 bg-emerald-500/10 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-emerald-400">
+            <span className="text-sm font-semibold tracking-tight text-[#f5f3fa]">TraceScope</span>
+            <span className="inline-flex items-center gap-1.5 rounded-full border border-emerald-500/30 bg-emerald-500/15 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-emerald-300">
               <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-emerald-400" />
               Live Estate
             </span>
@@ -163,19 +234,19 @@ function FilterBar() {
 
           {/* Quick Global Search */}
           <form onSubmit={handleGlobalSearch} className="relative hidden lg:block">
-            <Search className="absolute left-2.5 top-2 text-[#8b949e]" size={12} />
+            <Search className="absolute left-2.5 top-2 text-[#9e96b8]" size={12} />
             <input
               type="text"
               placeholder="Search services, trace ID..."
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              className="h-7 w-60 rounded-lg border border-[rgba(255,255,255,0.08)] bg-white/[0.02] pl-8 pr-3 text-xs text-[#f0f3f6] placeholder:text-[#6e7681] focus:border-indigo-500/60 focus:bg-white/[0.05] focus:outline-none"
+              className="h-7 w-60 rounded-lg border border-[rgba(255,255,255,0.14)] bg-white/[0.04] pl-8 pr-3 text-xs text-[#f5f3fa] placeholder:text-[#9e96b8] focus:border-cyan-400 focus:ring-1 focus:ring-cyan-400/50 focus:bg-white/[0.08] focus:outline-none"
             />
           </form>
         </div>
 
         {/* Center: Range preset segmented control */}
-        <div className="flex items-center rounded-lg border border-[rgba(255,255,255,0.08)] bg-white/[0.03] p-0.5">
+        <div className="flex items-center rounded-lg border border-[rgba(255,255,255,0.14)] bg-white/[0.04] p-0.5">
           {[
             { label: "1h", hours: 1 },
             { label: "3h", hours: 3 },
@@ -187,8 +258,8 @@ function FilterBar() {
               onClick={() => setRange(hours)}
               className={`rounded-md px-2.5 py-1 text-xs font-medium transition ${
                 rangeHours === hours
-                  ? "bg-white/[0.12] text-white shadow-sm"
-                  : "text-[#8b949e] hover:text-[#f0f3f6]"
+                  ? "bg-gradient-to-r from-cyan-600 via-indigo-600 to-violet-600 text-white shadow-sm font-semibold"
+                  : "text-[#c4bdd9] hover:text-white"
               }`}
             >
               {label}
@@ -201,12 +272,12 @@ function FilterBar() {
           {/* Quick filter toggle button */}
           <button
             onClick={() => setShowFilters(!showFilters)}
-            className={`btn ${showFilters || activeFilterKeys.length > 0 ? "border-indigo-500/50 bg-indigo-500/10 text-indigo-300" : ""}`}
+            className={`btn ${showFilters || activeFilterKeys.length > 0 ? "border-cyan-500/50 bg-cyan-500/20 text-cyan-200" : ""}`}
           >
             <SlidersHorizontal size={13} />
             <span>Filters</span>
             {activeFilterKeys.length > 0 && (
-              <span className="grid h-4 w-4 place-items-center rounded-full bg-indigo-500 text-[9px] font-bold text-white">
+              <span className="grid h-4 w-4 place-items-center rounded-full bg-cyan-500 text-[9px] font-bold text-white shadow-[0_0_6px_rgba(6,182,212,0.8)]">
                 {activeFilterKeys.length}
               </span>
             )}
@@ -217,11 +288,11 @@ function FilterBar() {
             aria-label="Timezone"
             value={filters.timezone}
             onChange={(e) => setFilter("timezone", e.target.value)}
-            className="btn bg-[rgba(255,255,255,0.02)] cursor-pointer"
+            className="btn bg-[rgba(255,255,255,0.04)] border-[rgba(255,255,255,0.14)] text-[#f5f3fa] cursor-pointer"
           >
-            <option value="UTC" className="bg-[#12151a]">UTC</option>
-            <option value="Asia/Ho_Chi_Minh" className="bg-[#12151a]">Asia/Ho Chi Minh</option>
-            <option value="local" className="bg-[#12151a]">Browser Local</option>
+            <option value="UTC" className="bg-[#1a172a]">UTC</option>
+            <option value="Asia/Ho_Chi_Minh" className="bg-[#1a172a]">Asia/Ho Chi Minh</option>
+            <option value="local" className="bg-[#1a172a]">Browser Local</option>
           </select>
 
           {/* Baseline comparison */}
@@ -229,16 +300,16 @@ function FilterBar() {
             aria-label="Comparison period"
             value={filters.comparison}
             onChange={(e) => setFilter("comparison", e.target.value)}
-            className="btn bg-[rgba(255,255,255,0.02)] cursor-pointer"
+            className="btn bg-[rgba(255,255,255,0.04)] border-[rgba(255,255,255,0.14)] text-[#f5f3fa] cursor-pointer"
           >
-            <option value="previous" className="bg-[#12151a]">vs Prior Window</option>
-            <option value="week" className="bg-[#12151a]">vs Prior Week</option>
-            <option value="none" className="bg-[#12151a]">No Comparison</option>
+            <option value="previous" className="bg-[#1a172a]">vs Prior Window</option>
+            <option value="week" className="bg-[#1a172a]">vs Prior Week</option>
+            <option value="none" className="bg-[#1a172a]">No Comparison</option>
           </select>
 
           {/* Auto refresh badge */}
-          <div className="chip font-mono text-[10px] text-emerald-400 border-emerald-500/30">
-            <Radio size={11} className="animate-pulse" />
+          <div className="chip font-mono text-[10px] text-emerald-300 border-emerald-500/40 bg-emerald-500/10">
+            <Radio size={11} className="animate-pulse text-emerald-400" />
             <span>60s rollup</span>
           </div>
         </div>
@@ -246,17 +317,17 @@ function FilterBar() {
 
       {/* Expanded filter panel */}
       {showFilters && (
-        <div className="mt-3 grid grid-cols-2 gap-2 border-t border-[rgba(255,255,255,0.06)] pt-3 sm:grid-cols-3 lg:grid-cols-6">
+        <div className="mt-3 grid grid-cols-2 gap-2 border-t border-[rgba(255,255,255,0.12)] pt-3 sm:grid-cols-3 lg:grid-cols-6">
           {[
-            ["service", "Service"],
-            ["operation", "Operation"],
-            ["account", "Account"],
-            ["environment", "Environment"],
-            ["group", "Group"],
-            ["module", "Module"],
-          ].map(([key, label]) => (
+            ["service", "Service", "focus:border-indigo-400"],
+            ["operation", "Operation", "focus:border-violet-400"],
+            ["account", "Account", "focus:border-cyan-400"],
+            ["environment", "Environment", "focus:border-emerald-400"],
+            ["group", "Group", "focus:border-amber-400"],
+            ["module", "Module", "focus:border-sky-400"],
+          ].map(([key, label, focusClass]) => (
             <div key={key} className="flex flex-col gap-1">
-              <label className="text-[10px] font-medium uppercase tracking-wider text-[#8b949e]">
+              <label className="text-[10px] font-medium uppercase tracking-wider text-[#9e96b8]">
                 {label}
               </label>
               <div className="relative">
@@ -265,12 +336,12 @@ function FilterBar() {
                   placeholder={`All ${label.toLowerCase()}s`}
                   value={filters[key as keyof Filters] || ""}
                   onChange={(e) => setFilter(key as keyof Filters, e.target.value)}
-                  className="w-full rounded-md border border-[rgba(255,255,255,0.08)] bg-white/[0.02] px-2.5 py-1 text-xs text-[#f0f3f6] placeholder:text-[#6e7681] focus:border-indigo-500/60 focus:bg-white/[0.05] focus:outline-none"
+                  className={`w-full rounded-md border border-[rgba(255,255,255,0.14)] bg-white/[0.04] px-2.5 py-1 text-xs text-[#f5f3fa] placeholder:text-[#9e96b8] ${focusClass} focus:bg-white/[0.08] focus:outline-none`}
                 />
                 {filters[key as keyof Filters] && (
                   <button
                     onClick={() => setFilter(key as keyof Filters, "")}
-                    className="absolute right-2 top-1/2 -translate-y-1/2 text-[#8b949e] hover:text-white"
+                    className="absolute right-2 top-1/2 -translate-y-1/2 text-[#9e96b8] hover:text-white"
                   >
                     <X size={12} />
                   </button>
@@ -284,28 +355,39 @@ function FilterBar() {
       {/* Active filter badges */}
       {activeFilterKeys.length > 0 && (
         <div className="mt-2.5 flex flex-wrap items-center gap-1.5">
-          <span className="text-[10px] font-semibold uppercase tracking-wider text-[#6e7681]">
+          <span className="text-[10px] font-semibold uppercase tracking-wider text-[#9e96b8]">
             Active Filters:
           </span>
-          {activeFilterKeys.map((k) => (
-            <span
-              key={k}
-              className="inline-flex items-center gap-1 rounded-md border border-indigo-500/30 bg-indigo-500/10 px-2 py-0.5 text-xs text-indigo-300"
-            >
-              <span className="text-[#8b949e]">{k}:</span>
-              <span className="font-mono font-medium">{filters[k]}</span>
-              <button
-                onClick={() => setFilter(k, "")}
-                className="ml-0.5 hover:text-white"
-                title={`Remove ${k} filter`}
+          {activeFilterKeys.map((k) => {
+            const badgeColorMap: Record<string, string> = {
+              account: "border-cyan-500/40 bg-cyan-500/15 text-cyan-200",
+              service: "border-indigo-500/40 bg-indigo-500/15 text-indigo-200",
+              operation: "border-violet-500/40 bg-violet-500/15 text-violet-200",
+              environment: "border-emerald-500/40 bg-emerald-500/15 text-emerald-200",
+              group: "border-amber-500/40 bg-amber-500/15 text-amber-200",
+              module: "border-sky-500/40 bg-sky-500/15 text-sky-200",
+            };
+            const badgeColor = badgeColorMap[k] || "border-violet-500/40 bg-violet-500/15 text-violet-200";
+            return (
+              <span
+                key={k}
+                className={`inline-flex items-center gap-1 rounded-md border px-2 py-0.5 text-xs ${badgeColor}`}
               >
-                <X size={11} />
-              </button>
-            </span>
-          ))}
+                <span className="opacity-75">{k}:</span>
+                <span className="font-mono font-medium">{filters[k]}</span>
+                <button
+                  onClick={() => setFilter(k, "")}
+                  className="ml-0.5 hover:text-white"
+                  title={`Remove ${k} filter`}
+                >
+                  <X size={11} />
+                </button>
+              </span>
+            );
+          })}
           <button
             onClick={() => activeFilterKeys.forEach((k) => setFilter(k, ""))}
-            className="text-[11px] text-[#8b949e] hover:text-white underline ml-1"
+            className="text-[11px] text-[#c4bdd9] hover:text-white underline ml-1"
           >
             Clear all
           </button>
@@ -318,7 +400,7 @@ function FilterBar() {
 function Layout() {
   const location = useLocation();
   return (
-    <div className="min-h-screen bg-[#08090a] text-[#f0f3f6]">
+    <div className="min-h-screen bg-[#12101b] text-[#f5f3fa]">
       <SideNav />
       <main className="md:pl-[184px]">
         <header className="sticky top-0 z-20">
@@ -343,6 +425,8 @@ function Layout() {
             <Route path="/accounts/:username" element={<PrincipalDetailPage />} />
             <Route path="/traces" element={<TracesPage />} />
             <Route path="/traces/:id" element={<TraceDetailPage />} />
+            <Route path="/agent-stats" element={<AgentStatsPage />} />
+            <Route path="/agent-stats/:node" element={<AgentNodeDetailPage />} />
           </Routes>
         </div>
       </main>
