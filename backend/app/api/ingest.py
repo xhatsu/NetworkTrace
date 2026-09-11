@@ -20,6 +20,7 @@ from backend.app.services.apm_parser import (
     apm_document_to_normalized_trace,
 )
 from backend.app.repositories.trace_repository import TraceRepository
+from backend.app.repositories.ingest_batch_repository import IngestBatchRepository
 from backend.app.services.aggregation import aggregate_traces
 from backend.app.services.principal_relationships import process_principal_intelligence
 
@@ -28,15 +29,32 @@ legacy_router = APIRouter(tags=["ingestion"])
 otlp_router = APIRouter(tags=["otlp"])
 
 
-async def _aggregate_ingested_window(start_ms: int, end_ms: int) -> None:
-    aggregate_traces(start_ms, end_ms)
-    process_principal_intelligence()
+def _aggregate_ingested_window(start_ms: int, end_ms: int) -> None:
+    try:
+        aggregate_traces(start_ms, end_ms)
+        process_principal_intelligence()
+    except Exception:
+        pass
 
 
 @router.post("/ingest", dependencies=[Depends(require_api_key)])
 @router.post("/ingest/traces", dependencies=[Depends(require_api_key)])
 @legacy_router.post("/api/ingest", dependencies=[Depends(require_api_key)], include_in_schema=False)
 async def ingest_traces(request: Request, bg: BackgroundTasks) -> Dict[str, Any]:
+    batch_id = (request.headers.get("x-batch-id") or "").strip()
+    batch_repo = IngestBatchRepository()
+    if batch_id and batch_repo.is_batch_processed(batch_id):
+        return {
+            "status": "success",
+            "ok": True,
+            "duplicate": True,
+            "batch_id": batch_id,
+            "message": "Batch already processed",
+            "received": 0,
+            "inserted": 0,
+            "rejected": 0,
+        }
+
     content_length = request.headers.get("content-length")
     if content_length:
         try:
@@ -49,7 +67,13 @@ async def ingest_traces(request: Request, bg: BackgroundTasks) -> Dict[str, Any]
         raise HTTPException(status_code=413, detail="Ingestion payload is too large")
 
     content_encoding = request.headers.get("content-encoding")
-    decompressed = decompress_payload(raw_body, content_encoding)
+    try:
+        decompressed = decompress_payload(raw_body, content_encoding)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from None
+
+    if len(decompressed) > settings.max_ingest_bytes * 4:
+        raise HTTPException(status_code=413, detail="Decompressed payload is too large")
 
     try:
         body = json.loads(decompressed)
@@ -72,11 +96,28 @@ async def ingest_traces(request: Request, bg: BackgroundTasks) -> Dict[str, Any]
                 traces.append(t)
         repo = TraceRepository()
         inserted = repo.insert_traces(traces)
+        if batch_id:
+            batch_repo.record_batch(
+                batch_id=batch_id,
+                node=envelope_node or "otlp",
+                record_count=len(traces),
+                status="accepted",
+            )
         if inserted > 0:
             min_ts = min(t.timestamp_ms for t in traces)
             max_ts = max(t.timestamp_ms for t in traces)
             bg.add_task(_aggregate_ingested_window, min_ts, max_ts + 60_000)
-        return {"status": "success", "received": len(spans), "inserted": inserted, "rejected": len(spans) - len(traces)}
+        resp: Dict[str, Any] = {
+            "status": "success",
+            "received": len(spans),
+            "inserted": inserted,
+            "rejected": len(spans) - len(traces),
+        }
+        if batch_id:
+            resp["ok"] = True
+            resp["duplicate"] = False
+            resp["batch_id"] = batch_id
+        return resp
     else:
         records = body if isinstance(body, list) else [body]
 
@@ -99,18 +140,30 @@ async def ingest_traces(request: Request, bg: BackgroundTasks) -> Dict[str, Any]
 
     repo = TraceRepository()
     inserted = repo.insert_traces(traces)
+    if batch_id:
+        batch_repo.record_batch(
+            batch_id=batch_id,
+            node=envelope_node or "unknown",
+            record_count=len(traces),
+            status="accepted",
+        )
 
     if inserted > 0:
         min_ts = min(t.timestamp_ms for t in traces)
         max_ts = max(t.timestamp_ms for t in traces)
         bg.add_task(_aggregate_ingested_window, min_ts, max_ts + 60_000)
 
-    return {
+    resp = {
         "status": "success",
         "received": len(records),
         "inserted": inserted,
-        "rejected": rejected
+        "rejected": rejected,
     }
+    if batch_id:
+        resp["ok"] = True
+        resp["duplicate"] = False
+        resp["batch_id"] = batch_id
+    return resp
 
 
 # =========================================================================
@@ -127,7 +180,10 @@ async def otlp_v1_traces(request: Request, bg: BackgroundTasks) -> Dict[str, Any
 
     content_type = request.headers.get("content-type", "").lower()
     content_encoding = request.headers.get("content-encoding", "")
-    decompressed = decompress_payload(raw_body, content_encoding)
+    try:
+        decompressed = decompress_payload(raw_body, content_encoding)
+    except ValueError as exc:
+        return JSONResponse({"error": str(exc)}, status_code=400)
 
     spans = []
     if "protobuf" in content_type or (not content_type and not decompressed.startswith(b"{")):
@@ -176,7 +232,10 @@ async def elastic_apm_ingest(request: Request, bg: BackgroundTasks) -> Dict[str,
 
     content_type = request.headers.get("content-type", "")
     content_encoding = request.headers.get("content-encoding", "")
-    decompressed = decompress_payload(raw_body, content_encoding)
+    try:
+        decompressed = decompress_payload(raw_body, content_encoding)
+    except ValueError as exc:
+        return JSONResponse({"error": str(exc)}, status_code=400)
 
     documents = parse_apm_body(decompressed, content_type)
     if not documents:
