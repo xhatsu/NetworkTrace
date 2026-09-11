@@ -56,6 +56,14 @@ python -m backend.cli analyze
 
 See [docs/DESIGN.md](docs/DESIGN.md), [docs/ANOMALIES.md](docs/ANOMALIES.md), and [docs/BENCHMARK.md](docs/BENCHMARK.md).
 
+## Kubernetes deployment
+
+The production manifests split traffic ingestion and agent lifecycle/reporting
+into stateless, horizontally scalable Deployments. A single storage-owner
+StatefulSet is the only pod that mounts SQLite; edge pods use an authenticated
+internal API instead of sharing WAL files across nodes. See the complete
+[Kubernetes architecture and migration runbook](deploy/k8s/README.md).
+
 ## Tests
 
 ```sh
