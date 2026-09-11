@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import asyncio
 import json
+import sqlite3
 from typing import Any, Dict, List
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import JSONResponse
 
 from backend.config import settings
@@ -19,42 +21,79 @@ from backend.app.services.apm_parser import (
     parse_apm_body,
     apm_document_to_normalized_trace,
 )
-from backend.app.repositories.trace_repository import TraceRepository
-from backend.app.repositories.ingest_batch_repository import IngestBatchRepository
-from backend.app.services.aggregation import aggregate_traces
-from backend.app.services.principal_relationships import process_principal_intelligence
+from backend.app.services.ingest_writer import (
+    IngestCommitTimeout,
+    IngestQueueFull,
+    IngestWriteResult,
+    ingest_writer,
+)
+from backend.app.services.storage_owner_client import StorageOwnerError, storage_owner_client
 
 router = APIRouter(prefix="/api/v1", tags=["ingestion"])
 legacy_router = APIRouter(tags=["ingestion"])
 otlp_router = APIRouter(tags=["otlp"])
 
 
-def _aggregate_ingested_window(start_ms: int, end_ms: int) -> None:
+def _normalize_records(records: List[Dict[str, Any]], envelope_node: Any) -> tuple[List[NormalizedTrace], int]:
+    traces: List[NormalizedTrace] = []
+    rejected = 0
+    for record in records:
+        normalized_record = record
+        if envelope_node and "host" not in record:
+            normalized_record = {**record, "host": envelope_node}
+        trace = normalize_otel_record(normalized_record)
+        if trace:
+            traces.append(trace)
+        else:
+            rejected += 1
+    return traces, rejected
+
+
+async def _commit_traces(
+    traces: List[NormalizedTrace], batch_id: str = "", node: str = "unknown"
+):
     try:
-        aggregate_traces(start_ms, end_ms)
-        process_principal_intelligence()
-    except Exception:
-        pass
+        if storage_owner_client.enabled:
+            result = await storage_owner_client.commit_traces(traces, batch_id, node)
+            return IngestWriteResult(
+                inserted=int(result.get("inserted", 0)),
+                duplicate=bool(result.get("duplicate", False)),
+            )
+        return await ingest_writer.submit_async(traces, batch_id, node)
+    except IngestQueueFull:
+        raise HTTPException(
+            status_code=429,
+            detail="Ingestion queue is full; retry with backoff",
+            headers={"Retry-After": "1"},
+        ) from None
+    except IngestCommitTimeout:
+        raise HTTPException(
+            status_code=503,
+            detail="Timed out waiting for ingestion commit; retry with the same X-Batch-Id",
+            headers={"Retry-After": "1"},
+        ) from None
+    except (sqlite3.OperationalError, Exception) as exc:
+        if isinstance(exc, (HTTPException, IngestQueueFull, IngestCommitTimeout, StorageOwnerError)):
+            raise
+        raise HTTPException(
+            status_code=503,
+            detail="Ingestion store is busy; retry with the same X-Batch-Id",
+            headers={"Retry-After": "1"},
+        ) from None
+    except StorageOwnerError as exc:
+        headers = {"Retry-After": exc.retry_after} if exc.retry_after else None
+        raise HTTPException(
+            status_code=exc.status_code,
+            detail=exc.detail,
+            headers=headers,
+        ) from None
 
 
 @router.post("/ingest", dependencies=[Depends(require_api_key)])
 @router.post("/ingest/traces", dependencies=[Depends(require_api_key)])
 @legacy_router.post("/api/ingest", dependencies=[Depends(require_api_key)], include_in_schema=False)
-async def ingest_traces(request: Request, bg: BackgroundTasks) -> Dict[str, Any]:
+async def ingest_traces(request: Request) -> Dict[str, Any]:
     batch_id = (request.headers.get("x-batch-id") or "").strip()
-    batch_repo = IngestBatchRepository()
-    if batch_id and batch_repo.is_batch_processed(batch_id):
-        return {
-            "status": "success",
-            "ok": True,
-            "duplicate": True,
-            "batch_id": batch_id,
-            "message": "Batch already processed",
-            "received": 0,
-            "inserted": 0,
-            "rejected": 0,
-        }
-
     content_length = request.headers.get("content-length")
     if content_length:
         try:
@@ -89,34 +128,27 @@ async def ingest_traces(request: Request, bg: BackgroundTasks) -> Dict[str, Any]
     elif isinstance(body, dict) and ("resourceSpans" in body or "resource_spans" in body):
         # Direct OTLP JSON payload sent to generic ingest endpoint
         spans = parse_otlp_json(body)
+        if len(spans) > settings.max_ingest_records:
+            raise HTTPException(status_code=413, detail="Too many ingestion records")
         traces: List[NormalizedTrace] = []
         for s in spans:
             t = otlp_span_to_normalized_trace(s)
             if t:
                 traces.append(t)
-        repo = TraceRepository()
-        inserted = repo.insert_traces(traces)
-        if batch_id:
-            batch_repo.record_batch(
-                batch_id=batch_id,
-                node=envelope_node or "otlp",
-                record_count=len(traces),
-                status="accepted",
-            )
-        if inserted > 0:
-            min_ts = min(t.timestamp_ms for t in traces)
-            max_ts = max(t.timestamp_ms for t in traces)
-            bg.add_task(_aggregate_ingested_window, min_ts, max_ts + 60_000)
+        write_result = await _commit_traces(traces, batch_id, envelope_node or "otlp")
+        inserted = write_result.inserted
         resp: Dict[str, Any] = {
             "status": "success",
-            "received": len(spans),
+            "received": 0 if write_result.duplicate else len(spans),
             "inserted": inserted,
-            "rejected": len(spans) - len(traces),
+            "rejected": 0 if write_result.duplicate else len(spans) - len(traces),
         }
         if batch_id:
             resp["ok"] = True
-            resp["duplicate"] = False
+            resp["duplicate"] = write_result.duplicate
             resp["batch_id"] = batch_id
+            if write_result.duplicate:
+                resp["message"] = "Batch already processed"
         return resp
     else:
         records = body if isinstance(body, list) else [body]
@@ -126,43 +158,22 @@ async def ingest_traces(request: Request, bg: BackgroundTasks) -> Dict[str, Any]
     if len(records) > settings.max_ingest_records:
         raise HTTPException(status_code=413, detail="Too many ingestion records")
 
-    traces: List[NormalizedTrace] = []
-    rejected = 0
-    for record in records:
-        r = record
-        if envelope_node and "host" not in record:
-            r = {**record, "host": envelope_node}
-        t = normalize_otel_record(r)
-        if t:
-            traces.append(t)
-        else:
-            rejected += 1
-
-    repo = TraceRepository()
-    inserted = repo.insert_traces(traces)
-    if batch_id:
-        batch_repo.record_batch(
-            batch_id=batch_id,
-            node=envelope_node or "unknown",
-            record_count=len(traces),
-            status="accepted",
-        )
-
-    if inserted > 0:
-        min_ts = min(t.timestamp_ms for t in traces)
-        max_ts = max(t.timestamp_ms for t in traces)
-        bg.add_task(_aggregate_ingested_window, min_ts, max_ts + 60_000)
+    traces, rejected = _normalize_records(records, envelope_node)
+    write_result = await _commit_traces(traces, batch_id, envelope_node or "unknown")
+    inserted = write_result.inserted
 
     resp = {
         "status": "success",
-        "received": len(records),
+        "received": 0 if write_result.duplicate else len(records),
         "inserted": inserted,
-        "rejected": rejected,
+        "rejected": 0 if write_result.duplicate else rejected,
     }
     if batch_id:
         resp["ok"] = True
-        resp["duplicate"] = False
+        resp["duplicate"] = write_result.duplicate
         resp["batch_id"] = batch_id
+        if write_result.duplicate:
+            resp["message"] = "Batch already processed"
     return resp
 
 
@@ -171,7 +182,7 @@ async def ingest_traces(request: Request, bg: BackgroundTasks) -> Dict[str, Any]
 # =========================================================================
 
 @otlp_router.post("/v1/traces")
-async def otlp_v1_traces(request: Request, bg: BackgroundTasks) -> Dict[str, Any]:
+async def otlp_v1_traces(request: Request) -> Dict[str, Any]:
     raw_body = await request.body()
     if len(raw_body) > settings.max_ingest_bytes:
         return JSONResponse({"error": "Payload Too Large"}, status_code=413)
@@ -184,6 +195,8 @@ async def otlp_v1_traces(request: Request, bg: BackgroundTasks) -> Dict[str, Any
         decompressed = decompress_payload(raw_body, content_encoding)
     except ValueError as exc:
         return JSONResponse({"error": str(exc)}, status_code=400)
+    if len(decompressed) > settings.max_ingest_bytes * 4:
+        return JSONResponse({"error": "Decompressed payload is too large"}, status_code=413)
 
     spans = []
     if "protobuf" in content_type or (not content_type and not decompressed.startswith(b"{")):
@@ -200,6 +213,8 @@ async def otlp_v1_traces(request: Request, bg: BackgroundTasks) -> Dict[str, Any
             spans = parse_otlp_json(data)
         except Exception:
             return JSONResponse({"error": "Invalid OTLP JSON"}, status_code=400)
+    if len(spans) > settings.max_ingest_records:
+        return JSONResponse({"error": "Too many ingestion records"}, status_code=413)
 
     traces: List[NormalizedTrace] = []
     for s in spans:
@@ -207,12 +222,7 @@ async def otlp_v1_traces(request: Request, bg: BackgroundTasks) -> Dict[str, Any
         if t:
             traces.append(t)
 
-    repo = TraceRepository()
-    inserted = repo.insert_traces(traces)
-    if inserted > 0:
-        min_ts = min(t.timestamp_ms for t in traces)
-        max_ts = max(t.timestamp_ms for t in traces)
-        bg.add_task(_aggregate_ingested_window, min_ts, max_ts + 60_000)
+    await _commit_traces(traces)
 
     return {"partialSuccess": {}}
 
@@ -223,7 +233,7 @@ async def otlp_v1_traces(request: Request, bg: BackgroundTasks) -> Dict[str, Any
 
 @legacy_router.post("/api/ingest/apm")
 @legacy_router.post("/api/ingest/elastic-apm")
-async def elastic_apm_ingest(request: Request, bg: BackgroundTasks) -> Dict[str, Any]:
+async def elastic_apm_ingest(request: Request) -> Dict[str, Any]:
     raw_body = await request.body()
     if len(raw_body) > settings.max_ingest_bytes:
         return JSONResponse({"error": "Payload Too Large"}, status_code=413)
@@ -236,10 +246,14 @@ async def elastic_apm_ingest(request: Request, bg: BackgroundTasks) -> Dict[str,
         decompressed = decompress_payload(raw_body, content_encoding)
     except ValueError as exc:
         return JSONResponse({"error": str(exc)}, status_code=400)
+    if len(decompressed) > settings.max_ingest_bytes * 4:
+        return JSONResponse({"error": "Decompressed payload is too large"}, status_code=413)
 
     documents = parse_apm_body(decompressed, content_type)
     if not documents:
         return JSONResponse({"error": "No Elastic APM transaction documents found"}, status_code=400)
+    if len(documents) > settings.max_ingest_records:
+        return JSONResponse({"error": "Too many ingestion records"}, status_code=413)
 
     traces: List[NormalizedTrace] = []
     ignored = 0
@@ -250,12 +264,8 @@ async def elastic_apm_ingest(request: Request, bg: BackgroundTasks) -> Dict[str,
         else:
             ignored += 1
 
-    repo = TraceRepository()
-    inserted = repo.insert_traces(traces)
-    if inserted > 0:
-        min_ts = min(t.timestamp_ms for t in traces)
-        max_ts = max(t.timestamp_ms for t in traces)
-        bg.add_task(_aggregate_ingested_window, min_ts, max_ts + 60_000)
+    write_result = await _commit_traces(traces)
+    inserted = write_result.inserted
 
     return {
         "ok": True,

@@ -1,0 +1,402 @@
+"""Role-aware FastAPI application factory for TraceScope / OtelTrace.
+
+Historically the platform was a single monolith served by ``backend.main:app``
+(FastAPI + built React SPA + ingest + analytics + agent telemetry). The ``all``
+role preserves that public surface while adding authenticated internal storage
+operations used by Kubernetes edge workloads.
+
+Two additional roles isolate independently deployable Kubernetes workloads:
+
+* ``ingest``      -> ``backend.ingest_main:app``       traffic-log ingestion
+* ``agent-stats`` -> ``backend.agent_stats_main:app``  agent lifecycle / health
+
+Role isolation is enforced at *router mount* and *lifespan* time:
+
+* the ingest role never mounts the analytics read/write routers or the SPA;
+* Kubernetes ingest and agent-stats roles call the storage owner over HTTP and
+  never open SQLite; local role launches retain their historical direct mode;
+* only the ``all`` role serves the compiled SPA and the legacy dashboard APIs.
+
+See ``deploy/k8s/README.md`` for the storage / single-writer contract that these
+roles are deployed under.
+"""
+from __future__ import annotations
+
+import json
+import sqlite3
+from contextlib import asynccontextmanager
+from datetime import datetime
+from pathlib import Path
+from typing import Annotated, Any
+
+from fastapi import Depends, FastAPI, HTTPException, Query
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse, JSONResponse
+from fastapi.staticfiles import StaticFiles
+
+from backend.config import settings
+from backend.models import AnomalyPatch, Page, QueryFilters, epoch_ms
+from backend.repository import SQLiteRepository
+
+from backend.app.api.overview import router as overview_router
+from backend.app.api.services import router as services_router
+from backend.app.api.principals import router as principals_router
+from backend.app.api.topology import router as topology_router
+from backend.app.api.anomalies import router as anomalies_router
+from backend.app.api.traces import router as traces_router
+from backend.app.api.blast_radius import router as blast_radius_router
+from backend.app.api.ingest import (
+    legacy_router as legacy_ingest_router,
+    otlp_router,
+    router as ingest_router,
+)
+from backend.app.api.users import router as users_router
+from backend.app.api.reference_compat import router as reference_compat_router
+from backend.app.api.agent_stats import router as agent_stats_router
+from backend.app.api.internal_storage import router as internal_storage_router
+from backend.app.services.ingest_writer import ingest_writer
+from backend.app.services.storage_owner_client import StorageOwnerError, storage_owner_client
+
+
+# --------------------------------------------------------------------------
+# Roles
+# --------------------------------------------------------------------------
+ROLE_ALL = "all"
+ROLE_INGEST = "ingest"
+ROLE_AGENT_STATS = "agent-stats"
+VALID_ROLES = (ROLE_ALL, ROLE_INGEST, ROLE_AGENT_STATS)
+
+# The monolith/storage owner starts the SQLite writer. An ingest role starts a
+# local writer only in backwards-compatible non-Kubernetes mode, when no
+# storage-owner URL is configured.
+
+# Analytics / read-mostly routers (dashboard, topology, traces, users, ...).
+_ANALYTICS_ROUTERS = (
+    overview_router,
+    services_router,
+    principals_router,
+    topology_router,
+    anomalies_router,
+    traces_router,
+    blast_radius_router,
+    users_router,
+    reference_compat_router,
+)
+
+# Traffic-log ingestion routers: /api/v1/ingest, /api/v1/ingest/traces,
+# /api/ingest (+ apm aliases) and the canonical OTLP /v1/{traces,metrics,logs}.
+_INGEST_ROUTERS = (ingest_router, legacy_ingest_router, otlp_router)
+
+# Agent lifecycle / health routers: /api/agent/stats*.
+_AGENT_STATS_ROUTERS = (agent_stats_router,)
+
+
+def create_app(role: str = ROLE_ALL) -> FastAPI:
+    """Build a FastAPI app for ``role``.
+
+    ``role`` must be one of :data:`VALID_ROLES`.  ``all`` reproduces the
+    historical monolith exactly; the other roles expose only their own surface.
+    """
+    if role not in VALID_ROLES:
+        raise ValueError(
+            "Unknown TraceScope role {!r}; expected one of {}".format(role, VALID_ROLES)
+        )
+
+    repo = SQLiteRepository()
+
+    @asynccontextmanager
+    async def lifespan(_app: FastAPI):
+        # Only one pod in the fleet is configured to run migrations
+        # (OTEL_RUN_MIGRATIONS); the rest wait for the schema owner.
+        if settings.run_migrations:
+            repo.migrate()
+        owns_writer = role == ROLE_ALL or (
+            role == ROLE_INGEST and not storage_owner_client.enabled
+        )
+        if storage_owner_client.enabled:
+            await storage_owner_client.start()
+        if owns_writer:
+            ingest_writer.start()
+        try:
+            yield
+        finally:
+            if owns_writer:
+                ingest_writer.shutdown()
+            if storage_owner_client.enabled:
+                await storage_owner_client.shutdown()
+
+    app = FastAPI(
+        title="TraceScope API",
+        version="0.2.0",
+        docs_url="/api/docs",
+        redoc_url=None,
+        lifespan=lifespan,
+    )
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=list(settings.cors_origins),
+        allow_credentials=False,
+        allow_methods=["GET", "POST", "PATCH", "DELETE", "OPTIONS"],
+        allow_headers=["*"],
+    )
+    # Exposed for tests / diagnostics: which workload surface this app serves.
+    app.state.tracescope_role = role
+
+    if role == ROLE_ALL:
+        for router in _ANALYTICS_ROUTERS:
+            app.include_router(router)
+        for router in _INGEST_ROUTERS:
+            app.include_router(router)
+        for router in _AGENT_STATS_ROUTERS:
+            app.include_router(router)
+        app.include_router(internal_storage_router)
+    elif role == ROLE_INGEST:
+        for router in _INGEST_ROUTERS:
+            app.include_router(router)
+    else:  # ROLE_AGENT_STATS
+        for router in _AGENT_STATS_ROUTERS:
+            app.include_router(router)
+
+    @app.get("/api/v1/health")
+    async def health():
+        return {
+            "status": "ok",
+            "demo_mode": settings.demo_mode,
+            "service_role": role,
+        }
+
+    @app.get("/livez", include_in_schema=False)
+    async def livez():
+        return {"status": "alive", "service_role": role}
+
+    @app.get("/readyz", include_in_schema=False)
+    async def readyz():
+        if role in (ROLE_INGEST, ROLE_AGENT_STATS) and storage_owner_client.enabled:
+            if not await storage_owner_client.ready():
+                return JSONResponse(status_code=503, content={"status": "not-ready"})
+            return {"status": "ready", "service_role": role}
+        try:
+            with repo.connect() as db:
+                db.execute("SELECT 1").fetchone()
+        except Exception:
+            return JSONResponse(status_code=503, content={"status": "not-ready"})
+        if role in (ROLE_ALL, ROLE_INGEST) and not storage_owner_client.enabled:
+            if not ingest_writer.snapshot()["writer_alive"]:
+                return JSONResponse(status_code=503, content={"status": "not-ready"})
+        return {"status": "ready", "service_role": role}
+
+    if role == ROLE_ALL:
+        _register_dashboard_routes(app, repo)
+    if role in (ROLE_ALL, ROLE_INGEST):
+        _register_ingestion_status_route(app, repo)
+
+    @app.exception_handler(sqlite3.Error)
+    @app.exception_handler(Exception)
+    async def database_error(_request, exc):
+        if isinstance(exc, (sqlite3.Error,)):
+            return JSONResponse(
+                status_code=503,
+                content={"detail": "Analytics store is temporarily unavailable"},
+            )
+        import clickhouse_connect.driver.exceptions as ch_exc
+        if isinstance(exc, (ch_exc.ClickHouseError,)):
+            return JSONResponse(
+                status_code=503,
+                content={"detail": "Analytics store is temporarily unavailable"},
+            )
+        raise exc
+
+    @app.exception_handler(StorageOwnerError)
+    async def storage_owner_error(_request, exc: StorageOwnerError):
+        headers = {"Retry-After": exc.retry_after} if exc.retry_after else None
+        return JSONResponse(
+            status_code=exc.status_code,
+            content={"detail": exc.detail},
+            headers=headers,
+        )
+
+    if role == ROLE_ALL:
+        _mount_spa(app)
+
+    return app
+
+
+# --------------------------------------------------------------------------
+# Shared query-filter dependency (module level so FastAPI's get_type_hints can
+# resolve the ``Filters`` annotation from the module globals, exactly as the
+# original ``backend.main`` did).
+# --------------------------------------------------------------------------
+async def filters_model(
+    start: datetime,
+    end: datetime,
+    timezone: str = "UTC",
+    environment: str | None = None,
+    group: str | None = None,
+    module: str | None = None,
+    service: str | None = None,
+    operation: str | None = None,
+    account: str | None = None,
+    comparison: str = "previous",
+) -> QueryFilters:
+    try:
+        return QueryFilters(
+            start=start,
+            end=end,
+            timezone=timezone,
+            environment=environment,
+            group=group,
+            module=module,
+            service=service,
+            operation=operation,
+            account=account,
+            comparison=comparison,
+        )
+    except Exception as exc:
+        raise HTTPException(422, "Invalid filter or time range") from None
+
+
+Filters = Annotated[QueryFilters, Depends(filters_model)]
+
+
+def filter_dict(f: QueryFilters) -> dict[str, str | None]:
+    return {
+        k: getattr(f, k)
+        for k in (
+            "environment",
+            "group",
+            "module",
+            "service",
+            "operation",
+            "account",
+            "comparison",
+        )
+    }
+
+
+# --------------------------------------------------------------------------
+# Legacy dashboard / read routes (only the ``all`` monolith served these)
+# --------------------------------------------------------------------------
+def _register_dashboard_routes(app: FastAPI, repo: SQLiteRepository) -> None:
+    @app.get("/api/v1/dashboard/summary")
+    async def dashboard_summary(f: Filters):
+        return repo.dashboard_summary(f.start_ms, f.end_ms, filter_dict(f))
+
+    @app.get("/api/v1/dashboard/series")
+    async def dashboard_series(f: Filters):
+        return {
+            "items": repo.dashboard_series(f.start_ms, f.end_ms, filter_dict(f)),
+            "bucket_seconds": 60,
+            "units": {"rate": "observed requests/s", "latency": "ms"},
+        }
+
+    @app.get("/api/v1/dashboard/rankings")
+    async def rankings(f: Filters):
+        return repo.rankings(f.start_ms, f.end_ms, filter_dict(f))
+
+    @app.get("/api/v1/dashboard/heatmap")
+    async def heatmap(f: Filters):
+        where, args = repo._event_where(f.start_ms, f.end_ms, filter_dict(f))
+        with repo.connect() as db:
+            rows = [
+                dict(r)
+                for r in db.execute(
+                    f"SELECT service_name,(timestamp_ms/300000)*300000 bucket_ms,COUNT(*) samples,"
+                    f"ROUND(AVG(duration_us)/1000.0,1) avg_ms,SUM(status_code>=500)*1.0/COUNT(*) failure_rate "
+                    f"FROM events WHERE {where} AND span_kind='server' "
+                    f"GROUP BY service_name,bucket_ms ORDER BY samples DESC LIMIT 1200",
+                    args,
+                )
+            ]
+        return {
+            "items": rows,
+            "metric": "average latency (ms)",
+            "note": "Heatmap uses average latency for compact comparison; operation tables retain p95/p99.",
+        }
+
+    @app.get("/api/v1/accounts")
+    async def accounts(q: str | None = None, limit: int = Query(100, ge=1, le=500)):
+        with repo.connect() as db:
+            rows = [
+                dict(r)
+                for r in db.execute(
+                    "SELECT * FROM accounts WHERE (? IS NULL OR username LIKE ?) "
+                    "ORDER BY last_seen_ms DESC LIMIT ?",
+                    (q, f"%{q}%" if q else None, limit),
+                )
+            ]
+        return {
+            "items": rows,
+            "identity_caveat": "Presented request identity; not proof of a human or caller service.",
+        }
+
+    @app.get("/api/v1/accounts/{username}")
+    async def account_detail(username: str, f: Filters):
+        result = repo.account_detail(username, f.start_ms, f.end_ms)
+        if not result:
+            raise HTTPException(404, "Account not found")
+        return result
+
+    @app.get("/api/v1/events")
+    async def events(
+        f: Filters,
+        limit: int = Query(50, ge=1, le=200),
+        offset: int = Query(0, ge=0, le=1_000_000),
+    ):
+        where, args = repo._event_where(f.start_ms, f.end_ms, filter_dict(f))
+        safe_columns = (
+            "timestamp_ms,ingested_ms,trace_id,transaction_id,parent_id,service_name,environment,"
+            "node_name,service_group,service_module,operation,duration_us,sampled,outcome,http_method,"
+            "status_code,account_username,account_namespace,span_kind,event_type,peer_service,client_ip,"
+            "source_ip,attributes_json"
+        )
+        with repo.connect() as db:
+            rows = [
+                dict(r)
+                for r in db.execute(
+                    f"SELECT {safe_columns} FROM events WHERE {where} "
+                    f"ORDER BY timestamp_ms DESC LIMIT ? OFFSET ?",
+                    [*args, limit, offset],
+                )
+            ]
+        return {"items": rows, "limit": limit, "offset": offset, "partial": len(rows) == limit}
+
+
+def _register_ingestion_status_route(app: FastAPI, repo: SQLiteRepository) -> None:
+    @app.get("/api/v1/ingestion/status")
+    async def ingestion_status():
+        if storage_owner_client.enabled:
+            return await storage_owner_client.ingestion_status()
+        with repo.connect() as db:
+            count, min_ts, max_ts = db.execute(
+                "SELECT COUNT(*),MIN(timestamp_ms),MAX(timestamp_ms) FROM traces"
+            ).fetchone()
+            jobs = [dict(r) for r in db.execute("SELECT * FROM jobs ORDER BY started_at_ms DESC")]
+        return {
+            "events": count,
+            "traces": count,
+            "earliest_event_ms": min_ts,
+            "latest_event_ms": max_ts,
+            "latest_ingested_ms": None,
+            "jobs": jobs,
+            "demo_mode": settings.demo_mode,
+            "sampling_coverage": "unknown",
+            "ingest_writer": ingest_writer.snapshot(),
+        }
+
+
+def _mount_spa(app: FastAPI) -> None:
+    frontend_dist = Path(__file__).resolve().parent.parent.parent / "frontend" / "dist"
+    if (frontend_dist / "assets").is_dir():
+        app.mount("/assets", StaticFiles(directory=str(frontend_dist / "assets")), name="assets")
+
+    @app.get("/{full_path:path}")
+    async def serve_spa(full_path: str):
+        if full_path.startswith("api/"):
+            raise HTTPException(404, "Not Found")
+        target_file = frontend_dist / full_path
+        if full_path and target_file.is_file():
+            return FileResponse(str(target_file))
+        index_file = frontend_dist / "index.html"
+        if index_file.is_file():
+            return FileResponse(str(index_file))
+        return {"message": "TraceScope API is running"}
