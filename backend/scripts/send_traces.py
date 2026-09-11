@@ -30,13 +30,19 @@ from typing import Iterator, List, Dict, Any
 # Attempt import of TraceScope internals for direct mode
 TRACESCOPE_AVAILABLE = False
 try:
-    project_root = Path(__file__).resolve().parent.parent / "OtelTrace"
-    if project_root.exists():
-        sys.path.insert(0, str(project_root))
-        from backend.app.services.normalization import normalize_otel_record
-        from backend.app.repositories.trace_repository import TraceRepository
-        from backend.app.services.aggregation import aggregate_traces
-        TRACESCOPE_AVAILABLE = True
+    for candidate in [
+        Path(__file__).resolve().parents[2],
+        Path(__file__).resolve().parents[1] / "OtelTrace",
+        Path("/home/ubuntu/Viettel/OtelTrace"),
+    ]:
+        if (candidate / "backend" / "app").exists():
+            project_root = candidate
+            sys.path.insert(0, str(project_root))
+            from backend.app.services.normalization import normalize_otel_record
+            from backend.app.repositories.trace_repository import TraceRepository
+            from backend.app.services.aggregation import aggregate_traces
+            TRACESCOPE_AVAILABLE = True
+            break
 except Exception:
     TRACESCOPE_AVAILABLE = False
 
@@ -195,8 +201,16 @@ def run_direct_mode(args: argparse.Namespace):
             max_ts = max(max_ts, t.timestamp_ms) if max_ts is not None else t.timestamp_ms
 
         if len(batch) >= args.batch_size:
-            ins = repo.insert_traces(batch)
-            total_inserted += ins
+            for attempt in range(5):
+                try:
+                    ins = repo.insert_traces(batch)
+                    total_inserted += ins
+                    break
+                except Exception as e:
+                    if "locked" in str(e).lower() and attempt < 4:
+                        time.sleep(1.0 + attempt * 1.5)
+                        continue
+                    raise
             batch.clear()
             elapsed = max(0.001, time.time() - t0)
             rate = total_inserted / elapsed
@@ -206,8 +220,16 @@ def run_direct_mode(args: argparse.Namespace):
             break
 
     if batch:
-        ins = repo.insert_traces(batch)
-        total_inserted += ins
+        for attempt in range(5):
+            try:
+                ins = repo.insert_traces(batch)
+                total_inserted += ins
+                break
+            except Exception as e:
+                if "locked" in str(e).lower() and attempt < 4:
+                    time.sleep(1.0 + attempt * 1.5)
+                    continue
+                raise
         batch.clear()
 
     total_time = max(0.001, time.time() - t0)
@@ -218,6 +240,31 @@ def run_direct_mode(args: argparse.Namespace):
         print(f" Computing analytical rollups over window [{min_ts} -> {max_ts}]...")
         res = aggregate_traces(min_ts, max_ts + 60_000)
         print(f" Aggregation result: {res}")
+
+        try:
+            from backend.app.services.baseline import rebuild_baselines
+            from backend.app.services.anomaly_detection import detect_anomalies
+            from backend.app.services.principal_relationships import process_principal_intelligence
+            from backend.app.repositories.db_context import get_connection
+
+            print(" Computing rolling baselines (median & MAD per dimension)...")
+            b_count = rebuild_baselines(db_path=db_file)
+            print(f" Baselines computed: {b_count}")
+
+            print(" Evaluating anomaly rules (Detectors 1-8)...")
+            with get_connection(db_file) as db:
+                windows = [r[0] for r in db.execute("SELECT DISTINCT bucket_start FROM metric_buckets WHERE bucket_size = 300 ORDER BY bucket_start").fetchall()]
+            all_anomalies = []
+            for w in windows:
+                found = detect_anomalies(window_start_sec=w, window_end_sec=w + 300, db_path=db_file)
+                all_anomalies.extend(found)
+            print(f" Anomalies detected: {len(all_anomalies)}")
+
+            print(" Processing principal intelligence and user behavioral changes...")
+            p_res = process_principal_intelligence()
+            print(f" Principal intelligence result: {p_res}")
+        except Exception as e:
+            print(f" [!] Error during anomaly / intelligence pipeline: {e}")
     print("=" * 80)
 
 

@@ -1,0 +1,17 @@
+[Unit]
+Description=NetworkTracing bootstrap & bundle distribution server on port 30105
+After=network.target network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/home/ubuntu/Viettel/OtelTrace/bootstrap
+Environment=BOOTSTRAP_PORT=30105
+Environment=HUB_PORT=30102
+ExecStart=/usr/bin/python3 /home/ubuntu/Viettel/OtelTrace/bootstrap/nt-bootstrap.py
+Restart=always
+RestartSec=3
+LimitNOFILE=65536
+
+[Install]
+WantedBy=multi-user.target
