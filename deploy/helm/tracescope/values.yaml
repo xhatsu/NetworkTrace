@@ -169,7 +169,8 @@ ingress:
     nginx.ingress.kubernetes.io/proxy-body-size: "16m"
     nginx.ingress.kubernetes.io/proxy-read-timeout: "70"
     nginx.ingress.kubernetes.io/proxy-send-timeout: "70"
-  host: tracescope.local
+    nginx.ingress.kubernetes.io/ssl-redirect: "false"
+  host: trace.n2d.id.vn
   tls: []
 
 podDisruptionBudget:
