@@ -12,30 +12,21 @@ class AnomalyRepository:
     def save_anomalies(self, anomalies: List[AnomalyEvent]) -> None:
         if not anomalies:
             return
-        sql = """
-        INSERT INTO anomaly_events (
-          detected_at, anomaly_type, severity, score, confidence,
-          caller_service, target_service, principal_name, operation, instance,
-          baseline_value, current_value, delta_percentage, first_seen, last_seen,
-          status, acknowledged, reason_json, metadata_json
-        )
-        SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
-        WHERE NOT EXISTS (
-          SELECT 1 FROM anomaly_events
-          WHERE anomaly_type=? AND caller_service IS ? AND target_service IS ?
-            AND principal_name IS ? AND operation IS ? AND first_seen IS ? AND last_seen IS ?
-        )
-        """
+        cols = [
+            "detected_at", "anomaly_type", "severity", "score", "confidence",
+            "caller_service", "target_service", "principal_name", "source_ip", "operation", "instance",
+            "baseline_value", "current_value", "delta_percentage", "first_seen", "last_seen",
+            "status", "acknowledged", "reason_json", "metadata_json"
+        ]
+        sql = f"INSERT OR IGNORE INTO anomaly_events ({','.join(cols)}) VALUES ({','.join('?' for _ in cols)})"
         with db_transaction(self.db_path) as db:
             db.executemany(sql, [[
                 a.detected_at, a.anomaly_type, a.severity, a.score, a.confidence,
-                a.caller_service, a.target_service, a.principal_name, a.operation, a.instance,
+                a.caller_service, a.target_service, a.principal_name, a.source_ip, a.operation, getattr(a, "instance", None),
                 a.baseline_value, a.current_value, a.delta_percentage, a.first_seen, a.last_seen,
                 a.status, a.acknowledged,
-                json.dumps([r.dict() for r in a.reasons], separators=(',', ':')),
+                json.dumps([r.model_dump() for r in a.reasons], separators=(',', ':')),
                 json.dumps(a.metadata, separators=(',', ':')),
-                a.anomaly_type, a.caller_service, a.target_service,
-                a.principal_name, a.operation, a.first_seen, a.last_seen,
             ] for a in anomalies])
 
     def list_anomalies(
@@ -46,10 +37,11 @@ class AnomalyRepository:
         severity: Optional[str] = None,
         service: Optional[str] = None,
         principal: Optional[str] = None,
+        source_ip: Optional[str] = None,
         limit: int = 100
     ) -> List[Dict[str, Any]]:
         clauses = []
-        args: List[Any] = []
+        args = []
         if start_ms is not None:
             # Time filters refer to when the anomaly was observed in telemetry,
             # not when a background worker happened to evaluate the window.
@@ -68,13 +60,11 @@ class AnomalyRepository:
             clauses.append("(target_service = ? OR caller_service = ?)")
             args.extend([service, service])
         if principal:
-            clauses.append("""(principal_name = ? OR EXISTS (
-              SELECT 1 FROM json_each(
-                CASE WHEN json_valid(metadata_json) THEN metadata_json ELSE '{}' END,
-                '$.principals'
-              ) WHERE json_each.value = ?
-            ))""")
-            args.extend([principal, principal])
+            clauses.append("(principal_name = ? OR metadata_json LIKE ?)")
+            args.extend([principal, f'%"{principal}"%'])
+        if source_ip:
+            clauses.append("source_ip = ?")
+            args.append(source_ip)
 
         where = " AND ".join(clauses) if clauses else "1=1"
         sql = f"""

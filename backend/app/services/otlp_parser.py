@@ -29,15 +29,24 @@ from backend.app.services.wsse import (
 log = logging.getLogger("tracescope-hub")
 
 
-def decompress_payload(raw_body: bytes, content_encoding: Optional[str] = None) -> bytes:
-    """Decompress gzip payload if encoded or matching gzip magic bytes."""
+def decompress_payload(raw_body: bytes, content_encoding: Optional[str] = None, max_bytes: int = 40 * 1024 * 1024) -> bytes:
+    """Decompress gzip payload if encoded or matching gzip magic bytes.
+
+    Raises:
+        ValueError: If gzip compression was detected but decompression failed,
+                    or if decompressed size exceeds max_bytes.
+    """
     if not raw_body:
         return raw_body
     if (content_encoding and "gzip" in content_encoding.lower()) or raw_body.startswith(b"\x1f\x8b"):
         try:
-            return gzip.decompress(raw_body)
+            decompressed = gzip.decompress(raw_body)
         except Exception as exc:
             log.warning("gzip decompression failed: %s", exc)
+            raise ValueError(f"Invalid gzip compressed data: {exc}") from exc
+        if len(decompressed) > max_bytes:
+            raise ValueError(f"Decompressed payload exceeds maximum size limit ({max_bytes} bytes)")
+        return decompressed
     return raw_body
 
 

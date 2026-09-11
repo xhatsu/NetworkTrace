@@ -51,7 +51,7 @@ def aggregate_traces(
         # Pull raw traces grouped by 60-second window
         rows = db.execute("""
             SELECT
-              (timestamp_ms / 60000) * 60 as bucket_start,
+              (intDiv(timestamp_ms, 60000) * 60) as bucket_start,
               COALESCE(caller_service, '') as caller_service,
               target_service,
               COALESCE(principal_name, 'unknown') as principal_name,
@@ -66,7 +66,8 @@ def aggregate_traces(
     groups: Dict[tuple, Dict[str, Any]] = {}
     groups_5m: Dict[tuple, Dict[str, Any]] = {}
     for r in rows:
-        key = (r["bucket_start"], r["caller_service"], r["target_service"], r["principal_name"], r["operation"])
+        b_start_int = int(r["bucket_start"])
+        key = (b_start_int, r["caller_service"], r["target_service"], r["principal_name"], r["operation"])
         if key not in groups:
             groups[key] = {
                 "count": 0,
@@ -79,7 +80,7 @@ def aggregate_traces(
             g["errors"] += 1
         g["durations"].append(r["duration_ms"])
         key_5m = (
-            (r["bucket_start"] // 300) * 300,
+            (b_start_int // 300) * 300,
             r["caller_service"], r["target_service"],
             r["principal_name"], r["operation"],
         )
@@ -104,7 +105,7 @@ def aggregate_traces(
         p99 = percentile(durations, 0.99)
 
         bucket = MetricBucket(
-            bucket_start=b_start,
+            bucket_start=int(b_start),
             bucket_size=60,
             caller_service=caller,
             target_service=target,
@@ -166,7 +167,7 @@ def aggregate_traces(
         durations.sort()
         latency_sum = sum(durations)
         buckets_5m.append(MetricBucket(
-            bucket_start=b5_start,
+            bucket_start=int(b5_start),
             bucket_size=300,
             caller_service=caller,
             target_service=target,

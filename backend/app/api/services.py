@@ -98,9 +98,11 @@ async def get_service_detail(
             WHERE target_service = ? AND bucket_size = 60 AND bucket_start >= ? AND bucket_start < ?
         """, (service, start_sec, end_sec)).fetchone()
 
-        if not summary_row or summary_row["total_requests"] is None:
+        if not summary_row or not summary_row["total_requests"]:
             # Fallback check
             exists = db.execute("SELECT 1 FROM traces WHERE service_name = ? OR target_service = ? LIMIT 1", (service, service)).fetchone()
+            if not exists:
+                exists = db.execute("SELECT 1 FROM services WHERE name = ? LIMIT 1", (service,)).fetchone()
             if not exists:
                 raise HTTPException(status_code=404, detail="Service not found")
 

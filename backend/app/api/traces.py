@@ -14,6 +14,7 @@ async def list_traces(
     target: Optional[str] = None,
     principal: Optional[str] = None,
     operation: Optional[str] = None,
+    source_ip: Optional[str] = None,
     status: Optional[str] = None,
     trace_id: Optional[str] = None,
     limit: int = 50,
@@ -25,7 +26,7 @@ async def list_traces(
     repo = TraceRepository()
     rows = repo.list_traces(
         start_ms=start_ms, end_ms=end_ms, service=service, caller=caller,
-        target=target, principal=principal, operation=operation, status=status,
+        target=target, principal=principal, operation=operation, source_ip=source_ip, status=status,
         trace_id=trace_id, limit=limit, offset=offset
     )
     return {"items": rows, "count": len(rows)}

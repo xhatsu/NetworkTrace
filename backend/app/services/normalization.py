@@ -26,6 +26,55 @@ def _is_networktracing_event(document: dict[str, Any]) -> bool:
     )
 
 
+def _is_trusted_proxy(ip: Optional[str]) -> bool:
+    if not ip:
+        return False
+    clean = ip.strip()
+    return (
+        clean in {"127.0.0.1", "::1", "localhost"}
+        or clean.startswith("10.")
+        or clean.startswith("192.168.")
+        or any(clean.startswith(f"172.{i}.") for i in range(16, 32))
+        or "proxy" in clean.lower()
+        or "gateway" in clean.lower()
+    )
+
+
+def derive_source_group(ip: Optional[str]) -> Optional[str]:
+    if not ip or ip in {"unknown", ""}:
+        return None
+    parts = ip.strip().split(".")
+    if len(parts) == 4 and all(p.isdigit() for p in parts):
+        return f"{parts[0]}.{parts[1]}.{parts[2]}.0/24"
+    if ":" in ip:
+        colon_parts = ip.strip().split(":")
+        if len(colon_parts) >= 4:
+            return ":".join(colon_parts[:4]) + "::/64"
+    return "gateway" if "gateway" in ip.lower() else "other"
+
+
+def normalize_operation_key(target_service: str, raw_op: str, rpc_method: Optional[str] = None) -> str:
+    if rpc_method and str(rpc_method).strip():
+        svc = target_service.split("/")[-1].replace("-", "") if target_service and target_service != "unknown" else "Service"
+        return f"{svc}/{str(rpc_method).strip()}"
+    if not raw_op or raw_op == "unknown":
+        return "unknown"
+    cleaned = raw_op.strip()
+    if cleaned.upper().startswith(("GET ", "POST ", "PUT ", "DELETE ", "PATCH ", "HEAD ", "OPTIONS ")):
+        parts = cleaned.split(None, 1)
+        cleaned = parts[1].strip() if len(parts) > 1 else cleaned
+    cleaned = re.sub(r'/[0-9a-fA-F-]{16,}', '/{id}', cleaned)
+    cleaned = re.sub(r'/\d+', '/{id}', cleaned)
+    cleaned = cleaned.lstrip("/")
+    if "/" in cleaned:
+        segments = [s for s in cleaned.split("/") if s]
+        if len(segments) >= 2:
+            return f"{segments[0]}/{segments[-1]}"
+        elif len(segments) == 1:
+            return f"{target_service}/{segments[0]}" if target_service and target_service != "unknown" else segments[0]
+    return f"{target_service}/{cleaned}" if target_service and target_service != "unknown" else cleaned
+
+
 def _safe_number(value: Any, default: float = 0.0) -> float:
     try:
         return float(value)
@@ -224,19 +273,30 @@ def normalize_otel_record(raw: dict[str, Any], source_label: str = "import") -> 
     except Exception:
         target_port = None
 
-    # Caller and Target Services
+    # Caller and Target Services & Resolution
     if span_kind == "client":
         caller_service = service_name
         target_service = peer_service or "unknown"
+        caller_resolution_method = "client_span"
+        caller_confidence = 1.0
     else:
-        caller_service = peer_service
         target_service = service_name
+        if peer_service:
+            caller_service = peer_service
+            caller_resolution_method = "trace_parent" if parent_span_id else "header"
+            caller_confidence = 1.0 if parent_span_id else 0.8
+        elif peer_address or client_ip:
+            caller_service = None
+            caller_resolution_method = "network_ip"
+            caller_confidence = 0.4
+        else:
+            caller_service = None
+            caller_resolution_method = "none"
+            caller_confidence = 0.0
 
     # Principal extraction. Credential-bearing inputs are read only in memory and
     # are never copied into attributes_json.
     auth_header = pick("labels.http_request_header_authorization", "http.request.headers.authorization", "authorization")
-    # Non-header user attributes will be implemented later:
-    # fallback_user = pick("enduser.id", "user.name", "user.id", "account.username")
     principal_name = extract_principal(auth_header, fallback_user=None)
     auth_scheme = "basic" if principal_name != "unknown" else None
     if principal_name == "unknown":
@@ -258,6 +318,79 @@ def normalize_otel_record(raw: dict[str, Any], source_label: str = "import") -> 
             principal_name = str(legacy_user).strip()[:200]
             supplied_scheme = str(pick("scheme", default="")).strip().lower()
             auth_scheme = supplied_scheme if supplied_scheme in {"basic", "wsse"} else None
+
+    # Stable Principal ID
+    principal_id = f"{environment}:{principal_name}"
+
+    # Identity Source
+    if auth_scheme == "wsse":
+        identity_source = "wsse_username"
+    elif auth_scheme == "basic":
+        identity_source = "basic_auth"
+    elif is_network_event and principal_name != "unknown":
+        identity_source = "legacy_agent"
+    elif principal_name != "unknown":
+        identity_source = "application_header"
+    else:
+        identity_source = "anonymous"
+
+    # Explicit Authentication Result & Evidence (DO NOT infer from HTTP 200 or 500)
+    soap_fault_raw = pick("soap.fault.code", "soap_fault_code", "faultcode", "error.code")
+    soap_fault_code = str(soap_fault_raw).strip() if soap_fault_raw else None
+    sec_fault_keywords = ["failedauthentication", "securityfault", "invalidsecurity", "failedcheck", "badcontexttoken"]
+    is_sec_fault = soap_fault_code and any(k in soap_fault_code.lower() for k in sec_fault_keywords)
+
+    sec_event_raw = pick("security.event", "event.category", "auth.result", "security.auth.result", "authentication.result")
+    sec_event_str = str(sec_event_raw).strip().lower() if sec_event_raw else ""
+
+    if is_sec_fault:
+        auth_result = "failure"
+        auth_evidence = f"soap_security_fault:{soap_fault_code}"
+    elif sec_event_str:
+        if any(k in sec_event_str for k in ["fail", "denied", "reject"]):
+            auth_result = "failure"
+            auth_evidence = f"security_event:{sec_event_raw}"
+        elif any(k in sec_event_str for k in ["success", "allow", "ok"]):
+            auth_result = "success"
+            auth_evidence = f"security_event:{sec_event_raw}"
+        else:
+            auth_result = "unknown"
+            auth_evidence = "unknown"
+    else:
+        auth_result = "unknown"
+        auth_evidence = "unknown"
+
+    # Client IP, Forwarded IP, and Source Group
+    network_peer_ip = peer_address or client_ip
+    forwarded_for = pick("x_forwarded_for", "http.request.headers.x-forwarded-for")
+    if forwarded_for and _is_trusted_proxy(peer_address):
+        original_client_ip = str(forwarded_for).split(",")[0].strip()
+        original_client_ip_trusted = 1
+    else:
+        original_client_ip = client_ip or network_peer_ip
+        original_client_ip_trusted = 0
+    source_group = derive_source_group(original_client_ip)
+
+    # Operation Key Normalization
+    rpc_method = pick("rpc.method", "soap.action", "soap_action", "operation_name")
+    operation_key = normalize_operation_key(target_service, operation, rpc_method)
+
+    # Outcome Class
+    if http_status:
+        if http_status >= 500: outcome_class = "5xx"
+        elif http_status >= 400: outcome_class = "4xx"
+        elif http_status >= 300: outcome_class = "3xx"
+        elif http_status >= 200: outcome_class = "2xx"
+        else: outcome_class = "other"
+    elif outcome == "failure":
+        outcome_class = "failure"
+    elif outcome == "success":
+        outcome_class = "success"
+    else:
+        outcome_class = "unknown"
+
+    sampling_context = str(pick("sampling.policy", "sampling_context", default="")) or None
+    dedup_key = f"{environment}:{trace_id}:{span_id}"
 
     # Secondary / Contextual Attributes
     extra: dict[str, Any] = {}
@@ -289,6 +422,11 @@ def normalize_otel_record(raw: dict[str, Any], source_label: str = "import") -> 
 
     if auth_scheme:
         extra["auth_scheme"] = auth_scheme
+    if identity_source != "unknown":
+        extra["identity_source"] = identity_source
+    if auth_result != "unknown":
+        extra["auth_result"] = auth_result
+        extra["auth_evidence"] = auth_evidence
 
     for key, tgt in [
         ("labels.http_request_content_length", "request_bytes"),
@@ -337,4 +475,20 @@ def normalize_otel_record(raw: dict[str, Any], source_label: str = "import") -> 
         span_kind=span_kind,
         attributes_json=attributes_json,
         created_at=int(time.time() * 1000),
+        environment=environment,
+        principal_id=principal_id,
+        identity_source=identity_source,
+        auth_result=auth_result,
+        auth_evidence=auth_evidence,
+        caller_resolution_method=caller_resolution_method,
+        caller_confidence=caller_confidence,
+        network_peer_ip=network_peer_ip,
+        original_client_ip=original_client_ip,
+        original_client_ip_trusted=original_client_ip_trusted,
+        source_group=source_group,
+        operation_key=operation_key,
+        soap_fault_code=soap_fault_code,
+        outcome_class=outcome_class,
+        sampling_context=sampling_context,
+        dedup_key=dedup_key,
     )

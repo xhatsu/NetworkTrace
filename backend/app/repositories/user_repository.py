@@ -32,13 +32,13 @@ class UserRepository:
             clauses, args = ["1=1"], []
             if search:
                 like = f"%{search}%"
-                clauses.append("""(p.principal_name LIKE ? OR EXISTS(
-                  SELECT 1 FROM principal_relationships sr WHERE sr.principal_name=p.principal_name
-                  AND (sr.source_ip LIKE ? OR sr.caller_service LIKE ? OR sr.target_service LIKE ? OR sr.operation LIKE ?)))""")
+                clauses.append("""(p.principal_name LIKE ? OR p.principal_name IN (
+                  SELECT principal_name FROM principal_relationships
+                  WHERE source_ip LIKE ? OR caller_service LIKE ? OR target_service LIKE ? OR operation LIKE ?))""")
                 args.extend([like] * 5)
-            for value, sql in ((caller, "EXISTS(SELECT 1 FROM principal_callers x WHERE x.principal_name=p.principal_name AND x.caller_service=?)"),
-                               (target, "EXISTS(SELECT 1 FROM principal_targets x WHERE x.principal_name=p.principal_name AND x.target_service=?)"),
-                               (source_ip, "EXISTS(SELECT 1 FROM principal_sources x WHERE x.principal_name=p.principal_name AND x.source_ip=?)")):
+            for value, sql in ((caller, "p.principal_name IN (SELECT principal_name FROM principal_callers WHERE caller_service=?)"),
+                               (target, "p.principal_name IN (SELECT principal_name FROM principal_targets WHERE target_service=?)"),
+                               (source_ip, "p.principal_name IN (SELECT principal_name FROM principal_sources WHERE source_ip=?)")):
                 if value:
                     clauses.append(sql); args.append(value)
             if active == "active": clauses.append("p.last_seen>=?"); args.append(active_cutoff)
@@ -47,43 +47,73 @@ class UserRepository:
                                              (last_from, ">=", "last_seen"), (last_to, "<", "last_seen")):
                 if value is not None: clauses.append(f"p.{column}{operator}?"); args.append(value)
             if environment:
-                clauses.append("EXISTS(SELECT 1 FROM traces et WHERE et.principal_name=p.principal_name AND et.service_environment=?)")
+                clauses.append("p.principal_name IN (SELECT principal_name FROM traces WHERE service_environment=?)")
                 args.append(environment)
-            change_expr = "COALESCE((SELECT COUNT(*) FROM principal_change_events ce WHERE ce.principal_name=p.principal_name AND ce.detected_at>=? AND ce.detected_at<? AND ce.status NOT IN ('expected','ignored')),0)"
-            score_expr = """COALESCE((SELECT MIN(100,SUM(type_score)) FROM (
-              SELECT MAX(score) type_score FROM principal_change_events ce
-              WHERE ce.principal_name=p.principal_name AND ce.detected_at>=? AND ce.detected_at<?
-                AND ce.status NOT IN ('expected','ignored') GROUP BY ce.change_type
-            )),0)"""
-            select_args = [start, end, start, end]
-            if has_changes is True: clauses.append(change_expr + ">0"); args.extend([start, end])
-            if has_changes is False: clauses.append(change_expr + "=0"); args.extend([start, end])
+
+            if has_changes is True:
+                clauses.append("coalesce(c.recent_changes, 0) > 0")
+            elif has_changes is False:
+                clauses.append("coalesce(c.recent_changes, 0) = 0")
+
             level_bounds = {"low": (0, 24), "medium": (25, 59), "high": (60, 100)}
             if behavior_level in level_bounds:
                 lo, hi = level_bounds[behavior_level]
-                clauses.append(score_expr + " BETWEEN ? AND ?"); args.extend([start, end, lo, hi])
+                clauses.append("coalesce(c.behavior_score, 0) BETWEEN ? AND ?")
+                args.extend([lo, hi])
+
             order = {
                 "most_active": "p.total_requests DESC", "most_changed": "behavior_score DESC",
                 "most_target_services": "p.unique_targets DESC", "most_operations": "p.unique_operations DESC",
                 "newest": "p.first_seen DESC", "dormant_returned": "dormant_reactivated DESC,p.last_seen DESC",
                 "highest_behavior_change": "behavior_score DESC,p.last_seen DESC",
             }.get(sort, "p.total_requests DESC")
+
+            from_clause = """
+              principals p
+              LEFT JOIN (
+                SELECT
+                    principal_name,
+                    count() AS recent_changes,
+                    least(100, sum(type_score)) AS behavior_score,
+                    max(if(change_type = 'DORMANT_REACTIVATED', 1, 0)) AS dormant_reactivated
+                FROM (
+                    SELECT
+                        principal_name,
+                        change_type,
+                        max(score) AS type_score
+                    FROM principal_change_events
+                    WHERE detected_at >= ? AND detected_at < ? AND status NOT IN ('expected', 'ignored')
+                    GROUP BY principal_name, change_type
+                )
+                GROUP BY principal_name
+              ) c ON p.principal_name = c.principal_name
+              LEFT JOIN (
+                SELECT principal_name, count() as baseline_values
+                FROM principal_baselines
+                GROUP BY principal_name
+              ) b ON p.principal_name = b.principal_name
+            """
+            join_args = [start, end]
             sql = f"""
               SELECT p.*,
-                CASE WHEN p.last_seen>=? THEN 'Active' ELSE 'Inactive' END status,
-                {change_expr} recent_changes,{score_expr} behavior_score,
-                (SELECT COUNT(*) FROM principal_baselines pb WHERE pb.principal_name=p.principal_name) baseline_values,
-                EXISTS(SELECT 1 FROM principal_change_events d WHERE d.principal_name=p.principal_name AND d.change_type='DORMANT_REACTIVATED' AND d.detected_at>=? AND d.detected_at<?) dormant_reactivated
-              FROM principals p WHERE {' AND '.join(clauses)} ORDER BY {order} LIMIT ? OFFSET ?
+                if(p.last_seen >= ?, 'Active', 'Inactive') status,
+                coalesce(c.recent_changes, 0) recent_changes,
+                coalesce(c.behavior_score, 0) behavior_score,
+                coalesce(b.baseline_values, 0) baseline_values,
+                coalesce(c.dormant_reactivated, 0) dormant_reactivated
+              FROM {from_clause}
+              WHERE {' AND '.join(clauses)}
+              ORDER BY {order} LIMIT ? OFFSET ?
             """
-            rows = [dict(r) for r in db.execute(sql, [active_cutoff, *select_args, start, end, *args, limit, offset])]
+            rows = [dict(r) for r in db.execute(sql, [active_cutoff, *join_args, *args, limit, offset])]
             for row in rows:
                 score = int(row.get("behavior_score") or 0)
                 row["behavior_level"] = "High" if score >= 60 else "Medium" if score >= 25 else "Low"
                 row["learning_status"] = "established" if row.get("baseline_values") else "learning"
                 row["status_basis"] = "dataset_latest"
                 row["reference_time_ms"] = latest
-            count = db.execute(f"SELECT COUNT(*) FROM principals p WHERE {' AND '.join(clauses)}", args).fetchone()[0]
+            count_sql = f"SELECT COUNT(*) FROM {from_clause} WHERE {' AND '.join(clauses)}"
+            count = db.execute(count_sql, [*join_args, *args]).fetchone()[0]
             return {"items": rows, "count": count, "limit": limit, "offset": offset,
                     "window": {"from": start, "to": end}}
 
@@ -221,18 +251,120 @@ class UserRepository:
             return {"items": rows, "count": count, "total_unfiltered": total_unfiltered, "fallback_applied": False, "limit": limit, "offset": offset}
 
     def update_change(self, change_id: int, status: str) -> dict[str, Any] | None:
+        return self.review_change(change_id, action="expected" if status == "expected" else "investigate" if status == "reviewed" else "data_quality" if status == "ignored" else "investigate")
+
+    def review_change(self, change_id: int, action: str, scope: str | None = None,
+                      reason: str | None = None, operator: str = "operator",
+                      expires_at: int | None = None) -> dict[str, Any] | None:
+        now = int(time.time() * 1000)
         with db_transaction(self.db_path) as db:
             row = db.execute("SELECT * FROM principal_change_events WHERE id=?", (change_id,)).fetchone()
-            if not row: return None
-            db.execute("UPDATE principal_change_events SET status=?,updated_at=? WHERE id=?", (status,int(time.time()*1000),change_id))
-            if status == "expected":
-                mapping = {"NEW_CALLER": ("caller",row["caller_service"]), "NEW_SOURCE_IP": ("source",row["source_ip"]),
-                           "NEW_TARGET": ("target",row["target_service"]), "NEW_OPERATION": ("operation",f"{row['target_service']}→{row['operation']}")}
-                if row["change_type"] in mapping:
-                    dimension, value = mapping[row["change_type"]]
+            if not row:
+                return None
+            row_dict = dict(row)
+            status = "expected" if action == "expected" else "reviewed" if action == "investigate" else "ignored"
+            category = "data_quality" if action == "data_quality" else row_dict.get("category", "behavioral")
+
+            table_cols = {r[1] for r in db.execute("PRAGMA table_info(principal_change_events)").fetchall()}
+            if "reviewed_by" in table_cols:
+                db.execute("""
+                    UPDATE principal_change_events SET
+                      status = ?, category = ?, reviewed_by = ?, review_reason = ?,
+                      expires_at = ?, updated_at = ?
+                    WHERE id = ?
+                """, (status, category, operator, reason or action, expires_at, now, change_id))
+            else:
+                db.execute("UPDATE principal_change_events SET status = ?, updated_at = ? WHERE id = ?",
+                           (status, now, change_id))
+
+            if action == "expected":
+                scope_type = scope or "change_rule"
+                scope_val = f"{row_dict.get('principal_id') or row_dict['principal_name']}|{row_dict['change_type']}|{row_dict.get('new_value') or ''}"
+                db.execute("""
+                    INSERT INTO operator_overrides (scope_type, scope_value, reason, operator, created_at, expires_at)
+                    VALUES (?, ?, ?, ?, ?, ?)
+                """, (scope_type, scope_val, reason or "Operator marked as expected change", operator, now, expires_at))
+                mapping = {"NEW_CALLER": ("caller", row_dict["caller_service"]), "NEW_SOURCE_IP": ("source", row_dict["source_ip"]),
+                           "NEW_TARGET": ("target", row_dict["target_service"]), "NEW_OPERATION": ("operation", f"{row_dict['target_service']}→{row_dict['operation']}")}
+                if row_dict["change_type"] in mapping:
+                    dimension, value = mapping[row_dict["change_type"]]
                     db.execute("INSERT OR IGNORE INTO principal_baselines VALUES(?,?,?,?,?,?,?)",
-                               (row["principal_name"],dimension,value or "",row["first_observed"],row["first_observed"],1,0.0))
-            return {"id": change_id, "status": status}
+                               (row_dict["principal_name"], dimension, value or "", row_dict["first_observed"], row_dict["first_observed"], 1, 0.0))
+
+            incident_id = row_dict.get("incident_id")
+            if incident_id:
+                if action == "investigate":
+                    db.execute("UPDATE incidents SET status = 'investigating', updated_at = ? WHERE incident_id = ?", (now, incident_id))
+                elif action == "expected":
+                    db.execute("UPDATE incidents SET status = 'accepted', updated_at = ? WHERE incident_id = ?", (now, incident_id))
+                try:
+                    from backend.app.services.behavioral_engine import recalculate_incident_score
+                    recalculate_incident_score(db, incident_id)
+                except Exception:
+                    pass
+
+            return {"id": change_id, "status": status, "action": action, "operator": operator}
+
+    def list_incidents(self, *, principal_id: str | None = None, status: str | None = None,
+                       priority: str | None = None, category: str | None = None,
+                       start_ms: int | None = None, end_ms: int | None = None,
+                       limit: int = 50, offset: int = 0) -> dict[str, Any]:
+        clauses, args = ["1=1"], []
+        if principal_id:
+            clauses.append("(principal_id = ? OR principal_id LIKE ?)")
+            args.extend([principal_id, f"%:{principal_id}"])
+        if status:
+            clauses.append("status = ?")
+            args.append(status)
+        if priority:
+            clauses.append("priority = ?")
+            args.append(priority)
+        if category:
+            clauses.append("category = ?")
+            args.append(category)
+        if start_ms is not None:
+            clauses.append("started_at >= ?")
+            args.append(start_ms)
+        if end_ms is not None:
+            clauses.append("started_at < ?")
+            args.append(end_ms)
+
+        where = " AND ".join(clauses)
+        with get_connection(self.db_path) as db:
+            rows = [dict(r) for r in db.execute(f"SELECT * FROM incidents WHERE {where} ORDER BY started_at DESC LIMIT ? OFFSET ?", [*args, limit, offset])]
+            count = db.execute(f"SELECT COUNT(*) FROM incidents WHERE {where}", args).fetchone()[0]
+            for row in rows:
+                for col in ("family_scores", "contributing_event_ids", "suppressed_contributions"):
+                    col_json = f"{col}_json"
+                    if col_json in row:
+                        try:
+                            row[col] = json.loads(row.pop(col_json))
+                        except Exception:
+                            row[col] = {} if "scores" in col else []
+            return {"items": rows, "count": count, "limit": limit, "offset": offset}
+
+    def get_incident(self, incident_id: str) -> dict[str, Any] | None:
+        with get_connection(self.db_path) as db:
+            row = db.execute("SELECT * FROM incidents WHERE incident_id = ?", (incident_id,)).fetchone()
+            if not row:
+                return None
+            inc = dict(row)
+            for col in ("family_scores", "contributing_event_ids", "suppressed_contributions"):
+                col_json = f"{col}_json"
+                if col_json in inc:
+                    try:
+                        inc[col] = json.loads(inc.pop(col_json))
+                    except Exception:
+                        inc[col] = {} if "scores" in col else []
+            events = [dict(r) for r in db.execute("SELECT * FROM principal_change_events WHERE incident_id = ? ORDER BY detected_at ASC", (incident_id,)).fetchall()]
+            for ev in events:
+                if "reason_json" in ev:
+                    try:
+                        ev["reason"] = json.loads(ev.pop("reason_json"))
+                    except Exception:
+                        ev["reason"] = {}
+            inc["events"] = events
+            return inc
 
     def update_principal_type(self, principal: str, principal_type: str) -> bool:
         with db_transaction(self.db_path) as db:
@@ -247,13 +379,22 @@ class UserRepository:
         if start_ms is not None: clauses.append("r.last_seen>=?"); args.append(start_ms)
         if end_ms is not None: clauses.append("r.first_seen<?"); args.append(end_ms)
         with get_connection(self.db_path) as db:
-            rows = db.execute(f"""SELECT r.caller_service,r.principal_name,r.target_service,
-              SUM(r.observation_count) requests,MAX(r.last_seen) last_seen,
-              EXISTS(SELECT 1 FROM principal_change_events c WHERE c.principal_name=r.principal_name
-                AND c.status='new' AND ((c.change_type='NEW_CALLER' AND c.caller_service=r.caller_service)
-                  OR (c.change_type='NEW_TARGET' AND c.target_service=r.target_service))) changed
+            base_rows = db.execute(f"""SELECT r.caller_service,r.principal_name,r.target_service,
+              SUM(r.observation_count) requests,MAX(r.last_seen) last_seen
               FROM principal_relationships r WHERE {' AND '.join(clauses)}
               GROUP BY r.caller_service,r.principal_name,r.target_service ORDER BY requests DESC LIMIT ?""", [*args,limit]).fetchall()
+            changes_rows = db.execute("""
+              SELECT principal_name, caller_service, target_service, change_type
+              FROM principal_change_events
+              WHERE status='new' AND change_type IN ('NEW_CALLER', 'NEW_TARGET')
+            """).fetchall()
+            caller_changes = {(r["principal_name"], r["caller_service"]) for r in changes_rows if r["change_type"] == "NEW_CALLER"}
+            target_changes = {(r["principal_name"], r["target_service"]) for r in changes_rows if r["change_type"] == "NEW_TARGET"}
+            rows = []
+            for r in base_rows:
+                d = dict(r)
+                d["changed"] = 1 if ((d["principal_name"], d["caller_service"]) in caller_changes or (d["principal_name"], d["target_service"]) in target_changes) else 0
+                rows.append(d)
         nodes: dict[str, dict[str, Any]] = {}
         edges = []
         for row in rows:
@@ -275,10 +416,32 @@ class UserRepository:
                 "most_active": rows("total_requests DESC"), "most_callers": rows("unique_callers DESC"),
                 "most_sources": rows("unique_sources DESC"), "most_targets": rows("unique_targets DESC"),
                 "most_operations": rows("unique_operations DESC"), "newest": rows("first_seen DESC"),
-                "most_changed": [dict(r) for r in db.execute("SELECT p.*,COUNT(c.id) changes,SUM(c.score) behavior_score FROM principals p JOIN principal_change_events c USING(principal_name) WHERE c.status NOT IN ('expected','ignored') GROUP BY p.principal_name ORDER BY behavior_score DESC LIMIT 10")],
+                "most_changed": [dict(r) for r in db.execute("""
+                    SELECT p.*, c.changes, c.behavior_score
+                    FROM principals p
+                    JOIN (
+                        SELECT principal_name, count() as changes, sum(score) as behavior_score
+                        FROM principal_change_events
+                        WHERE status NOT IN ('expected', 'ignored')
+                        GROUP BY principal_name
+                    ) c ON p.principal_name = c.principal_name
+                    ORDER BY c.behavior_score DESC
+                    LIMIT 10
+                """)],
                 "shared_credentials": [dict(r) for r in db.execute("SELECT principal_name,COUNT(*) callers,SUM(observation_count) requests FROM principal_callers GROUP BY principal_name HAVING callers>1 ORDER BY callers DESC LIMIT 20")],
                 "source_diversity": rows("unique_sources DESC"),
-                "dormant_reactivated": [dict(r) for r in db.execute("SELECT p.*,MAX(c.detected_at) reactivated_at FROM principals p JOIN principal_change_events c USING(principal_name) WHERE c.change_type='DORMANT_REACTIVATED' GROUP BY p.principal_name ORDER BY reactivated_at DESC LIMIT 20")],
+                "dormant_reactivated": [dict(r) for r in db.execute("""
+                    SELECT p.*, c.reactivated_at
+                    FROM principals p
+                    JOIN (
+                        SELECT principal_name, max(detected_at) as reactivated_at
+                        FROM principal_change_events
+                        WHERE change_type = 'DORMANT_REACTIVATED'
+                        GROUP BY principal_name
+                    ) c ON p.principal_name = c.principal_name
+                    ORDER BY c.reactivated_at DESC
+                    LIMIT 20
+                """)],
             }
 
     def service_users(self, service: str, start_ms: int | None, end_ms: int | None) -> list[dict[str, Any]]:
@@ -289,7 +452,7 @@ class UserRepository:
             return [dict(r) for r in db.execute(f"""SELECT principal_name,COUNT(*) requests,
               COUNT(DISTINCT caller_service) callers,COUNT(DISTINCT operation) operations,
               MIN(timestamp_ms) first_seen,MAX(timestamp_ms) last_seen,
-              EXISTS(SELECT 1 FROM principal_change_events c WHERE c.principal_name=traces.principal_name AND c.target_service=?) recent_change
+              principal_name IN (SELECT principal_name FROM principal_change_events WHERE target_service=?) recent_change
               FROM traces WHERE principal_name<>'unknown' AND {' AND '.join(clauses)}
               GROUP BY principal_name ORDER BY requests DESC""", [service,*args])]
 

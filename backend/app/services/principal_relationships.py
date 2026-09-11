@@ -7,23 +7,25 @@ from typing import Any, Optional
 
 from backend.config import settings
 from backend.app.repositories.db_context import db_transaction, get_connection
-
-
-CHANGE_SCORES = {
-    "USERNAME_FIRST_SEEN": 10,
-    "NEW_CALLER": 30,
-    "NEW_SOURCE_IP": 20,
-    "NEW_TARGET": 25,
-    "NEW_OPERATION": 15,
-    "NEW_RELATIONSHIP": 15,
-    "DORMANT_REACTIVATED": 40,
-    "UNUSUAL_TIME": 10,
-    "CALLER_EXPANSION": 30,
-    "TARGET_EXPANSION": 25,
-    "OPERATION_EXPANSION": 15,
-    "RELATIONSHIP_REAPPEARED": 25,
-    "RELATIONSHIP_DISAPPEARED": 15,
-}
+from backend.app.services.behavioral_engine import (
+    CHANGE_SCORES,
+    EVENT_SCORES,
+    EVENT_FAMILY,
+    FAMILY_CAPS,
+    BASE_IMPORTANCE,
+    emit_behavioral_change,
+    evaluate_readiness,
+    record_historical_observation,
+    record_candidate_behavior,
+    detect_operation_mix_shift,
+    detect_caller_principal_switch,
+    detect_target_fanout_surge,
+    detect_source_fanout_surge,
+    detect_principal_rate_surge,
+    detect_explicit_auth_anomalies,
+    detect_telemetry_quality_gates,
+)
+from backend.app.services.normalization import _is_trusted_proxy, derive_source_group
 
 
 def _severity(score: int) -> str:
@@ -33,26 +35,30 @@ def _severity(score: int) -> str:
 def _emit(db, *, principal: str, change_type: str, observed: int,
           caller: str = "", source: str = "", target: str = "",
           operation: str = "", old: str = "", new: str = "",
-          reason: dict[str, Any] | None = None, recurrence: str = "") -> None:
-    score = CHANGE_SCORES[change_type]
-    identity = "|".join((principal, change_type, caller, source, target, operation, recurrence))
-    fingerprint = hashlib.sha256(identity.encode()).hexdigest()
-    explanation = reason or {
-        "summary": change_type.replace("_", " ").title(),
-        "evidence": {"old": old or None, "new": new or None},
-        "framing": "Behavior change; review operational context before classification.",
-    }
-    now = int(time.time() * 1000)
-    db.execute("""
-      INSERT OR IGNORE INTO principal_change_events(
-        fingerprint,principal_name,change_type,severity,score,detected_at,
-        caller_service,source_ip,target_service,operation,old_value,new_value,
-        first_observed,reason_json,status,updated_at
-      ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
-    """, (fingerprint, principal, change_type, _severity(score), score, observed,
-          caller or None, source or None, target or None, operation or None,
-          old or None, new or None, observed,
-          json.dumps(explanation, separators=(",", ":")), "new", now))
+          reason: dict[str, Any] | None = None, recurrence: str = "",
+          principal_id: str = "") -> None:
+    # Rename legacy NEW_USER_ON_IP to NEW_PRINCIPAL_ON_SOURCE
+    if change_type == "NEW_USER_ON_IP":
+        change_type = "NEW_PRINCIPAL_ON_SOURCE"
+
+    pid = principal_id or f"production:{principal}"
+    summary = None
+    if reason and isinstance(reason, dict) and "summary" in reason:
+        summary = reason["summary"]
+
+    emit_behavioral_change(
+        db,
+        principal_id=pid,
+        change_type=change_type,
+        detected_at=observed,
+        caller_service=caller,
+        source_ip=source,
+        target_service=target,
+        operation=operation,
+        old_value=old,
+        new_value=new,
+        custom_summary=summary,
+    )
 
 
 def _upsert_dimension(db, table: str, column: str, principal: str, value: str,
@@ -134,19 +140,19 @@ def _bootstrap(db, ratio: float) -> dict[str, int]:
       DO UPDATE SET first_seen=excluded.first_seen,last_seen=excluded.last_seen,
         observation_count=excluded.observation_count,success_count=excluded.success_count,error_count=excluded.error_count
     """)
-    for table, column, expression, extra in (
-        ("principal_callers", "caller_service", "caller_service", ""),
-        ("principal_sources", "source_ip", "caller_ip", ""),
-        ("principal_targets", "target_service", "target_service", ",SUM(CASE WHEN http_status>=400 OR outcome='failure' THEN 1 ELSE 0 END)"),
+    for table, column, expression, col_extra, expr_extra in (
+        ("principal_callers", "caller_service", "caller_service", "", ""),
+        ("principal_sources", "source_ip", "caller_ip", "", ""),
+        ("principal_targets", "target_service", "target_service", ",error_count", ",SUM(CASE WHEN http_status>=400 OR outcome='failure' THEN 1 ELSE 0 END)"),
     ):
         db.execute(f"""
-          INSERT INTO {table}(principal_name,{column},first_seen,last_seen,observation_count{',error_count' if extra else ''})
-          SELECT principal_name,{expression},MIN(timestamp_ms),MAX(timestamp_ms),COUNT(*){extra}
+          INSERT INTO {table}(principal_name,{column},first_seen,last_seen,observation_count{col_extra})
+          SELECT principal_name,{expression},MIN(timestamp_ms),MAX(timestamp_ms),COUNT(*){expr_extra}
           FROM traces WHERE principal_name<>'unknown' AND COALESCE({expression},'')<>''
           GROUP BY principal_name,{expression}
           ON CONFLICT(principal_name,{column}) DO UPDATE SET first_seen=excluded.first_seen,
             last_seen=excluded.last_seen,observation_count=excluded.observation_count
-            {',error_count=excluded.error_count' if extra else ''}
+            {',error_count=excluded.error_count' if col_extra else ''}
         """)
     db.execute("""
       INSERT INTO principal_operations(principal_name,target_service,operation,first_seen,last_seen,observation_count,error_count)
@@ -190,21 +196,21 @@ def _bootstrap(db, ratio: float) -> dict[str, int]:
         db.execute(f"""
           INSERT INTO principal_baselines(principal_name,dimension_type,dimension_value,first_seen,last_seen,observation_count,distribution_share)
           SELECT principal_name,?,{expression},MIN(timestamp_ms),MAX(timestamp_ms),COUNT(*),
-            COUNT(*)*1.0/(SELECT COUNT(*) FROM traces total WHERE total.principal_name=traces.principal_name AND total.timestamp_ms<=?)
+            COUNT(*)*1.0/SUM(COUNT(*)) OVER (PARTITION BY principal_name)
           FROM traces WHERE principal_name<>'unknown' AND timestamp_ms<=? AND {condition}
           GROUP BY principal_name,{expression}
           ON CONFLICT(principal_name,dimension_type,dimension_value) DO UPDATE SET
             first_seen=excluded.first_seen,last_seen=excluded.last_seen,observation_count=excluded.observation_count,
             distribution_share=excluded.distribution_share
-        """, (dimension, cutoff, cutoff))
+        """, (dimension, cutoff))
 
     before = db.total_changes
     for principal, first_seen in db.execute(
         "SELECT principal_name,first_seen FROM principals WHERE first_seen>?", (cutoff,)
     ).fetchall():
         _emit(db, principal=principal, change_type="USERNAME_FIRST_SEEN", observed=first_seen,
-              new=principal, reason={"summary": f"{principal} first appeared after the historical baseline window.",
-              "evidence": {"first_seen": first_seen}, "framing": "Newly observed identity; not automatically suspicious."})
+              new=principal, reason={"summary": f"{principal} first appeared after the historical baseline window."})
+
     dimension_events = (
         ("principal_callers", "caller_service", "caller", "NEW_CALLER"),
         ("principal_sources", "source_ip", "source", "NEW_SOURCE_IP"),
@@ -216,17 +222,35 @@ def _bootstrap(db, ratio: float) -> dict[str, int]:
         ).fetchall():
             kwargs = {"caller": value} if dimension == "caller" else {"source": value} if dimension == "source" else {"target": value}
             _emit(db, principal=principal, change_type=event_type, observed=first_seen, new=value, **kwargs)
+
+    # Check for dedicated IPs accessed by novel users post-cutoff (excluding shared proxies)
+    for principal, source, first_seen in db.execute("""
+        SELECT DISTINCT ps.principal_name, ps.source_ip, ps.first_seen
+        FROM principal_sources ps
+        INNER JOIN principal_baselines pb
+          ON ps.source_ip = pb.dimension_value
+        WHERE ps.first_seen > ?
+          AND pb.dimension_type = 'source'
+          AND pb.principal_name <> ps.principal_name
+    """, (cutoff,)).fetchall():
+        if not _is_trusted_proxy(source):
+            _emit(db, principal=principal, change_type="NEW_PRINCIPAL_ON_SOURCE", observed=first_seen,
+                  source=source, new=principal,
+                  reason={"summary": f"Known host {source} was accessed by novel user {principal}."})
+
     for principal, target, operation, first_seen in db.execute(
         "SELECT principal_name,target_service,operation,first_seen FROM principal_operations WHERE first_seen>?", (cutoff,)
     ).fetchall():
         _emit(db, principal=principal, change_type="NEW_OPERATION", observed=first_seen,
               target=target, operation=operation, new=operation)
+
     for row in db.execute("""
         SELECT principal_name,caller_service,source_ip,target_service,operation,first_seen
         FROM principal_relationships WHERE first_seen>?
     """, (cutoff,)).fetchall():
         _emit(db, principal=row[0], change_type="NEW_RELATIONSHIP", observed=row[5], caller=row[1],
               source=row[2], target=row[3], operation=row[4], new=" → ".join(row[1:5]))
+
     changes = db.total_changes - before
     checkpoint = json.dumps({"trace_id": cursor, "bootstrap_cutoff_ms": cutoff, "ratio": ratio})
     db.execute("INSERT INTO checkpoints(source,cursor_json,updated_at_ms) VALUES('principal_intelligence',?,?) "
@@ -241,36 +265,122 @@ def _process_incremental_row(db, row) -> int:
     if not principal or principal == "unknown":
         return 0
     timestamp_ms = row["timestamp_ms"]
-    caller, source, target, operation = (row["caller_service"] or "", row["caller_ip"] or "",
-                                          row["target_service"] or "", row["operation"] or "")
+    caller = row["caller_service"] or ""
+    source = row["caller_ip"] or ""
+    target = row["target_service"] or ""
+    operation = row["operation"] or ""
+
+    env = row["service_environment"] if "service_environment" in row.keys() else "production"
+    principal_id = row["principal_id"] if "principal_id" in row.keys() and row["principal_id"] else f"{env}:{principal}"
+    op_key = row["operation_key"] if "operation_key" in row.keys() and row["operation_key"] else operation
+    src_group = row["source_group"] if "source_group" in row.keys() and row["source_group"] else derive_source_group(source)
+
+    # 1. Update historical registry for all dimensions
+    record_historical_observation(db, principal_id, "caller", caller, timestamp_ms)
+    record_historical_observation(db, principal_id, "source", source, timestamp_ms)
+    record_historical_observation(db, principal_id, "target", target, timestamp_ms)
+    record_historical_observation(db, principal_id, "operation", op_key, timestamp_ms)
+    logical_rel = f"{caller}→{target}→{op_key}"
+    record_historical_observation(db, principal_id, "logical_relationship", logical_rel, timestamp_ms)
+    if src_group:
+        origin_rel = f"{caller}→{src_group}→{target}→{op_key}"
+        record_historical_observation(db, principal_id, "origin_relationship", origin_rel, timestamp_ms)
+
     existing = db.execute("SELECT first_seen,last_seen FROM principals WHERE principal_name=?", (principal,)).fetchone()
     is_new = existing is None
-    learning = is_new or timestamp_ms - existing[0] < settings.principal_learning_days * 86_400_000
+
+    # Track novelty flags to avoid duplicate scoring
+    is_caller_new = False
+    is_target_new = False
+    is_op_new = False
+
     if is_new:
-        _emit(db, principal=principal, change_type="USERNAME_FIRST_SEEN", observed=timestamp_ms,
+        _emit(db, principal=principal, principal_id=principal_id, change_type="USERNAME_FIRST_SEEN", observed=timestamp_ms,
+              caller=caller, source=source, target=target, operation=operation,
               new=principal, recurrence=str(timestamp_ms // 86_400_000))
     elif timestamp_ms - existing[1] >= settings.principal_dormant_days * 86_400_000:
-        days = (timestamp_ms - existing[1]) // 86_400_000
-        _emit(db, principal=principal, change_type="DORMANT_REACTIVATED", observed=timestamp_ms,
-              old=f"inactive {days} days", new="active", recurrence=str(timestamp_ms // 86_400_000),
-              reason={"summary": f"{principal} became active after {days} inactive days.",
-                      "evidence": {"previous_last_seen": existing[1], "inactive_days": days},
-                      "framing": "Reactivation may be operationally expected; verify ownership and deployment context."})
+        ready, _ = evaluate_readiness(db, principal_id, "DORMANT_REACTIVATED", timestamp_ms)
+        if ready:
+            days = (timestamp_ms - existing[1]) // 86_400_000
+            _emit(db, principal=principal, principal_id=principal_id, change_type="DORMANT_REACTIVATED", observed=timestamp_ms,
+                  old=f"inactive {days} days", new="active", recurrence=str(timestamp_ms // 86_400_000),
+                  reason={"summary": f"{principal} became active after {days} inactive days."})
 
-    if not learning:
-        checks = (("caller", caller, "NEW_CALLER"), ("source", source, "NEW_SOURCE_IP"),
-                  ("target", target, "NEW_TARGET"), ("operation", f"{target}→{operation}", "NEW_OPERATION"),
-                  ("relationship", f"{caller}→{source}→{target}→{operation}", "NEW_RELATIONSHIP"))
-        for dimension, value, change_type in checks:
-            if value and not _dimension_known(db, principal, dimension, value):
-                kwargs = {"caller": caller, "source": source, "target": target, "operation": operation}
-                _emit(db, principal=principal, change_type=change_type, observed=timestamp_ms,
-                      new=value, **kwargs)
-        day_hour = time.strftime("%w:%H", time.gmtime(timestamp_ms / 1000))
-        if not _dimension_known(db, principal, "hour", day_hour):
-            _emit(db, principal=principal, change_type="UNUSUAL_TIME", observed=timestamp_ms,
-                  caller=caller, source=source, target=target, operation=operation, new=day_hour,
-                  recurrence=str(timestamp_ms // 3_600_000))
+    # Dedicated source host accessed by novel user (excluding shared proxies / gateways)
+    if source and source not in {"unknown", ""} and not _is_trusted_proxy(source):
+        ip_globally_known = db.execute("SELECT 1 FROM principal_sources WHERE source_ip=? LIMIT 1", (source,)).fetchone()
+        if ip_globally_known and not _dimension_known(db, principal, "source", source):
+            already_seen_together = db.execute(
+                "SELECT 1 FROM principal_sources WHERE principal_name=? AND source_ip=?", (principal, source)
+            ).fetchone()
+            if not already_seen_together:
+                ready, _ = evaluate_readiness(db, principal_id, "NEW_PRINCIPAL_ON_SOURCE", timestamp_ms)
+                if ready:
+                    _emit(db, principal=principal, principal_id=principal_id, change_type="NEW_PRINCIPAL_ON_SOURCE", observed=timestamp_ms,
+                          caller=caller, source=source, target=target, operation=operation, new=principal,
+                          reason={"summary": f"Host {source} was accessed by novel user {principal}."})
+
+    # Detector readiness-guarded novelty checks
+    if caller and not _dimension_known(db, principal, "caller", caller):
+        ready, _ = evaluate_readiness(db, principal_id, "NEW_CALLER", timestamp_ms)
+        if ready:
+            _emit(db, principal=principal, principal_id=principal_id, change_type="NEW_CALLER", observed=timestamp_ms,
+                  caller=caller, source=source, target=target, operation=operation, new=caller)
+            is_caller_new = True
+
+    if source and not _dimension_known(db, principal, "source", source):
+        ready, _ = evaluate_readiness(db, principal_id, "NEW_SOURCE_IP", timestamp_ms)
+        if ready:
+            _emit(db, principal=principal, principal_id=principal_id, change_type="NEW_SOURCE_IP", observed=timestamp_ms,
+                  caller=caller, source=source, target=target, operation=operation, new=source)
+
+    if target and not _dimension_known(db, principal, "target", target):
+        ready, _ = evaluate_readiness(db, principal_id, "NEW_TARGET", timestamp_ms)
+        if ready:
+            _emit(db, principal=principal, principal_id=principal_id, change_type="NEW_TARGET", observed=timestamp_ms,
+                  caller=caller, source=source, target=target, operation=operation, new=target)
+            is_target_new = True
+
+    op_dim = f"{target}→{operation}"
+    if operation and not _dimension_known(db, principal, "operation", op_dim):
+        ready, _ = evaluate_readiness(db, principal_id, "NEW_OPERATION", timestamp_ms)
+        if ready:
+            _emit(db, principal=principal, principal_id=principal_id, change_type="NEW_OPERATION", observed=timestamp_ms,
+                  caller=caller, source=source, target=target, operation=operation, new=operation)
+            is_op_new = True
+
+    # Logical relationship novelty
+    rel_dim = f"{caller}→{source}→{target}→{operation}"
+    if not _dimension_known(db, principal, "relationship", rel_dim):
+        ready, _ = evaluate_readiness(db, principal_id, "NEW_RELATIONSHIP", timestamp_ms)
+        # Score NEW_RELATIONSHIP only when constituent dimensions are already known
+        if ready and not (is_caller_new or is_target_new or is_op_new):
+            _emit(db, principal=principal, principal_id=principal_id, change_type="NEW_RELATIONSHIP", observed=timestamp_ms,
+                  caller=caller, source=source, target=target, operation=operation, new=rel_dim)
+
+    # Circadian unusual time check
+    day_hour = time.strftime("%w:%H", time.gmtime(timestamp_ms / 1000))
+    if not _dimension_known(db, principal, "hour", day_hour):
+        ready, _ = evaluate_readiness(db, principal_id, "UNUSUAL_TIME", timestamp_ms)
+        if ready:
+            active_hours = db.execute(
+                "SELECT COUNT(DISTINCT hour_of_day) FROM principal_hourly_activity WHERE principal_name = ?",
+                (principal,)
+            ).fetchone()[0]
+            # Only alert if account is diurnal/periodic, not continuous 24h
+            if active_hours <= 18:
+                _emit(db, principal=principal, principal_id=principal_id, change_type="UNUSUAL_TIME", observed=timestamp_ms,
+                      caller=caller, source=source, target=target, operation=operation, new=day_hour,
+                      recurrence=str(timestamp_ms // 3_600_000))
+
+    # Check explicit authentication outcomes
+    if "auth_result" in row.keys() and row["auth_result"] == "failure":
+        detect_explicit_auth_anomalies(db, principal_id, timestamp_ms - 900_000, timestamp_ms + 1)
+
+    # Update candidate behaviors
+    record_candidate_behavior(db, principal_id, "caller", caller, timestamp_ms, timestamp_ms // 900000)
+    record_candidate_behavior(db, principal_id, "target", target, timestamp_ms, timestamp_ms // 900000)
+    record_candidate_behavior(db, principal_id, "operation", op_key, timestamp_ms, timestamp_ms // 900000)
 
     now = int(time.time() * 1000)
     db.execute("""

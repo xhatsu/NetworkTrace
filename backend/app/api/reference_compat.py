@@ -106,20 +106,17 @@ def qdict(request: Request) -> Dict[str, str]:
 # =========================================================================
 
 @router.get("/healthz")
-def healthz() -> Dict[str, Any]:
+async def healthz() -> Dict[str, Any]:
     return {"ok": True, "telemetry_source": "otel"}
 
 
 @router.get("/api/otel/status")
-def api_otel_status() -> Dict[str, Any]:
+async def api_otel_status() -> Dict[str, Any]:
     with get_connection() as conn:
-        seq_row = conn.execute("SELECT (SELECT seq FROM sqlite_sequence WHERE name='traces')").fetchone()
-        spans_count = int(seq_row[0]) if (seq_row and seq_row[0] is not None) else 0
-        if spans_count == 0:
-            max_id = conn.execute("SELECT (SELECT MAX(id) FROM traces)").fetchone()
-            spans_count = int(max_id[0]) if (max_id and max_id[0] is not None) else 0
+        spans_row = conn.execute("SELECT count() FROM traces").fetchone()
+        spans_count = int(spans_row[0]) if (spans_row and spans_row[0] is not None) else 0
 
-        bounds = conn.execute("SELECT (SELECT MIN(timestamp) FROM traces), (SELECT MAX(timestamp) FROM traces)").fetchone()
+        bounds = conn.execute("SELECT MIN(timestamp), MAX(timestamp) FROM traces").fetchone()
         first_seen = bounds[0] if bounds else None
         last_seen = bounds[1] if bounds else None
 
@@ -157,7 +154,7 @@ def api_otel_status() -> Dict[str, Any]:
 # =========================================================================
 
 @router.get("/api/nodes")
-def api_nodes() -> Dict[str, Any]:
+async def api_nodes() -> Dict[str, Any]:
     with get_connection() as conn:
         rows = conn.execute(
             """
@@ -173,7 +170,7 @@ def api_nodes() -> Dict[str, Any]:
 
 
 @router.get("/api/coverage")
-def api_coverage() -> Dict[str, Any]:
+async def api_coverage() -> Dict[str, Any]:
     with get_connection() as conn:
         rows = conn.execute(
             """
@@ -191,7 +188,7 @@ def api_coverage() -> Dict[str, Any]:
 
 
 @router.get("/api/users")
-def api_users() -> Dict[str, Any]:
+async def api_users() -> Dict[str, Any]:
     with get_connection() as conn:
         rows = conn.execute(
             """
@@ -207,7 +204,7 @@ def api_users() -> Dict[str, Any]:
 
 
 @router.get("/api/rpm")
-def api_rpm(request: Request) -> Dict[str, Any]:
+async def api_rpm(request: Request) -> Dict[str, Any]:
     q = qdict(request)
     win_str = q.get("window", "300")
     try:
@@ -241,7 +238,7 @@ def api_rpm(request: Request) -> Dict[str, Any]:
 
 
 @router.get("/api/callers")
-def api_callers() -> Dict[str, Any]:
+async def api_callers() -> Dict[str, Any]:
     with get_connection() as conn:
         rows = conn.execute(
             """
@@ -390,7 +387,7 @@ def _traces_query(q: Dict[str, str]) -> List[Dict[str, Any]]:
         limit = 200
 
     where_sql = (" WHERE " + " AND ".join(clauses)) if clauses else ""
-    sql = f"SELECT * FROM traces {where_sql} ORDER BY id DESC LIMIT ?"
+    sql = f"SELECT * FROM traces {where_sql} ORDER BY timestamp_ms DESC LIMIT ?"
     params.append(limit)
 
     with get_connection() as conn:
@@ -399,13 +396,13 @@ def _traces_query(q: Dict[str, str]) -> List[Dict[str, Any]]:
 
 
 @router.get("/api/logs")
-def api_logs(request: Request) -> Dict[str, Any]:
+async def api_logs(request: Request) -> Dict[str, Any]:
     rows = _traces_query(qdict(request))
     return {"logs": [_trace_to_log_row(r) for r in rows]}
 
 
 @router.get("/api/export/logs")
-def api_export_logs(request: Request) -> PlainTextResponse:
+async def api_export_logs(request: Request) -> PlainTextResponse:
     q = qdict(request)
     q.pop("limit", None)
     try:
@@ -421,7 +418,7 @@ def api_export_logs(request: Request) -> PlainTextResponse:
 
 
 @router.get("/api/violations")
-def api_violations(request: Request) -> Dict[str, Any]:
+async def api_violations(request: Request) -> Dict[str, Any]:
     q = qdict(request)
     rows = _traces_query(q)
     violations = []
@@ -440,7 +437,7 @@ def api_violations(request: Request) -> Dict[str, Any]:
 # =========================================================================
 
 @router.get("/api/policy")
-def api_policy() -> Dict[str, Any]:
+async def api_policy() -> Dict[str, Any]:
     return load_policy()
 
 
@@ -469,7 +466,7 @@ async def api_policy_post(request: Request) -> Dict[str, Any]:
 # =========================================================================
 
 @router.get("/api/endpoints/slow")
-def api_endpoints_slow() -> Dict[str, Any]:
+async def api_endpoints_slow() -> Dict[str, Any]:
     with get_connection() as conn:
         rows = conn.execute(
             """
@@ -489,7 +486,7 @@ def api_endpoints_slow() -> Dict[str, Any]:
 
 
 @router.get("/api/endpoints/errors")
-def api_endpoints_errors() -> Dict[str, Any]:
+async def api_endpoints_errors() -> Dict[str, Any]:
     with get_connection() as conn:
         rows = conn.execute(
             """
@@ -509,7 +506,7 @@ def api_endpoints_errors() -> Dict[str, Any]:
 
 
 @router.get("/api/endpoints/health")
-def api_endpoints_health() -> Dict[str, Any]:
+async def api_endpoints_health() -> Dict[str, Any]:
     with get_connection() as conn:
         rows = conn.execute(
             """
@@ -529,7 +526,7 @@ def api_endpoints_health() -> Dict[str, Any]:
 
 
 @router.get("/api/traffic/hourly")
-def api_traffic_hourly() -> Dict[str, Any]:
+async def api_traffic_hourly() -> Dict[str, Any]:
     with get_connection() as conn:
         rows = conn.execute(
             """
@@ -547,7 +544,7 @@ def api_traffic_hourly() -> Dict[str, Any]:
 
 
 @router.get("/api/traffic/anomalies")
-def api_traffic_anomalies() -> Dict[str, Any]:
+async def api_traffic_anomalies() -> Dict[str, Any]:
     with get_connection() as conn:
         rows = conn.execute(
             """
@@ -574,14 +571,11 @@ def api_traffic_anomalies() -> Dict[str, Any]:
 # =========================================================================
 
 @router.get("/metrics")
-def prometheus_metrics() -> PlainTextResponse:
+async def prometheus_metrics() -> PlainTextResponse:
     lines: List[str] = []
     with get_connection() as conn:
-        seq_row = conn.execute("SELECT (SELECT seq FROM sqlite_sequence WHERE name='traces')").fetchone()
-        total_spans = int(seq_row[0]) if (seq_row and seq_row[0] is not None) else 0
-        if total_spans == 0:
-            max_id = conn.execute("SELECT (SELECT MAX(id) FROM traces)").fetchone()
-            total_spans = int(max_id[0]) if (max_id and max_id[0] is not None) else 0
+        total_spans_row = conn.execute("SELECT count() FROM traces").fetchone()
+        total_spans = int(total_spans_row[0]) if (total_spans_row and total_spans_row[0] is not None) else 0
 
         nodes_rows = conn.execute(
             """

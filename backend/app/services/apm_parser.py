@@ -108,7 +108,10 @@ def extract_apm_documents(payload: Any) -> List[Dict[str, Any]]:
 
 
 def parse_apm_body(body_bytes: bytes, content_type: str = "application/json") -> List[Dict[str, Any]]:
-    decompressed = decompress_payload(body_bytes)
+    try:
+        decompressed = decompress_payload(body_bytes)
+    except ValueError:
+        return []
     text = decompressed.decode("utf-8", "replace")
     if "ndjson" in str(content_type).lower() or ("\n" in text and text.strip().startswith("{")):
         documents = []

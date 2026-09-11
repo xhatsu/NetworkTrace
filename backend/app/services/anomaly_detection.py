@@ -259,6 +259,105 @@ def detect_anomalies(
                 )]
             ))
 
+    # Detector 9: User + Source IP Behavioral Anomalies
+    with get_connection(db_path) as db:
+        user_ip_window = db.execute("""
+            SELECT
+              principal_name,
+              caller_ip as source_ip,
+              COALESCE(caller_service, '') as caller_service,
+              target_service,
+              operation,
+              COUNT(*) as request_count
+            FROM traces
+            WHERE timestamp_ms >= ? AND timestamp_ms < ?
+              AND principal_name IS NOT NULL AND principal_name != '' AND principal_name != 'unknown'
+              AND caller_ip IS NOT NULL AND caller_ip != '' AND caller_ip != 'unknown'
+            GROUP BY principal_name, caller_ip, caller_service, target_service, operation
+        """, (window_start_sec * 1000, window_end_sec * 1000)).fetchall()
+
+        historical_user_ips = {
+            (row[0], row[1]) for row in db.execute(
+                "SELECT DISTINCT principal_name, source_ip FROM principal_sources WHERE first_seen < ?",
+                (window_start_sec * 1000,)
+            ).fetchall()
+        }
+        known_ips = {
+            row[0] for row in db.execute(
+                "SELECT DISTINCT source_ip FROM principal_sources WHERE first_seen < ?",
+                (window_start_sec * 1000,)
+            ).fetchall()
+        }
+        known_users = {
+            row[0] for row in db.execute(
+                "SELECT DISTINCT principal_name FROM principals WHERE first_seen < ?",
+                (window_start_sec * 1000,)
+            ).fetchall()
+        }
+
+    for uip in user_ip_window:
+        user = uip["principal_name"]
+        ip = uip["source_ip"]
+        u_reqs = uip["request_count"] or 0
+        c_svc = uip["caller_service"]
+        t_svc = uip["target_service"]
+        u_op = uip["operation"]
+
+        if not user or user == "unknown" or not ip or ip == "unknown" or u_reqs < 1:
+            continue
+
+        # Case A: Known user from a completely new / unobserved source IP
+        if user in known_users and (user, ip) not in historical_user_ips:
+            score = 80 if ("admin" in t_svc.lower() or "pay" in t_svc.lower()) else 70
+            anomalies.append(AnomalyEvent(
+                detected_at=detected_at,
+                anomaly_type="user_new_source_ip",
+                severity="high" if score >= 75 else "medium",
+                score=score,
+                confidence=0.90,
+                caller_service=c_svc,
+                target_service=t_svc,
+                principal_name=user,
+                source_ip=ip,
+                operation=u_op,
+                baseline_value=0.0,
+                current_value=float(u_reqs),
+                reasons=[AnomalyReason(
+                    type="user_new_ip",
+                    contribution=score,
+                    baseline=0.0,
+                    current=float(u_reqs),
+                    text=f"Established user '{user}' accessed target '{t_svc}' from unobserved source IP {ip} ({u_reqs} requests)"
+                )],
+                metadata={"user": user, "source_ip": ip, "target_service": t_svc, "operation": u_op, "requests": u_reqs}
+            ))
+
+        # Case B: Known source IP suddenly used by an unexpected / new user
+        elif ip in known_ips and (user, ip) not in historical_user_ips:
+            score = 75
+            anomalies.append(AnomalyEvent(
+                detected_at=detected_at,
+                anomaly_type="ip_new_user",
+                severity="medium",
+                score=score,
+                confidence=0.85,
+                caller_service=c_svc,
+                target_service=t_svc,
+                principal_name=user,
+                source_ip=ip,
+                operation=u_op,
+                baseline_value=0.0,
+                current_value=float(u_reqs),
+                reasons=[AnomalyReason(
+                    type="new_user_on_ip",
+                    contribution=score,
+                    baseline=0.0,
+                    current=float(u_reqs),
+                    text=f"Known IP {ip} was accessed by novel user '{user}' calling '{t_svc}' ({u_reqs} requests)"
+                )],
+                metadata={"user": user, "source_ip": ip, "target_service": t_svc, "operation": u_op, "requests": u_reqs}
+            ))
+
     for anomaly in anomalies:
         if anomaly.first_seen is None:
             anomaly.first_seen = window_start_sec * 1000

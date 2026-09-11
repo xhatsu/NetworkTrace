@@ -19,8 +19,8 @@ class AnomalyEvent(BaseModel):
     caller_service: Optional[str] = None
     target_service: Optional[str] = None
     principal_name: Optional[str] = None
+    source_ip: Optional[str] = None
     operation: Optional[str] = None
-    instance: Optional[str] = None
     baseline_value: Optional[float] = None
     current_value: Optional[float] = None
     delta_percentage: Optional[float] = None

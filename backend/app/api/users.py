@@ -30,6 +30,20 @@ class ChangeUpdate(BaseModel):
     status: Literal["new", "reviewed", "expected", "ignored"]
 
 
+class ChangeReview(BaseModel):
+    action: Literal["expected", "investigate", "data_quality"]
+    scope: Optional[str] = None
+    reason: Optional[str] = None
+    operator: Optional[str] = "operator"
+    expires_at: Optional[int] = None
+
+
+class IncidentUpdate(BaseModel):
+    status: Optional[Literal["open", "investigating", "resolved", "suppressed", "accepted"]] = None
+    review_notes: Optional[str] = None
+    reviewed_by: Optional[str] = "operator"
+
+
 class PrincipalUpdate(BaseModel):
     principal_type: Literal["unknown", "human", "service_account", "system_account", "shared_credential", "integration_account"]
 
@@ -134,6 +148,46 @@ async def update_change(change_id: int, body: ChangeUpdate):
     result = UserRepository().update_change(change_id,body.status)
     if not result: raise HTTPException(404,"User change not found")
     return result
+
+
+@router.post("/user-changes/{change_id}/review")
+async def review_change(change_id: int, body: ChangeReview):
+    result = UserRepository().review_change(
+        change_id, action=body.action, scope=body.scope,
+        reason=body.reason, operator=body.operator or "operator",
+        expires_at=body.expires_at
+    )
+    if not result: raise HTTPException(404, "User change not found")
+    return result
+
+
+@router.get("/incidents")
+async def list_incidents(
+    principal_id: Optional[str] = None,
+    status: Optional[str] = None,
+    priority: Optional[str] = None,
+    category: Optional[str] = None,
+    from_time: Optional[str] = Query(None, alias="from"),
+    to_time: Optional[str] = Query(None, alias="to"),
+    start: Optional[str] = None,
+    end: Optional[str] = None,
+    limit: int = Query(50, ge=1, le=200),
+    offset: int = Query(0, ge=0),
+):
+    start_ms, end_ms = _window(from_time, to_time, start, end)
+    return UserRepository().list_incidents(
+        principal_id=principal_id, status=status, priority=priority,
+        category=category, start_ms=start_ms, end_ms=end_ms,
+        limit=limit, offset=offset
+    )
+
+
+@router.get("/incidents/{incident_id}")
+async def get_incident(incident_id: str):
+    inc = UserRepository().get_incident(incident_id)
+    if not inc:
+        raise HTTPException(404, "Incident not found")
+    return inc
 
 
 @router.get("/user-graph")

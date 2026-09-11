@@ -42,8 +42,10 @@ def _enrich_evidence(item: Dict[str, Any], include_traces: bool = False) -> None
               WHERE bucket_size=300 AND target_service=? AND bucket_start*1000<?
                 AND (bucket_start+300)*1000>?""", (service, end_ms, start_ms)).fetchone()[0] or 0)
             rows = db.execute("""SELECT first_seen,last_seen FROM anomaly_events
-              WHERE anomaly_type=? AND target_service IS ? AND caller_service IS ?
-                AND principal_name IS ? AND operation IS ? AND first_seen IS NOT NULL
+              WHERE anomaly_type=? AND COALESCE(target_service, '') = COALESCE(?, '')
+                AND COALESCE(caller_service, '') = COALESCE(?, '')
+                AND COALESCE(principal_name, '') = COALESCE(?, '')
+                AND COALESCE(operation, '') = COALESCE(?, '') AND first_seen IS NOT NULL
                 AND last_seen IS NOT NULL AND last_seen<=? ORDER BY last_seen DESC LIMIT 50""",
               (item.get("anomaly_type"), item.get("target_service"), item.get("caller_service"),
                item.get("principal_name"), item.get("operation"), end_ms)).fetchall()
@@ -98,7 +100,8 @@ def format_anomaly(r: Dict[str, Any]) -> Dict[str, Any]:
     r["first_detected_ms"] = r.get("first_seen") or r.get("detected_at") or det_ms
     r["window_start_ms"] = r.get("window_start_ms") or (det_ms - 60000)
     r["window_end_ms"] = r.get("window_end_ms") or det_ms
-    r["contributors"] = r.get("contributors") or []
+    r.pop("instance", None)
+    r.pop("contributors", None)
     r["trace_ids"] = r.get("trace_ids") or []
     r["limitations"] = r.get("limitations") or []
     r["percent_change"] = pct_change
@@ -117,13 +120,14 @@ async def list_anomalies(
     severity: Optional[str] = None,
     service: Optional[str] = None,
     principal: Optional[str] = None,
+    source_ip: Optional[str] = None,
     limit: int = 100
 ) -> Dict[str, Any]:
     start_ms = from_time if (from_time and from_time > 10_000_000_000) else (from_time * 1000 if from_time else None)
     end_ms = to_time if (to_time and to_time > 10_000_000_000) else (to_time * 1000 if to_time else None)
 
     repo = AnomalyRepository()
-    rows = repo.list_anomalies(start_ms=start_ms, end_ms=end_ms, status=status, severity=severity, service=service, principal=principal, limit=limit)
+    rows = repo.list_anomalies(start_ms=start_ms, end_ms=end_ms, status=status, severity=severity, service=service, principal=principal, source_ip=source_ip, limit=limit)
     items = [format_anomaly(r) for r in rows]
     return {"items": items, "count": len(items)}
 
@@ -172,7 +176,8 @@ async def get_anomaly_detail(anomaly_id: int) -> Dict[str, Any]:
     item["window_end_ms"] = item.get("window_end_ms") or det_ms
     item["training_start_ms"] = item.get("training_start_ms") or (det_ms - 86400000)
     item["training_end_ms"] = item.get("training_end_ms") or (det_ms - 60000)
-    item["contributors"] = item.get("contributors") or []
+    item.pop("instance", None)
+    item.pop("contributors", None)
     item["trace_ids"] = item.get("trace_ids") or []
     item["percent_change"] = pct_change
     item["absolute_difference"] = abs_diff

@@ -279,6 +279,10 @@ def test_user_change_lifecycle_and_incremental_cursor(client):
         assert updated.status_code == 200
         assert updated.json()["status"] == "expected"
     assert client.patch("/api/v1/user-changes/1", json={"status":"invalid"}).status_code == 422
+    # HTTP ingestion is durably committed by the hub and analytics are picked up
+    # asynchronously by the 60-second worker. The first call may process traces
+    # added by earlier API tests; a second incremental pass must be empty.
+    assert process_principal_intelligence()["processed"] >= 0
     assert process_principal_intelligence()["processed"] == 0
 
 
