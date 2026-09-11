@@ -51,7 +51,7 @@ app:
   replicaCount: 1
   image:
     repository: xhatsu101/tracescope
-    tag: app-0.2.0
+    tag: app-0.1.0
     pullPolicy: IfNotPresent
   resources:
     requests:
@@ -79,7 +79,7 @@ ingest:
   replicaCount: 3
   image:
     repository: xhatsu101/tracescope
-    tag: ingest-0.2.0
+    tag: ingest-0.1.0
     pullPolicy: IfNotPresent
   autoscaling:
     enabled: true
@@ -170,7 +170,7 @@ ingress:
     nginx.ingress.kubernetes.io/proxy-read-timeout: "70"
     nginx.ingress.kubernetes.io/proxy-send-timeout: "70"
     nginx.ingress.kubernetes.io/ssl-redirect: "false"
-  host: trace.n2d.id.vn
+  host: "trace.n2d.id.vn"
   tls: []
 
 podDisruptionBudget:
