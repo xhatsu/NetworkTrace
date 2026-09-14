@@ -1,3 +1,4 @@
+"""Build time-aware median/MAD expectations that resist outliers in live telemetry."""
 from __future__ import annotations
 import math
 from datetime import datetime, timezone
@@ -24,8 +25,20 @@ def mad(vals: List[float], med: Optional[float] = None) -> float:
     devs = [abs(x - med) for x in vals]
     return median(devs)
 
-def rebuild_baselines(db_path: Optional[str] = None) -> int:
+def rebuild_baselines(
+    db_path: Optional[str] = None,
+    target_services: Optional[List[str]] = None,
+) -> int:
     base_repo = BaselineRepository(db_path)
+
+    if target_services is not None and not target_services:
+        return 0
+    clauses = ["bucket_size = 300"]
+    args: List[Any] = []
+    if target_services is not None:
+        placeholders = ",".join("?" for _ in target_services)
+        clauses.append(f"target_service IN ({placeholders})")
+        args.extend(target_services)
 
     with get_connection(db_path) as db:
         # We compute baselines over 5-minute buckets (bucket_size = 300)
@@ -40,9 +53,8 @@ def rebuild_baselines(db_path: Optional[str] = None) -> int:
               error_count,
               latency_p50,
               latency_p95
-            FROM metric_buckets
-            WHERE bucket_size = 300
-        """).fetchall()
+            FROM metric_buckets FINAL
+            WHERE """ + " AND ".join(clauses), args).fetchall()
 
     # Dimensions to track:
     # 1. 'service': target_service
@@ -51,6 +63,26 @@ def rebuild_baselines(db_path: Optional[str] = None) -> int:
     # 4. 'principal_target': principal_name + '->' + target_service
 
     groups: Dict[tuple, Dict[str, List[float]]] = {}
+
+    # Service detectors compare one service-wide aggregate per 5-minute window.
+    # Build historical samples at that same grain before computing medians/MAD.
+    service_windows: Dict[tuple[str, int], Dict[str, float]] = {}
+    for r in rows:
+        key = (r["target_service"], r["bucket_start"])
+        sample = service_windows.setdefault(key, {"requests": 0.0, "errors": 0.0, "p50": 0.0, "p95": 0.0})
+        sample["requests"] += r["request_count"] or 0
+        sample["errors"] += r["error_count"] or 0
+        sample["p50"] = max(sample["p50"], r["latency_p50"] or 0.0)
+        sample["p95"] = max(sample["p95"], r["latency_p95"] or 0.0)
+
+    for (service, bucket_start), sample in service_windows.items():
+        dt = datetime.fromtimestamp(bucket_start, tz=timezone.utc)
+        key = ("service", service, dt.hour, dt.weekday())
+        vals = groups.setdefault(key, {"rps": [], "p50": [], "p95": [], "error_rate": []})
+        vals["rps"].append(sample["requests"] / 300.0)
+        vals["p50"].append(sample["p50"])
+        vals["p95"].append(sample["p95"])
+        vals["error_rate"].append(sample["errors"] / max(1.0, sample["requests"]))
 
     for r in rows:
         dt = datetime.fromtimestamp(r["bucket_start"], tz=timezone.utc)
@@ -63,7 +95,6 @@ def rebuild_baselines(db_path: Optional[str] = None) -> int:
         p95 = r["latency_p95"] or 0.0
 
         dims = [
-            ("service", r["target_service"]),
             ("caller_target", f"{r['caller_service']}->{r['target_service']}" if r["caller_service"] else None),
             ("target_operation", f"{r['target_service']}->{r['operation']}"),
             ("principal_target", f"{r['principal_name']}->{r['target_service']}" if r["principal_name"] else None)

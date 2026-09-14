@@ -2,6 +2,9 @@
 
 Implements canonical identity and request evidence normalization, detector readiness,
 multi-layer baselines, bounded incidents, capped family scoring, and behavioral detectors.
+
+The engine persists explainable derived evidence in the shared ClickHouse store,
+which lets periodic workers and read APIs agree without replaying raw telemetry.
 """
 from __future__ import annotations
 
@@ -19,6 +22,7 @@ from backend.app.models.incident import Incident, OperatorOverride
 
 
 # -----------------------------------------------------------------------------
+# Family caps prevent many correlated observations from being presented as many independent risks.
 # 1. Scoring Matrix and Family Caps
 # -----------------------------------------------------------------------------
 
@@ -222,14 +226,17 @@ def record_historical_observation(
 ):
     key = f"{dim_type}:{principal_id}:{dim_value}"
     now = int(time.time() * 1000)
-    db.execute("""
-        INSERT INTO historical_registry (registry_key, principal_id, dimension_type, dimension_value, first_seen, last_seen, observation_count, created_at, updated_at)
-        VALUES (?, ?, ?, ?, ?, ?, 1, ?, ?)
-        ON CONFLICT(registry_key) DO UPDATE SET
-          last_seen = MAX(last_seen, excluded.last_seen),
-          observation_count = observation_count + 1,
-          updated_at = excluded.updated_at
-    """, (key, principal_id, dim_type, dim_value, timestamp_ms, timestamp_ms, now, now))
+    existing = db.execute("SELECT first_seen,last_seen,observation_count,created_at FROM historical_registry FINAL "
+                          "WHERE registry_key=?", (key,)).fetchone()
+    if existing:
+        db.execute("INSERT INTO historical_registry (registry_key,principal_id,dimension_type,dimension_value,"
+                   "first_seen,last_seen,observation_count,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?)",
+                   (key, principal_id, dim_type, dim_value, min(int(existing[0]), timestamp_ms),
+                    max(int(existing[1]), timestamp_ms), int(existing[2]) + 1, int(existing[3]), now))
+    else:
+        db.execute("INSERT INTO historical_registry (registry_key,principal_id,dimension_type,dimension_value,"
+                   "first_seen,last_seen,observation_count,created_at,updated_at) VALUES(?,?,?,?,?,?,1,?,?)",
+                   (key, principal_id, dim_type, dim_value, timestamp_ms, timestamp_ms, now, now))
 
 
 def record_candidate_behavior(
@@ -237,14 +244,15 @@ def record_candidate_behavior(
 ):
     key = f"{dim_type}:{principal_id}:{dim_value}"
     now = int(time.time() * 1000)
-    existing = db.execute("SELECT first_seen, last_seen, distinct_days_count, distinct_windows_count, observation_count FROM candidate_behaviors WHERE candidate_key = ?", (key,)).fetchone()
+    existing = db.execute("SELECT first_seen,last_seen,distinct_days_count,distinct_windows_count,observation_count,status,created_at "
+                          "FROM candidate_behaviors FINAL WHERE candidate_key = ?", (key,)).fetchone()
     if not existing:
         db.execute("""
             INSERT INTO candidate_behaviors (candidate_key, principal_id, dimension_type, dimension_value, first_seen, last_seen, distinct_days_count, distinct_windows_count, observation_count, status, created_at, updated_at)
             VALUES (?, ?, ?, ?, ?, ?, 1, 1, 1, 'pending', ?, ?)
         """, (key, principal_id, dim_type, dim_value, timestamp_ms, timestamp_ms, now, now))
     else:
-        first_s, last_s, days_cnt, win_cnt, obs_cnt = existing
+        first_s, last_s, days_cnt, win_cnt, obs_cnt = existing[:5]
         new_day = 1 if (timestamp_ms // 86400000) > (last_s // 86400000) else 0
         new_win = 1 if (timestamp_ms // 900000) > (last_s // 900000) else 0
         new_days = days_cnt + new_day
@@ -258,22 +266,14 @@ def record_candidate_behavior(
             db.execute("""
                 INSERT INTO established_baselines (baseline_key, principal_id, dimension_type, dimension_value, first_seen, last_seen, observation_count, distribution_share, promoted_at, promotion_reason, created_at, updated_at)
                 VALUES (?, ?, ?, ?, ?, ?, ?, 0.05, ?, 'Promoted after 3+ days and 5+ windows support', ?, ?)
-                ON CONFLICT(baseline_key) DO UPDATE SET
-                  last_seen = MAX(last_seen, excluded.last_seen),
-                  observation_count = observation_count + excluded.observation_count,
-                  updated_at = excluded.updated_at
             """, (base_key, principal_id, dim_type, dim_value, first_s, timestamp_ms, new_obs, now, now, now))
-            db.execute("UPDATE candidate_behaviors SET status = 'promoted', updated_at = ? WHERE candidate_key = ?", (now, key))
+            db.execute("INSERT INTO candidate_behaviors VALUES(?,?,?,?,?,?,?,?,?,?,?,?)",
+                       (key, principal_id, dim_type, dim_value, first_s, timestamp_ms, new_days, new_wins,
+                        new_obs, "promoted", existing[6], now))
         else:
-            db.execute("""
-                UPDATE candidate_behaviors SET
-                  last_seen = ?,
-                  distinct_days_count = ?,
-                  distinct_windows_count = ?,
-                  observation_count = ?,
-                  updated_at = ?
-                WHERE candidate_key = ?
-            """, (timestamp_ms, new_days, new_wins, new_obs, now, key))
+            db.execute("INSERT INTO candidate_behaviors VALUES(?,?,?,?,?,?,?,?,?,?,?,?)",
+                       (key, principal_id, dim_type, dim_value, first_s, timestamp_ms, new_days, new_wins,
+                        new_obs, existing[5], existing[6], now))
 
 
 # -----------------------------------------------------------------------------
@@ -515,7 +515,7 @@ def emit_behavioral_change(
     event_id = (int(hashlib.sha256(fingerprint.encode()).hexdigest()[:15], 16) % 9000000000000000) + 1
 
     db.execute("""
-      INSERT OR IGNORE INTO principal_change_events (
+      INSERT INTO principal_change_events (
         id, fingerprint, principal_name, change_type, severity, score, detected_at,
         caller_service, source_ip, target_service, operation, old_value, new_value,
         first_observed, reason_json, status, updated_at, incident_id, principal_id,

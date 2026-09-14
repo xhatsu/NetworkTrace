@@ -58,11 +58,11 @@ See [docs/DESIGN.md](docs/DESIGN.md), [docs/ANOMALIES.md](docs/ANOMALIES.md), an
 
 ## Kubernetes deployment
 
-The production manifests split traffic ingestion and agent lifecycle/reporting
-into stateless, horizontally scalable Deployments. A single storage-owner
-StatefulSet is the only pod that mounts SQLite; edge pods use an authenticated
-internal API instead of sharing WAL files across nodes. See the complete
-[Kubernetes architecture and migration runbook](deploy/k8s/README.md).
+The production manifests provide a lightweight, horizontally scalable architecture:
+- `tracescope-clickhouse`: Single-replica StatefulSet owning the ClickHouse columnar analytics store and RWO persistent volume claim.
+- `tracescope-app`: Application StatefulSet consolidating schema migration init, FastAPI queries, built-in React UI, and the background analytics worker sidecar.
+- `tracescope-ingest`: Stateless, horizontally auto-scaled Deployment (HPA 3–12 pods) receiving high-throughput OTLP and ELK trace batches with transaction-atomic deduplication and direct ClickHouse batch insertion.
+- Unified Ingress routing public traffic to port 30102 for UI/API and port 30103 for ingestion. See the complete [Kubernetes architecture and deployment guide](deploy/k8s/README.md).
 
 ## Tests
 
@@ -71,7 +71,7 @@ pytest -q
 cd frontend && npm run build
 ```
 
-The lifecycle script binds to `0.0.0.0:30102` and automatically uses `.venv/bin/python` when present. Override `OTEL_HOST` when a narrower bind is required. Set `OTEL_API_KEY` to require `X-API-Key` on ingestion and lifecycle mutations.
+The lifecycle script binds to `0.0.0.0:30102` and automatically uses `.venv/bin/python` when present. Override `OTEL_HOST` when a narrower bind is required. Set `OTEL_API_KEY` to require `X-API-Key` on ingestion and lifecycle mutations. The legacy port `:31115` is obsolete and unused.
 
 ## User Intelligence
 
@@ -80,7 +80,7 @@ The additive User Intelligence module derives credential behavior from the exist
 ## Production rollout gaps
 
 - SSO/RBAC, tenant isolation, encrypted secrets management, and a formal security review.
-- PostgreSQL/ClickHouse-class repository implementation, HA workers, distributed job leasing, and backups.
+- Multi-node ClickHouse cluster replication, HA workers, distributed job leasing, and automated snapshot backups.
 - Empirical capacity testing on the target hardware and retention policy approval.
 - Sampling/agent coverage metadata, authoritative address-to-service mappings, and clock-skew monitoring.
 - TLS termination, audit export, alert routing, SLOs, observability for TraceScope itself, and disaster recovery drills.

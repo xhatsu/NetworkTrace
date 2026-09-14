@@ -1,3 +1,4 @@
+"""Persist and query rollups so high-cardinality raw telemetry stays off dashboard hot paths."""
 from __future__ import annotations
 import time
 from typing import Any, Dict, List, Optional
@@ -20,18 +21,6 @@ class AggregateRepository:
         sql = f"""
         INSERT INTO metric_buckets ({','.join(cols)})
         VALUES ({','.join('?' for _ in cols)})
-        ON CONFLICT(bucket_start, bucket_size, caller_service, target_service, principal_name, operation)
-        DO UPDATE SET
-          request_count=excluded.request_count,
-          error_count=excluded.error_count,
-          latency_sum=excluded.latency_sum,
-          latency_avg=excluded.latency_avg,
-          latency_min=excluded.latency_min,
-          latency_max=excluded.latency_max,
-          latency_p50=excluded.latency_p50,
-          latency_p95=excluded.latency_p95,
-          latency_p99=excluded.latency_p99,
-          created_at=excluded.created_at
         """
         now = int(time.time() * 1000)
         with db_transaction(self.db_path) as db:
@@ -76,7 +65,7 @@ class AggregateRepository:
           ROUND(CASE WHEN SUM(request_count) > 0 THEN SUM(error_count) * 1.0 / SUM(request_count) ELSE 0 END, 4) as error_rate,
           ROUND(CASE WHEN SUM(request_count) > 0 THEN SUM(latency_sum) / SUM(request_count) ELSE 0 END, 2) as latency_avg,
           ROUND(MAX(latency_p95), 2) as latency_p95
-        FROM metric_buckets
+        FROM metric_buckets FINAL
         WHERE {where}
         GROUP BY bucket_start
         ORDER BY bucket_start ASC
@@ -111,7 +100,7 @@ class AggregateRepository:
           ROUND(CASE WHEN SUM(request_count) > 0 THEN SUM(error_count) * 1.0 / SUM(request_count) ELSE 0 END, 4) as error_rate,
           ROUND(CASE WHEN SUM(request_count) > 0 THEN SUM(latency_sum) / SUM(request_count) ELSE 0 END, 2) as latency_avg,
           ROUND(MAX(latency_p95), 2) as latency_p95
-        FROM metric_buckets
+        FROM metric_buckets FINAL
         WHERE {where}
         """
         with get_connection(self.db_path) as db:

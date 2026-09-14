@@ -6,33 +6,35 @@ Production-ready Helm chart for deploying the TraceScope Behavioral Observabilit
 
 TraceScope consists of the following components:
 1. **ClickHouse (`clickhouse`)**: Columnar analytics database (StatefulSet).
-2. **Storage & Analytics Core (`storage`)**: StatefulSet with single-writer lock domain:
+2. **Application & Analytics Workload (`app` / `storage`)**: StatefulSet (`tracescope-app`) with single-replica schema and analytics coordination:
    - Init container: runs database schema migrations once.
-   - `api`: FastAPI serving analytics queries, topology, and internal writes.
-   - `analytics-worker`: Background worker running rollups, baselines, and anomaly detectors.
-3. **Ingest Edge (`ingest`)**: Stateless Deployment (with HPA 3–12 pods) handling OTEL/ELK trace batches, decompression, WSSE/Basic auth sanitization, and transaction-atomic deduplication.
-4. **Agent Stats (`agentStats`)**: Stateless Deployment (with HPA 2–6 pods) receiving oldkernel/eBPF agent heartbeat samples.
-5. **UI Frontend (`ui`)**: Stateless Nginx Deployment serving the compiled React 19 SPA.
-6. **Ingress**: Unified reverse proxy keeping all public endpoints identical to the host deployment.
+   - `api`: FastAPI serving analytics queries, built-in React UI, agent stats, and internal writes on port 30102.
+   - `analytics-worker`: Background worker running rollups, baselines, and anomaly detectors on a 60-second cadence.
+3. **Ingest Edge (`ingest`)**: Stateless Deployment (with HPA 3–12 pods) handling OTEL/ELK trace batches, decompression, WSSE/Basic auth sanitization, and transaction-atomic deduplication on port 30103.
+4. **Agent Stats (`agentStats`)**: Optional stateless Deployment (with HPA 2–6 pods) receiving oldkernel/eBPF agent heartbeat samples (merged into API pod by default).
+5. **UI Frontend (`ui`)**: Optional stateless Nginx Deployment serving the compiled React 19 SPA (merged into API pod by default).
+6. **Ingress**: Unified reverse proxy keeping all public endpoints identical to the host deployment (:30102).
 
 ---
 
 ## Deployment Modes & Merging Workloads
 
-### 1. Full Distributed Mode (Default - High Scale)
-Independent workloads for every tier. Best for high-throughput production estates:
+### 1. Consolidated 3-Tier Mode (Default - Balanced & Resource-Efficient)
+Saves 4+ pods by default (`ui.enabled: false` and `agentStats.enabled: false`):
+- UI is natively served by the Storage API pod (`/` and `/assets`).
+- Agent stats are served directly by the Storage API pod (`/api/agent/stats*`).
+- Ingestion runs in its horizontally auto-scaled Deployment (`tracescope-ingest`, 3–12 pods).
+- ClickHouse runs as a dedicated StatefulSet.
 ```sh
 helm install tracescope deploy/helm/tracescope
 ```
 
-### 2. Balanced Mode (Merge UI + Merge Agent Stats)
-Saves 4+ pods by:
-- Merging UI into the Storage API pod (`ui.enabled: false`)
-- Merging Agent Stats into the Ingest pods (`agentStats.enabled: false`)
+### 2. Full Distributed Mode
+Independent workloads for every tier (5 workloads, 9–21 pods). Best for high-throughput production estates requiring dedicated Nginx UI and isolated agent telemetry scaling:
 ```sh
 helm install tracescope deploy/helm/tracescope \
-  --set ui.enabled=false \
-  --set agentStats.enabled=false
+  --set ui.enabled=true \
+  --set agentStats.enabled=true
 ```
 
 ### 3. External ClickHouse Mode
@@ -51,14 +53,15 @@ helm install tracescope deploy/helm/tracescope \
 | Parameter | Description | Default |
 | :--- | :--- | :--- |
 | `clickhouse.enabled` | Deploy bundled ClickHouse StatefulSet | `true` |
-| `clickhouse.persistence.size` | Storage volume size for ClickHouse | `50Gi` |
-| `storage.replicaCount` | Storage & Worker replicas (must remain 1) | `1` |
+| `clickhouse.persistence.size` | Storage volume size for ClickHouse | `5Gi` |
+| `app.replicaCount` | Storage & Worker replicas (must remain 1) | `1` |
 | `ingest.replicaCount` | Initial replicas for trace ingestion | `3` |
 | `ingest.autoscaling.enabled`| Enable HPA for ingestion | `true` (3–12 pods) |
-| `agentStats.enabled` | Deploy dedicated agent-stats workload | `true` |
-| `ui.enabled` | Deploy dedicated Nginx UI workload | `true` |
+| `agentStats.enabled` | Deploy dedicated agent-stats workload | `false` |
+| `ui.enabled` | Deploy dedicated Nginx UI workload | `false` |
 | `ingress.enabled` | Create unified Ingress | `true` |
-| `ingress.host` | Public Ingress hostname | `tracescope.local` |
+| `ingress.serverSnippet.enabled` | Enable nginx `server-snippet` annotation (disable on hardened clusters) | `true` |
+| `ingress.host` | Public Ingress hostname | `trace.n2d.id.vn` |
 | `secrets.existingSecret` | Name of pre-created secret | `""` |
 | `secrets.internalApiToken` | Token for edge-to-storage internal communication | Auto-configured |
 

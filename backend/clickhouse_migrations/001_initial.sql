@@ -1,5 +1,7 @@
 -- ClickHouse Schema Migration 001: Initial Complete Schema
 -- Defines all TraceScope tables using native ClickHouse engines, partitioning, and sorting keys.
+-- ClickHouse is the sole live persistence layer: raw evidence and all derived
+-- views share one store, preventing dashboard/anomaly disagreement during ingest.
 
 CREATE TABLE IF NOT EXISTS schema_migrations (
     version String,
@@ -7,6 +9,7 @@ CREATE TABLE IF NOT EXISTS schema_migrations (
 ) ENGINE = ReplacingMergeTree(applied_at_ms)
 ORDER BY (version);
 
+-- Raw traces retain sanitized evidence. Partitioning by time keeps retention and range scans bounded.
 CREATE TABLE IF NOT EXISTS traces (
     id UInt64 DEFAULT toUnixTimestamp64Micro(now64(6)),
     event_uid LowCardinality(String),
@@ -58,6 +61,7 @@ CREATE TABLE IF NOT EXISTS traces (
 PARTITION BY toYYYYMM(toDateTime(intDiv(timestamp_ms, 1000)))
 ORDER BY (service_name, timestamp_ms, trace_id, span_id);
 
+-- Materialized rollups shield interactive dashboards from scanning high-volume trace rows.
 CREATE TABLE IF NOT EXISTS metric_buckets (
     id UInt64 DEFAULT toUnixTimestamp64Micro(now64(6)),
     bucket_start Int64,
@@ -80,6 +84,7 @@ CREATE TABLE IF NOT EXISTS metric_buckets (
 PARTITION BY toYYYYMM(toDateTime(bucket_start))
 ORDER BY (bucket_size, bucket_start, caller_service, target_service, principal_name, operation);
 
+-- Dependency tables make topology and blast-radius queries predictable rather than recursive raw scans.
 CREATE TABLE IF NOT EXISTS service_edges (
     caller_service String,
     target_service String,
@@ -107,6 +112,7 @@ CREATE TABLE IF NOT EXISTS principal_service_edges (
 ) ENGINE = ReplacingMergeTree(last_seen)
 ORDER BY (principal_name, caller_service, target_service);
 
+-- Robust baselines are stored separately so detector expectations survive worker restarts.
 CREATE TABLE IF NOT EXISTS baseline_metrics (
     id UInt64 DEFAULT 0,
     dimension_type String,
@@ -125,6 +131,7 @@ CREATE TABLE IF NOT EXISTS baseline_metrics (
 ) ENGINE = ReplacingMergeTree(updated_at)
 ORDER BY (dimension_type, dimension_key, hour_of_day, day_of_week);
 
+-- Immutable anomaly observations stay distinct from operator-managed incident state.
 CREATE TABLE IF NOT EXISTS anomaly_events (
     id UInt64 DEFAULT toUnixTimestamp64Micro(now64(6)),
     detected_at UInt64,
@@ -150,6 +157,7 @@ CREATE TABLE IF NOT EXISTS anomaly_events (
 ) ENGINE = ReplacingMergeTree()
 ORDER BY (id);
 
+-- Identity-derived relations hold normalized behavior, never reusable authentication material.
 CREATE TABLE IF NOT EXISTS principals (
     id UInt64 DEFAULT 0,
     principal_name String,
@@ -288,6 +296,7 @@ CREATE TABLE IF NOT EXISTS principal_change_events (
 ) ENGINE = ReplacingMergeTree()
 ORDER BY (fingerprint);
 
+-- Latest and history tables separate fleet-health reads from bounded forensic retention.
 CREATE TABLE IF NOT EXISTS agent_stats_latest (
     node String,
     instance_id String,
@@ -367,6 +376,7 @@ CREATE TABLE IF NOT EXISTS agent_stats_history (
 PARTITION BY toYYYYMM(toDateTime(observed_at))
 ORDER BY (node, instance_id, sequence);
 
+-- Batch IDs provide replay safety when a shipper retries after a lost response.
 CREATE TABLE IF NOT EXISTS ingest_batches (
     batch_id String,
     node Nullable(String),
@@ -377,6 +387,7 @@ CREATE TABLE IF NOT EXISTS ingest_batches (
 ORDER BY (batch_id)
 TTL toDateTime(intDiv(received_at_ms, 1000)) + INTERVAL 7 DAY;
 
+-- Incident and behavioral state use versioned rows because ClickHouse mutations are not row locks.
 CREATE TABLE IF NOT EXISTS incidents (
     incident_id String,
     principal_id String,
@@ -458,6 +469,7 @@ CREATE TABLE IF NOT EXISTS operator_overrides (
 ) ENGINE = ReplacingMergeTree(created_at)
 ORDER BY (scope_type, scope_value, id);
 
+-- Quality windows prevent detectors from treating known incomplete telemetry as behavioral change.
 CREATE TABLE IF NOT EXISTS telemetry_quality_windows (
     window_start_sec UInt32,
     window_end_sec UInt32,
@@ -490,6 +502,7 @@ CREATE TABLE IF NOT EXISTS jobs (
 ) ENGINE = ReplacingMergeTree()
 ORDER BY (name);
 
+-- Legacy-compatible analytical tables remain in the same store during API contract migration.
 CREATE TABLE IF NOT EXISTS services (
     name String,
     environment LowCardinality(String) DEFAULT 'production',
@@ -647,4 +660,3 @@ CREATE TABLE IF NOT EXISTS dirty_buckets (
     created_at_ms Int64
 ) ENGINE = ReplacingMergeTree()
 ORDER BY (bucket_ms);
-

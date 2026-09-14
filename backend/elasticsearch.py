@@ -47,5 +47,5 @@ class ElasticsearchReader:
             totals["inserted"] += inserted
             totals["duplicates"] += len(traces)-inserted
             with db_transaction() as db:
-                db.execute("INSERT INTO checkpoints VALUES ('elasticsearch',?,?) ON CONFLICT(source) DO UPDATE SET cursor_json=excluded.cursor_json,updated_at_ms=excluded.updated_at_ms",(json.dumps(cursor),int(time.time()*1000)))
+                db.execute("INSERT INTO checkpoints VALUES ('elasticsearch',?,?)",(json.dumps(cursor),int(time.time()*1000)))
         return totals

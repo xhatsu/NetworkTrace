@@ -31,10 +31,10 @@ clickhouse:
   resources:
     requests:
       cpu: 300m
-      memory: 1Gi
+      memory: 2Gi
     limits:
       cpu: "2"
-      memory: 2Gi
+      memory: 4Gi
   host: ""
   port: 8123
   database: tracescope
@@ -51,7 +51,7 @@ app:
   replicaCount: 1
   image:
     repository: xhatsu101/tracescope
-    tag: app-0.1.0
+    tag: app-0.2.2
     pullPolicy: IfNotPresent
   resources:
     requests:
@@ -76,10 +76,10 @@ app:
 # Ingestion Workload (Stateless Deployment)
 # -----------------------------------------------------------------------------
 ingest:
-  replicaCount: 3
+  replicaCount: 2
   image:
     repository: xhatsu101/tracescope
-    tag: ingest-0.1.0
+    tag: ingest-0.2.2
     pullPolicy: IfNotPresent
   autoscaling:
     enabled: true
@@ -91,7 +91,7 @@ ingest:
       cpu: 200m
       memory: 384Mi
     limits:
-      cpu: "2"
+      cpu: "1"
       memory: 2Gi
 
 # -----------------------------------------------------------------------------
@@ -104,7 +104,7 @@ agentStats:
   replicaCount: 2
   image:
     repository: xhatsu101/tracescope
-    tag: app-0.1.0
+    tag: app-0.2.2
     pullPolicy: IfNotPresent
   autoscaling:
     enabled: true
@@ -124,13 +124,14 @@ agentStats:
 # Default: false (merged directly into the Storage API pod, saving 2 pods and
 # eliminating extra Nginx config drift; the API pod natively serves / and /assets).
 # Set enabled: true if you want a dedicated standalone Nginx edge for static assets.
+# Note: enabling standalone UI requires a dedicated nginx 'ui' image target (do not use app image).
 # -----------------------------------------------------------------------------
 ui:
   enabled: false
   replicaCount: 2
   image:
     repository: xhatsu101/tracescope
-    tag: app-0.1.0
+    tag: app-0.2.2
     pullPolicy: IfNotPresent
   resources:
     requests:
@@ -145,13 +146,24 @@ ui:
 # -----------------------------------------------------------------------------
 secrets:
   existingSecret: ""
-  internalApiToken: "tracescope-internal-token-change-in-production"
+  # Real values live in gitignored values-secrets.yaml (helm upgrade -f values-secrets.yaml)
+  internalApiToken: ""
   apiKey: ""
 
 config:
   retentionDays: 30
   demoMode: false
-  corsOrigins: "http://localhost:30102,http://tracescope.local"
+  corsOrigins: "http://localhost:30102,http://tracescope.local,https://trace.n2d.id.vn"
+  # Backend resource controls, aggregation budgets & anomaly engine knobs
+  ingestMaxBatchBytes: 33554432
+  aggregationMaxMemoryUsage: 1073741824
+  aggregationExternalGroupByBytes: 268435456
+  aggregationShadowEnabled: true
+  aggregationCutover: false
+  baselineCadenceSeconds: 300
+  baselineSeriesBudget: 100
+  anomalyWindowBudget: 100
+  analyticsStageBudgetSeconds: 55
   highTpsWriter:
     queueCapacity: 256
     coalesceMs: 5
@@ -165,6 +177,8 @@ config:
 ingress:
   enabled: true
   className: nginx
+  serverSnippet:
+    enabled: true
   annotations:
     nginx.ingress.kubernetes.io/proxy-body-size: "16m"
     nginx.ingress.kubernetes.io/proxy-read-timeout: "70"

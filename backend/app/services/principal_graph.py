@@ -1,3 +1,5 @@
+"""Keep graph construction at the repository boundary so queries use derived relations."""
+
 from backend.app.repositories.user_repository import UserRepository
 
 

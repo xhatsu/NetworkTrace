@@ -1,3 +1,4 @@
+# Route by public path so role isolation is invisible to existing shippers and UI clients.
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
@@ -13,6 +14,8 @@ metadata:
     # (65s) before it answers.
     nginx.ingress.kubernetes.io/proxy-read-timeout: "70"
     nginx.ingress.kubernetes.io/proxy-send-timeout: "70"
+    nginx.ingress.kubernetes.io/server-snippet: |
+      location ^~ /internal/ { return 404; }
 spec:
   ingressClassName: nginx
   rules:

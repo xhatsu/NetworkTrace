@@ -10,12 +10,12 @@ from backend.app.models.trace import NormalizedTrace
 from backend.app.repositories.trace_repository import TraceRepository
 from backend.app.services.normalization import normalize_otel_record
 from backend.fixtures import synthetic_documents
-from backend.repository import SQLiteRepository
+from backend.repository import StorageRepository
 
 
 @pytest.fixture(scope="module", autouse=True)
 def seed_test_data():
-    SQLiteRepository().migrate()
+    StorageRepository().migrate()
     traces = [trace for doc in synthetic_documents(300, 8) if (trace := normalize_otel_record(doc))]
     TraceRepository().insert_traces(traces)
 

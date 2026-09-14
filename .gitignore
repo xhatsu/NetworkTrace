@@ -15,3 +15,5 @@ frontend/vite.config.d.ts
 .env
 benchmark-output/
 .hermes/
+values-secrets.yaml
+deploy/helm/tracescope/values-secrets.yaml

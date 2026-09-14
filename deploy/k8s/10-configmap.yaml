@@ -7,8 +7,8 @@ metadata:
     app.kubernetes.io/name: tracescope
 data:
   # --- storage -------------------------------------------------------------
-  # Only the storage-owner pod mounts the ReadWriteOnce claim. Edge workloads
-  # use an authenticated internal HTTP boundary and never open this path.
+  # ClickHouse owns durable data; the legacy path remains only a rollback/import
+  # location and is never mounted by the scalable edge workloads.
   OTEL_RETENTION_DAYS: "30"
   # --- ClickHouse configuration --------------------------------------------
   OTEL_CLICKHOUSE_HOST: "tracescope-clickhouse"
@@ -17,13 +17,15 @@ data:
   OTEL_CLICKHOUSE_USER: "default"
   OTEL_CLICKHOUSE_SECURE: "false"
   # --- schema ownership ----------------------------------------------------
-  # The storage pod init container overrides this to true. Runtime containers
-  # leave it false so a rollout cannot race schema changes.
+  # The app init container overrides this to true. Runtime containers leave it
+  # false so independently rolled pods cannot race ClickHouse schema changes.
   OTEL_RUN_MIGRATIONS: "false"
   # --- behaviour -----------------------------------------------------------
   OTEL_DEMO_MODE: "false"
   OTEL_CORS_ORIGINS: "http://localhost:30102,http://tracescope.local"
   # --- high-TPS ingest writer ---------------------------------------------
+  # These bounds trade a few milliseconds of latency for efficient block inserts
+  # and define when callers receive HTTP 429 plus a retry hint instead of OOM risk.
   OTEL_INGEST_QUEUE_CAPACITY: "256"
   OTEL_INGEST_COALESCE_MS: "5"
   OTEL_INGEST_TRANSACTION_RECORDS: "50000"

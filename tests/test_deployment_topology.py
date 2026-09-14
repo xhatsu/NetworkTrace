@@ -13,6 +13,8 @@ from __future__ import annotations
 
 import importlib.util
 import shutil
+import re
+import subprocess
 from pathlib import Path
 
 import httpx
@@ -25,6 +27,7 @@ from backend.app.application import (
     VALID_ROLES,
     create_app,
 )
+from backend.config import settings
 
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
@@ -42,6 +45,15 @@ def _load_validator():
 
 
 validator = _load_validator()
+
+
+def _load_bootstrap():
+    path = REPO_ROOT / "bootstrap" / "nt-bootstrap.py"
+    spec = importlib.util.spec_from_file_location("tracescope_bootstrap", path)
+    module = importlib.util.module_from_spec(spec)
+    assert spec and spec.loader
+    spec.loader.exec_module(module)
+    return module
 
 
 def _openapi_paths(app) -> set[str]:
@@ -156,6 +168,32 @@ def test_health_reports_the_running_role():
         assert body["service_role"] == role
 
 
+def test_every_public_mutation_uses_the_central_api_key_policy():
+    previous = settings.api_key
+    object.__setattr__(settings, "api_key", "central-policy-key")
+    try:
+        app = create_app(ROLE_ALL)
+        checked = set()
+        for path, operations in app.openapi()["paths"].items():
+            if path.startswith("/internal/"):
+                continue
+            for method in set(operations) & {"post", "put", "patch", "delete"}:
+                concrete = re.sub(r"\{[^}]+\}", "test-value", path)
+                response = _request(app, method.upper(), concrete, content=b"{}", headers={"content-type": "application/json"})
+                assert response.status_code == 401, (method, path, response.status_code)
+                checked.add((method, path))
+        assert checked
+    finally:
+        object.__setattr__(settings, "api_key", previous)
+
+
+@pytest.mark.parametrize("path", ["/../AGENTS.md", "/%2e%2e/AGENTS.md", "/..%2FAGENTS.md"])
+def test_spa_fallback_rejects_path_traversal(path):
+    response = _request(create_app(ROLE_ALL), "GET", path)
+    assert response.status_code in {200, 400, 404}
+    assert b"xHatsu" not in response.content
+
+
 # ---------------------------------------------------------------------------
 # 2. IngestWriter lifecycle scoping
 # ---------------------------------------------------------------------------
@@ -168,7 +206,7 @@ def test_only_ingest_capable_roles_start_the_sqlite_writer(monkeypatch):
     monkeypatch.setattr(
         application.ingest_writer, "shutdown", lambda *a, **k: events.append("shutdown")
     )
-    monkeypatch.setattr(application.SQLiteRepository, "migrate", lambda _self: None)
+    monkeypatch.setattr(application.StorageRepository, "migrate", lambda _self: None)
 
     async def run_lifespan(role):
         role_app = create_app(role)
@@ -201,7 +239,7 @@ def test_remote_ingest_role_does_not_start_a_sqlite_writer(monkeypatch):
     monkeypatch.setattr(application.storage_owner_client, "shutdown", _async_noop)
     monkeypatch.setattr(application.ingest_writer, "start", lambda: events.append("start"))
     monkeypatch.setattr(application.ingest_writer, "shutdown", lambda: events.append("shutdown"))
-    monkeypatch.setattr(application.SQLiteRepository, "migrate", lambda _self: None)
+    monkeypatch.setattr(application.StorageRepository, "migrate", lambda _self: None)
 
     async def run_lifespan():
         role_app = create_app(ROLE_INGEST)
@@ -232,6 +270,21 @@ def test_dockerfile_defines_all_four_role_targets():
     assert "PYTHONDONTWRITEBYTECODE=1" in text
 
 
+def test_bootstrap_scripts_require_https_and_verify_pinned_digests():
+    bootstrap = _load_bootstrap()
+    digest = "a" * 64
+    modern = bootstrap.generate_bootstrap_script(
+        "hub.example", 30105, 30102, "https://bootstrap.example", digest,
+    )
+    legacy = bootstrap.generate_oldkernel_bootstrap_script(
+        "hub.example", 30105, 30102, "https://bootstrap.example", digest,
+    )
+    for script in (modern, legacy):
+        assert 'EXPECTED_SHA256="{}"'.format(digest) in script
+        assert "sha256sum" in script
+        assert 'BOOTSTRAP_URL="https://bootstrap.example' in script
+
+
 # ---------------------------------------------------------------------------
 # 4. Kubernetes manifests
 # ---------------------------------------------------------------------------
@@ -252,6 +305,29 @@ def test_manifests_validate_cleanly():
     assert kinds.count("Deployment") == 1
     assert kinds.count("Service") == 4
     assert kinds.count("HorizontalPodAutoscaler") == 1
+
+
+def test_helm_requires_private_token_and_propagates_storage_credentials():
+    helm = shutil.which("helm")
+    if helm is None:
+        pytest.skip("helm is not installed")
+    chart = REPO_ROOT / "deploy" / "helm" / "tracescope"
+    rejected = subprocess.run([
+        helm, "template", "test", str(chart),
+        "--set", "secrets.internalApiToken=",
+    ], text=True, capture_output=True)
+    assert rejected.returncode != 0
+    assert "internalApiToken" in rejected.stderr
+    rendered = subprocess.run([
+        helm, "template", "test", str(chart),
+        "--set", "secrets.internalApiToken=0123456789abcdef0123456789abcdef",
+        "--set", "clickhouse.password=secret-password",
+    ], text=True, capture_output=True, check=True).stdout
+    assert "OTEL_STORAGE_OWNER_URL" in rendered
+    assert "location ^~ /internal/ { return 404; }" in rendered
+    assert "OTEL_CLICKHOUSE_PASSWORD" in rendered
+    assert "CLICKHOUSE_PASSWORD" in rendered
+    assert "app-0.1.0" not in rendered and "ingest-0.1.0" not in rendered
 
 
 def test_only_clickhouse_mounts_data_and_edges_scale():

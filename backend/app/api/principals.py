@@ -1,3 +1,4 @@
+"""Read identity behavior from normalized evidence rather than raw credentials."""
 from __future__ import annotations
 import time
 from typing import Any, Dict, List, Optional

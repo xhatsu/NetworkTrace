@@ -1,3 +1,4 @@
+# Headless discovery remains for compatibility with optional internal-storage routing.
 apiVersion: v1
 kind: Service
 metadata:

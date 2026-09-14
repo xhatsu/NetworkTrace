@@ -14,6 +14,7 @@ Separated service:
 """
 
 import math
+import hashlib
 import os
 import random
 import socket
@@ -24,6 +25,7 @@ import tarfile
 import threading
 import urllib.request
 import urllib.error
+import re
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -34,6 +36,7 @@ BUNDLE_TAR_PATH = os.environ.get("BUNDLE_TAR_PATH", os.path.join(BASE_DIR, "bund
 BOOTSTRAP_PORT = int(os.environ.get("BOOTSTRAP_PORT", "30105"))
 HUB_PORT = int(os.environ.get("HUB_PORT", "30102"))
 DEFAULT_HOST = os.environ.get("HUB_HOST", "")
+PUBLIC_URL = os.environ.get("BOOTSTRAP_PUBLIC_URL", "").rstrip("/")
 
 tar_lock = threading.Lock()
 
@@ -88,7 +91,15 @@ def ensure_bundle_tar():
             return None
 
 
-def generate_bootstrap_script(hub_host, bootstrap_port, hub_port):
+def _sha256_file(path):
+    digest = hashlib.sha256()
+    with open(path, "rb") as source:
+        for chunk in iter(lambda: source.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def generate_bootstrap_script(hub_host, bootstrap_port, hub_port, bootstrap_url=None, bundle_sha256=None):
     """Generate a 100% POSIX /bin/sh script to bootstrap the agent on remote nodes."""
     return f"""#!/bin/sh
 # NetworkTracing remote agent bootstrap script (POSIX sh)
@@ -100,7 +111,8 @@ BOOTSTRAP_PORT="{bootstrap_port}"
 HUB_HOST="{hub_host}"
 HUB_PORT="{hub_port}"
 
-BOOTSTRAP_URL="http://${{BOOTSTRAP_HOST}}:${{BOOTSTRAP_PORT}}"
+BOOTSTRAP_URL="{bootstrap_url or f'https://{hub_host}:{bootstrap_port}'}"
+EXPECTED_SHA256="{bundle_sha256 or ''}"
 HUB_ENDPOINT="http://${{HUB_HOST}}:${{HUB_PORT}}"
 
 # Parse any custom arguments passed to bootstrap
@@ -151,6 +163,16 @@ download_file() {{
 log "Downloading deployment bundle from $BOOTSTRAP_URL/bundle.tar.gz..."
 download_file "$BOOTSTRAP_URL/bundle.tar.gz" "$TMPDIR/bundle.tar.gz" || die "Failed to download bundle archive"
 
+[ -n "$EXPECTED_SHA256" ] || die "Bootstrap bundle digest is not configured"
+if command -v sha256sum >/dev/null 2>&1; then
+    printf '%s  %s\n' "$EXPECTED_SHA256" "$TMPDIR/bundle.tar.gz" | sha256sum -c - >/dev/null 2>&1 || die "Bundle SHA-256 verification failed"
+elif command -v openssl >/dev/null 2>&1; then
+    _actual=$(openssl dgst -sha256 "$TMPDIR/bundle.tar.gz" | sed 's/^.*= //')
+    [ "$_actual" = "$EXPECTED_SHA256" ] || die "Bundle SHA-256 verification failed"
+else
+    die "sha256sum or openssl is required to authenticate the bundle"
+fi
+
 log "Extracting bundle..."
 tar -xzf "$TMPDIR/bundle.tar.gz" -C "$TMPDIR" || die "Failed to extract bundle archive"
 
@@ -178,7 +200,7 @@ esac
 """
 
 
-def generate_oldkernel_bootstrap_script(hub_host, bootstrap_port, hub_port):
+def generate_oldkernel_bootstrap_script(hub_host, bootstrap_port, hub_port, bootstrap_url=None, installer_sha256=None):
     """Generate a 100% POSIX /bin/sh script to bootstrap the legacy agent on CentOS 6.x / 2.6.32+ nodes."""
     return f"""#!/bin/sh
 # NetworkTracing Oldkernel Agent Bootstrap Script (POSIX sh)
@@ -190,7 +212,8 @@ BOOTSTRAP_PORT="{bootstrap_port}"
 HUB_HOST="{hub_host}"
 HUB_PORT="{hub_port}"
 
-BOOTSTRAP_URL="http://${{BOOTSTRAP_HOST}}:${{BOOTSTRAP_PORT}}/oldkernel"
+BOOTSTRAP_URL="{(bootstrap_url or f'https://{hub_host}:{bootstrap_port}') + '/oldkernel'}"
+EXPECTED_SHA256="{installer_sha256 or ''}"
 HUB_ENDPOINT="http://${{HUB_HOST}}:${{HUB_PORT}}"
 
 # Parse any custom arguments passed to bootstrap
@@ -267,6 +290,13 @@ download_file() {{
 
 log "Downloading self-contained installer from $BOOTSTRAP_URL/install-firstrun-el68.sh..."
 download_file "$BOOTSTRAP_URL/install-firstrun-el68.sh" "$TMPDIR/install-firstrun-el68.sh" || die "Failed to download installer"
+[ -n "$EXPECTED_SHA256" ] || die "Bootstrap installer digest is not configured"
+if command -v sha256sum >/dev/null 2>&1; then
+    printf '%s  %s\n' "$EXPECTED_SHA256" "$TMPDIR/install-firstrun-el68.sh" | sha256sum -c - >/dev/null 2>&1 || die "Installer SHA-256 verification failed"
+else
+    _actual=$(openssl dgst -sha256 "$TMPDIR/install-firstrun-el68.sh" | sed 's/^.*= //')
+    [ "$_actual" = "$EXPECTED_SHA256" ] || die "Installer SHA-256 verification failed"
+fi
 chmod 755 "$TMPDIR/install-firstrun-el68.sh"
 
 log "Executing installer..."
@@ -321,16 +351,16 @@ class BootstrapHandler(BaseHTTPRequestHandler):
     def _get_hub_host(self):
         """Determine the IP or hostname of the hub."""
         if DEFAULT_HOST:
-            return DEFAULT_HOST
-        host_hdr = self.headers.get("Host", "")
-        if host_hdr:
-            # Handle host:port or [ipv6]:port
+            candidate = DEFAULT_HOST
+        else:
+            host_hdr = self.headers.get("Host", "")
             if host_hdr.startswith("[") and "]" in host_hdr:
-                return host_hdr.split("]")[0] + "]"
-            return host_hdr.split(":")[0]
-        # Fallback to local server address
-        sa = self.server.server_address
-        return sa[0] if sa[0] not in ("0.0.0.0", "::") else "127.0.0.1"
+                candidate = host_hdr.split("]")[0] + "]"
+            else:
+                candidate = host_hdr.split(":")[0]
+        if candidate and re.fullmatch(r"(?:[A-Za-z0-9](?:[A-Za-z0-9.-]{0,251}[A-Za-z0-9])?|\[[0-9A-Fa-f:]+\])", candidate):
+            return candidate
+        return None
 
     def do_HEAD(self):
         self._is_head = True
@@ -418,13 +448,19 @@ Telemetry Hub:
         # Oldkernel dedicated bootstrap script (one-line installer)
         if path in ("/oldkernel/bootstrap", "/oldkernel/bootstrap.sh", "/oldkernel/install", "/oldkernel/install.sh", "/bootstrap-oldkernel") or (path in ("/bootstrap", "/bootstrap.sh") and is_oldkernel_query):
             hub_host = self._get_hub_host()
-            script = generate_oldkernel_bootstrap_script(hub_host, BOOTSTRAP_PORT, HUB_PORT)
+            if not hub_host or not PUBLIC_URL.startswith("https://"):
+                return self._reply_text(400, "A valid Host and HTTPS BOOTSTRAP_PUBLIC_URL are required\n")
+            installer = os.path.join(PARENT_DIR, "oldkernel", "install-firstrun-el68.sh")
+            script = generate_oldkernel_bootstrap_script(hub_host, BOOTSTRAP_PORT, HUB_PORT, PUBLIC_URL, _sha256_file(installer))
             return self._reply_text(200, script, content_type="text/x-shellscript; charset=utf-8")
 
         # Standard modern bootstrap shell script
         if path in ("/bootstrap", "/bootstrap.sh"):
             hub_host = self._get_hub_host()
-            script = generate_bootstrap_script(hub_host, BOOTSTRAP_PORT, HUB_PORT)
+            if not hub_host or not PUBLIC_URL.startswith("https://"):
+                return self._reply_text(400, "A valid Host and HTTPS BOOTSTRAP_PUBLIC_URL are required\n")
+            tar_file = ensure_bundle_tar()
+            script = generate_bootstrap_script(hub_host, BOOTSTRAP_PORT, HUB_PORT, PUBLIC_URL, _sha256_file(tar_file))
             return self._reply_text(200, script, content_type="text/x-shellscript; charset=utf-8")
 
         # Raw install.sh
@@ -570,12 +606,6 @@ Telemetry Hub:
             try:
                 with open(fp, "rb") as f:
                     data = f.read()
-                if name == "install-firstrun-el68.sh":
-                    hub_host = self._get_hub_host()
-                    # Inject default server/endpoint so running `curl ... | sudo sh` works out-of-the-box without --server
-                    data = data.replace(b'ENDPOINT=""', f'ENDPOINT="${{ENDPOINT:-http://{hub_host}:{HUB_PORT}}}"'.encode("utf-8"), 1)
-                    data = data.replace(b'KIT_URLS="${NT_HUB:-}"', f'KIT_URLS="${{NT_HUB:-http://{hub_host}:{BOOTSTRAP_PORT}/oldkernel}}"'.encode("utf-8"), 1)
-                    data = data.replace(b'SERVER=""', f'SERVER="${{SERVER:-http://{hub_host}:{HUB_PORT}}}"'.encode("utf-8"), 1)
                 self.send_response(200)
                 self.send_header("Content-Type", content_type)
                 self.send_header("Content-Length", str(len(data)))

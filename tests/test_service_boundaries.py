@@ -8,7 +8,18 @@ import httpx
 
 from backend.app.application import ROLE_AGENT_STATS, ROLE_ALL, ROLE_INGEST, create_app
 from backend.app.services.storage_owner_client import storage_owner_client
-from backend.repository import SQLiteRepository
+from backend.app.repositories.db_context import get_connection
+from backend.repository import StorageRepository
+
+
+def test_agent_history_has_physical_one_day_ttl():
+    StorageRepository().migrate()
+    with get_connection() as db:
+        ddl = db.client.query(
+            "SELECT create_table_query FROM system.tables WHERE database={db:String} AND name='agent_stats_history'",
+            parameters={"db": db.database},
+        ).result_rows[0][0]
+    assert "TTL toDateTime(observed_at)" in ddl and "toIntervalDay(1)" in ddl
 
 
 def _request(app, method: str, path: str, **kwargs):
@@ -101,7 +112,7 @@ def test_agent_edge_forwards_lifecycle_operations(monkeypatch):
 def test_internal_agent_storage_requires_token_and_deduplicates(monkeypatch):
     import backend.app.api.internal_storage as internal_storage
 
-    SQLiteRepository().migrate()
+    StorageRepository().migrate()
     token = "test-internal-token"
     monkeypatch.setattr(
         internal_storage,

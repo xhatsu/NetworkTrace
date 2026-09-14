@@ -1,3 +1,4 @@
+"""Use deterministic evidence ordering so probable-origin explanations are reproducible."""
 from __future__ import annotations
 from typing import Any, Dict, List, Optional
 

@@ -10,7 +10,7 @@ from backend.app.repositories.trace_repository import TraceRepository
 from backend.app.services.normalization import normalize_otel_record
 from backend.app.services.wsse import extract_wsse_username
 from backend.main import app
-from backend.repository import SQLiteRepository
+from backend.repository import StorageRepository
 
 
 OASIS_2004 = "http://docs.oasis-open.org/wss/2004/01/oasis-200401-wss-wssecurity-secext-1.0.xsd"
@@ -23,7 +23,7 @@ LEGACY_NAMESPACES = (
 
 @pytest.fixture(scope="module", autouse=True)
 def migrate_test_database():
-    SQLiteRepository().migrate()
+    StorageRepository().migrate()
 
 
 def soap_fixture(namespace: str, username: str = "  billing.user  ") -> str:

@@ -2,6 +2,9 @@
 
 Protects against duplicate event injection when shippers retry requests after
 network timeouts or lost HTTP 200 responses.
+
+The durable ClickHouse table is authoritative; the bounded LRU only removes
+repeat lookup cost from the high-throughput retry path.
 """
 from __future__ import annotations
 
@@ -15,6 +18,7 @@ from backend.app.repositories.db_context import get_connection
 
 log = logging.getLogger("tracescope-hub")
 
+# Keep replay protection long enough for delayed shipper retries without retaining IDs indefinitely.
 _DEFAULT_RETENTION_MS = 7 * 24 * 3600 * 1000  # 7 days
 _MAX_CACHE_ENTRIES = 50_000
 
@@ -34,6 +38,7 @@ class IngestBatchRepository:
             return False
 
         with self._lock:
+            # A cache hit is safe because entries are added only after durable acceptance.
             if batch_id in self._cache:
                 self._cache.move_to_end(batch_id)
                 return True
@@ -71,7 +76,7 @@ class IngestBatchRepository:
             with get_connection(self.db_path) as db:
                 db.execute(
                     """
-                    INSERT OR IGNORE INTO ingest_batches (batch_id, node, record_count, received_at_ms, status)
+                    INSERT INTO ingest_batches (batch_id, node, record_count, received_at_ms, status)
                     VALUES (?, ?, ?, ?, ?)
                     """,
                     (batch_id, node, record_count, now_ms, status)

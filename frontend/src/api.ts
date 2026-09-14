@@ -6,7 +6,11 @@ export function queryString(
 ) {
   const p = new URLSearchParams();
   Object.entries({ ...filters, ...extra }).forEach(([k, v]) => {
-    if (v) p.set(k, v);
+    const key = k === "start" ? "from" : k === "end" ? "to" : k;
+    if (v) {
+      const value = (k === "start" || k === "end") ? String(Date.parse(v)) : v;
+      p.set(key, value);
+    }
   });
   return p.toString();
 }

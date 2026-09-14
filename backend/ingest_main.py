@@ -11,9 +11,9 @@ Run with::
 
     uvicorn backend.ingest_main:app --host 0.0.0.0 --port 30103
 
-With ``OTEL_STORAGE_OWNER_URL`` configured (the Kubernetes default), this
-process forwards normalized records to the single storage owner and never
-opens SQLite. Without it, local standalone mode retains the in-process writer.
+When the optional ``OTEL_STORAGE_OWNER_URL`` boundary is configured, this role
+forwards normalized records to the designated durable-operation owner. Otherwise
+it uses the in-process ClickHouse writer, while remaining storage-volume-free.
 """
 from __future__ import annotations
 

@@ -52,10 +52,11 @@ export function PrincipalsPage() {
   const { filters } = useFilters();
   const nav = useNavigate();
   const [searchTerm, setSearchTerm] = useState("");
+  const qs = queryString(filters);
 
   const q = useQuery({
-    queryKey: ["principals"],
-    queryFn: () => api<{ items: PrincipalItem[]; count: number }>("/api/v1/principals?limit=200"),
+    queryKey: ["principals", qs],
+    queryFn: () => api<{ items: PrincipalItem[]; count: number }>(`/api/v1/principals?${qs}&limit=200`),
   });
 
   const filteredItems = (q.data?.items || []).filter((p) => {
@@ -176,10 +177,11 @@ export function PrincipalDetailPage() {
   const principalName = name || username;
   const { filters } = useFilters();
   const nav = useNavigate();
+  const qs = queryString(filters);
 
   const q = useQuery({
-    queryKey: ["principal", principalName],
-    queryFn: () => api<PrincipalProfile>(`/api/v1/principals/${encodeURIComponent(principalName)}`),
+    queryKey: ["principal", principalName, qs],
+    queryFn: () => api<PrincipalProfile>(`/api/v1/principals/${encodeURIComponent(principalName)}?${qs}`),
   });
 
   if (q.isLoading) {

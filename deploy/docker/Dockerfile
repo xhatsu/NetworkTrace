@@ -10,9 +10,10 @@
 #   docker build -f deploy/docker/Dockerfile --target agent-stats -t tracescope-agent-stats:latest .
 #   docker build -f deploy/docker/Dockerfile --target worker      -t tracescope-worker:latest .
 #
-# The `ui` target bundles nginx serving the compiled React SPA.
-# The `api` target serves analytics and administration APIs.
-# The `ingest`, `agent-stats` and `worker` targets are API/worker-only.
+# The `ui` target is intentionally stateless: cached frontend assets can scale
+# independently because all mutable telemetry lives in ClickHouse.
+# The `api` target serves analytics and administration APIs; `ingest`,
+# `agent-stats`, and `worker` omit UI responsibilities to keep their roles narrow.
 
 # ---------------------------------------------------------------------------
 # Stage 1 — build the React/TypeScript SPA
@@ -25,7 +26,7 @@ COPY frontend/ ./
 RUN npm run build
 
 # ---------------------------------------------------------------------------
-# Target: ui — stateless nginx serving compiled frontend
+# Target: ui — stateless nginx serving compiled frontend without storage credentials
 # ---------------------------------------------------------------------------
 FROM nginx:alpine AS ui
 COPY --from=ui-builder /src/frontend/dist /usr/share/nginx/html
@@ -36,19 +37,18 @@ HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
 CMD ["nginx", "-g", "daemon off;"]
 
 # ---------------------------------------------------------------------------
-# Stage 2 — shared Python runtime
+# Stage 2 — shared Python runtime; role-specific entrypoints share one schema contract
 # ---------------------------------------------------------------------------
 FROM python:3.12-slim AS backend-base
 
 ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
     PIP_NO_CACHE_DIR=1 \
-    OTEL_DB_PATH=/data/tracescope.db \
+    OTEL_DATA_DIR=/data \
     OTEL_CLICKHOUSE_HOST=127.0.0.1 \
     OTEL_CLICKHOUSE_PORT=8123 \
     OTEL_CLICKHOUSE_DATABASE=tracescope \
     OTEL_CLICKHOUSE_USER=default \
-    OTEL_CLICKHOUSE_PASSWORD="" \
     OTEL_RUN_MIGRATIONS=false
 
 WORKDIR /app

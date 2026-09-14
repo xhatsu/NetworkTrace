@@ -1,3 +1,4 @@
+"""Define serializable anomaly evidence so detection and API explanation cannot drift."""
 from __future__ import annotations
 from typing import Any, Dict, List, Optional
 from pydantic import BaseModel

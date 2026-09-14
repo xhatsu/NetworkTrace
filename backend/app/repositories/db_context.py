@@ -1,4 +1,10 @@
-"""ClickHouse database context — persistence connection management and DB-API adapter."""
+"""ClickHouse connection context and a narrow SQLite-compatibility adapter.
+
+One canonical ClickHouse schema avoids split-brain reads between ingestion and
+analytics. The adapter preserves established repository SQL contracts during
+cutover, confining dialect translation to this boundary rather than scattering
+storage-specific branches throughout API and detector code.
+"""
 from __future__ import annotations
 
 import datetime
@@ -88,7 +94,7 @@ class ClickHouseCursor:
 
 
 def _convert_placeholders_and_bind(sql: str, params: Sequence[Any] | dict[str, Any] | None) -> str:
-    """Safely convert '?' placeholders to ClickHouse literal-formatted SQL."""
+    """Safely convert legacy placeholders at the storage boundary, never by string interpolation upstream."""
     if not params:
         return sql
     if isinstance(params, dict):
@@ -131,7 +137,6 @@ _RE_INSERT = re.compile(
 )
 _RE_PRAGMA_TABLE_INFO = re.compile(r"^\s*PRAGMA\s+table_info\s*\(\s*([a-zA-Z0-9_]+)\s*\)\s*;?$", re.IGNORECASE)
 _RE_PRAGMA_GENERIC = re.compile(r"^\s*PRAGMA\s+.*$", re.IGNORECASE)
-_RE_ON_CONFLICT = re.compile(r"\s+ON\s+CONFLICT\s*\(.*?\)\s*DO\s+UPDATE\s+SET\s+.*$", re.IGNORECASE | re.DOTALL)
 
 
 class ClickHouseConnection:
@@ -151,7 +156,7 @@ class ClickHouseConnection:
         """
         stripped = sql.strip()
 
-        # Handle PRAGMAs
+        # Legacy callers use PRAGMA for schema discovery; map only the supported shape.
         m_pragma = _RE_PRAGMA_TABLE_INFO.match(stripped)
         if m_pragma:
             table_name = m_pragma.group(1)
@@ -160,23 +165,21 @@ class ClickHouseConnection:
         if _RE_PRAGMA_GENERIC.match(stripped):
             return "NOOP", ""
 
-        # Handle transaction control
+        # Never imply cross-statement transactional semantics that ClickHouse does not provide.
         upper = stripped.upper()
         if upper.startswith(("BEGIN", "COMMIT", "ROLLBACK")):
-            return "NOOP", ""
+            raise NotImplementedError("Explicit SQL transactions are not supported by ClickHouse")
 
-        # Handle ON CONFLICT in INSERT statements
+        # ReplacingMergeTree models mutable entities; retain legacy insert syntax at callers.
         if upper.startswith("INSERT"):
-            # Strip ON CONFLICT clause for ClickHouse
-            stripped = _RE_ON_CONFLICT.sub("", stripped).strip()
-            # Strip OR IGNORE
-            stripped = re.sub(r"^\s*INSERT\s+OR\s+IGNORE\s+INTO", "INSERT INTO", stripped, flags=re.IGNORECASE)
+            if re.match(r"^\s*INSERT\s+OR\s+IGNORE\b", stripped, re.IGNORECASE):
+                raise NotImplementedError("INSERT OR IGNORE must be implemented with an explicit ClickHouse key strategy")
 
-        # Translate scalar MAX(a, b) and MIN(a, b) to ClickHouse greatest/least
+        # Preserve expression intent where SQLite's scalar spelling differs from ClickHouse.
         stripped = re.sub(r"\bMAX\s*\(([^,()]+),\s*([^()]+)\)", r"greatest(\1, \2)", stripped, flags=re.IGNORECASE)
         stripped = re.sub(r"\bMIN\s*\(([^,()]+),\s*([^()]+)\)", r"least(\1, \2)", stripped, flags=re.IGNORECASE)
 
-        # Handle UPDATE -> ALTER TABLE ... UPDATE ... SETTINGS mutations_sync = 1
+        # Wait for mutations so lifecycle APIs retain their historical synchronous visibility guarantee.
         if upper.startswith("UPDATE"):
             m_up = re.match(r"^\s*UPDATE\s+([a-zA-Z0-9_]+)\s+SET\s+(.*?)\s+WHERE\s+(.*)$", stripped, re.IGNORECASE | re.DOTALL)
             if m_up:
@@ -185,7 +188,7 @@ class ClickHouseConnection:
                 bound = _convert_placeholders_and_bind(mut_sql, params)
                 return "MUTATION", bound
 
-        # Handle DELETE -> ALTER TABLE ... DELETE WHERE ... SETTINGS mutations_sync = 1
+        # The same synchronous mutation rule makes delete responses deterministic for operators.
         if upper.startswith("DELETE"):
             m_del = re.match(r"^\s*DELETE\s+FROM\s+([a-zA-Z0-9_]+)(?:\s+WHERE\s+(.*))?$", stripped, re.IGNORECASE | re.DOTALL)
             if m_del:
@@ -272,7 +275,7 @@ class ClickHouseConnection:
         stripped = sql.strip()
         m_insert = _RE_INSERT.match(stripped)
 
-        # High performance columnar/block insert for INSERT statements
+        # Prefer block inserts: small row-by-row parts would undermine ClickHouse ingest throughput.
         if m_insert and m_insert.group(2):
             table = m_insert.group(1)
             raw_cols = m_insert.group(2)
@@ -331,7 +334,7 @@ def resolve_target_db(db_path: Optional[str] = None) -> str:
 
 
 def ensure_db_ready(target_db: str) -> None:
-    """Ensure database exists and migrations are applied once per process lifecycle."""
+    """Initialize a database once per process, avoiding repeated migration checks on hot paths."""
     if target_db not in _initialized_dbs:
         with _init_lock:
             if target_db not in _initialized_dbs:
@@ -341,7 +344,7 @@ def ensure_db_ready(target_db: str) -> None:
 
 
 def get_connection(db_path: Optional[str] = None) -> ClickHouseConnection:
-    """Return a ClickHouseConnection for repository operations."""
+    """Return a thread-local client so concurrent requests do not share mutable driver state."""
     target_db = resolve_target_db(db_path)
     ensure_db_ready(target_db)
 
@@ -369,7 +372,7 @@ def get_connection(db_path: Optional[str] = None) -> ClickHouseConnection:
 
 @contextmanager
 def db_transaction(db_path: Optional[str] = None) -> Iterator[ClickHouseConnection]:
-    """Context manager for atomic ClickHouse repository blocks."""
+    """Keep the repository call shape stable while ClickHouse owns per-statement durability."""
     conn = get_connection(db_path)
     try:
         yield conn

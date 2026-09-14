@@ -1,3 +1,4 @@
+"""Traverse stored service relationships to make incident impact explainable and bounded."""
 from __future__ import annotations
 from typing import Any, Dict, List, Set, Optional
 from backend.app.repositories.db_context import get_connection

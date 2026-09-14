@@ -1,11 +1,10 @@
+"""Preserve legacy hub integrations while keeping policy decisions at the API edge."""
 from __future__ import annotations
 
 import ipaddress
 import json
 import logging
-import os
 import time
-from pathlib import Path
 from typing import Any, Dict, List
 from urllib.parse import parse_qs
 
@@ -18,40 +17,29 @@ from backend.app.repositories.db_context import get_connection
 log = logging.getLogger("tracescope-hub")
 router = APIRouter(tags=["reference_compat"])
 
-POLICY_PATH = Path(settings.db_path).parent / "policy.json"
-_policy_cache: Dict[str, Any] = {"users": {}, "allow": [], "default_allow_private": True}
-_policy_mtime: float = -1.0
+_DEFAULT_POLICY: Dict[str, Any] = {
+    "users": {"admin": ["*"], "ops": ["10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16"]},
+    "allow": [],
+    "default_allow_private": True,
+}
+_policy_cache: Dict[str, Any] = dict(_DEFAULT_POLICY)
 
 
 def load_policy() -> Dict[str, Any]:
-    global _policy_cache, _policy_mtime
+    global _policy_cache
     try:
-        if not POLICY_PATH.exists():
-            POLICY_PATH.parent.mkdir(parents=True, exist_ok=True)
-            default_policy = {
-                "users": {
-                    "admin": ["*"],
-                    "ops": ["10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16"],
-                },
-                "allow": [],
-                "default_allow_private": True,
-            }
-            POLICY_PATH.write_text(json.dumps(default_policy, indent=2))
-            _policy_cache = default_policy
-            _policy_mtime = POLICY_PATH.stat().st_mtime
+        with get_connection() as db:
+            row = db.execute(
+                "SELECT policy_json FROM security_policy FINAL WHERE policy_key='default' LIMIT 1"
+            ).fetchone()
+        if row is None:
             return _policy_cache
-
-        mt = POLICY_PATH.stat().st_mtime
-        if mt == _policy_mtime:
-            return _policy_cache
-        with open(POLICY_PATH, "r", encoding="utf-8") as f:
-            d = json.load(f)
+        d = json.loads(row[0])
         _policy_cache = {
             "users": d.get("users") or {},
             "allow": d.get("allow") or [],
             "default_allow_private": bool(d.get("default_allow_private", True)),
         }
-        _policy_mtime = mt
     except Exception as e:
         log.warning("policy load error: %s", e)
     return _policy_cache
@@ -449,15 +437,22 @@ async def api_policy_post(request: Request) -> Dict[str, Any]:
     except Exception:
         d = {}
 
-    tmp = str(POLICY_PATH) + ".tmp"
     try:
-        with open(tmp, "w", encoding="utf-8") as f:
-            json.dump(d, f, indent=2)
-        os.replace(tmp, POLICY_PATH)
+        normalized = {
+            "users": d.get("users") or {},
+            "allow": d.get("allow") or [],
+            "default_allow_private": bool(d.get("default_allow_private", True)),
+        }
+        with get_connection() as db:
+            db.execute(
+                "INSERT INTO security_policy(policy_key,policy_json,updated_at) VALUES('default',?,?)",
+                (json.dumps(normalized, separators=(",", ":")), int(time.time() * 1000)),
+            )
     except Exception as e:
         return JSONResponse({"error": str(e)}, status_code=400)
 
-    load_policy()
+    global _policy_cache
+    _policy_cache = normalized
     return {"ok": True}
 
 

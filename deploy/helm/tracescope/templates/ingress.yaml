@@ -5,8 +5,18 @@ metadata:
   name: {{ include "tracescope.fullname" . }}
   labels:
     {{- include "tracescope.labels" . | nindent 4 }}
-  {{- with .Values.ingress.annotations }}
   annotations:
+    {{- $snippetEnabled := true }}
+    {{- if kindIs "map" .Values.ingress.serverSnippet }}
+      {{- $snippetEnabled = .Values.ingress.serverSnippet.enabled }}
+    {{- else if hasKey .Values.ingress "serverSnippet" }}
+      {{- $snippetEnabled = eq (toString .Values.ingress.serverSnippet) "true" }}
+    {{- end }}
+    {{- if $snippetEnabled }}
+    nginx.ingress.kubernetes.io/server-snippet: |
+      location ^~ /internal/ { return 404; }
+    {{- end }}
+  {{- with .Values.ingress.annotations }}
     {{- toYaml . | nindent 4 }}
   {{- end }}
 spec:

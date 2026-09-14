@@ -2,6 +2,9 @@
 
 Only the bounded, normalized username is returned.  SOAP bodies and all other
 UsernameToken material (passwords, digests, nonces, and timestamps) are ignored.
+
+This narrow extraction boundary lets identity analytics use WSSE attribution
+without storing replayable SOAP authentication material in ClickHouse.
 """
 from __future__ import annotations
 
@@ -35,6 +38,7 @@ SOAP_BODY_ATTRIBUTES = (
     "body",
 )
 
+# Limits make XML parsing safe on a public ingest path before a value reaches durable storage.
 _MAX_SOAP_BYTES = 64 * 1024
 _MAX_USERNAME_CHARS = 200
 

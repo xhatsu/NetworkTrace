@@ -6,11 +6,14 @@ formats on POST /v1/traces, plus Elastic APM 7.x JSON/NDJSON on POST /api/ingest
 SECURITY LAW:
 Raw passwords and tokens are immediately discarded in-memory and NEVER stored or logged.
 Zero external dependencies: 100% Python standard library.
+
+Transport decoding stays separate from normalization so protocol support can
+grow without changing ClickHouse's canonical analytical dimensions.
 """
 from __future__ import annotations
 
 import base64
-import gzip
+import zlib
 import json
 import logging
 import re
@@ -40,12 +43,21 @@ def decompress_payload(raw_body: bytes, content_encoding: Optional[str] = None, 
         return raw_body
     if (content_encoding and "gzip" in content_encoding.lower()) or raw_body.startswith(b"\x1f\x8b"):
         try:
-            decompressed = gzip.decompress(raw_body)
+            inflater = zlib.decompressobj(16 + zlib.MAX_WBITS)
+            decompressed = inflater.decompress(raw_body, max_bytes + 1)
+            if len(decompressed) > max_bytes or inflater.unconsumed_tail:
+                raise ValueError(f"Decompressed payload exceeds maximum size limit ({max_bytes} bytes)")
+            remaining = max_bytes + 1 - len(decompressed)
+            decompressed += inflater.flush(remaining)
+            if len(decompressed) > max_bytes:
+                raise ValueError(f"Decompressed payload exceeds maximum size limit ({max_bytes} bytes)")
+            if not inflater.eof:
+                raise ValueError("Invalid gzip compressed data: truncated stream")
+        except ValueError:
+            raise
         except Exception as exc:
             log.warning("gzip decompression failed: %s", exc)
             raise ValueError(f"Invalid gzip compressed data: {exc}") from exc
-        if len(decompressed) > max_bytes:
-            raise ValueError(f"Decompressed payload exceeds maximum size limit ({max_bytes} bytes)")
         return decompressed
     return raw_body
 

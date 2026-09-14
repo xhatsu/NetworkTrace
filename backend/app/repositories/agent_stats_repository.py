@@ -14,7 +14,7 @@ from typing import Any
 from backend.app.repositories.db_context import get_connection, db_transaction
 
 
-# Maximum history retention: keep the most recent N rows per node to bound disk growth.
+# Bound fleet-history retention so high-frequency health samples cannot crowd out analytical telemetry.
 _HISTORY_KEEP_PER_NODE = 2880  # ~24 h at 30-second intervals
 
 
@@ -97,6 +97,7 @@ class AgentStatsRepository:
     def is_duplicate(self, node: str, instance_id: str, sequence: int) -> bool:
         """Return True if this exact (node, instance_id, sequence) was already stored."""
         key = (node, instance_id, sequence)
+        # The local cache avoids repeated FINAL reads; ClickHouse remains the durable authority.
         with self._lock:
             if key in self._seen_cache:
                 self._seen_cache.move_to_end(key)
@@ -148,7 +149,7 @@ class AgentStatsRepository:
                  mode, status, reasons_json, raw_json, ingested_at),
             )
 
-            # --- latest: upsert, but only advance if this sequence is newer ---
+            # ReplacingMergeTree can retain versions briefly, so only newer sequences advance the live view.
             existing = conn.execute(
                 "SELECT sequence FROM agent_stats_latest FINAL WHERE node=? AND instance_id=?",
                 (node, instance_id),

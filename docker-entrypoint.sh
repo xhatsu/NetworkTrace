@@ -1,7 +1,7 @@
 #!/bin/sh
 set -eu
 python -m backend.cli migrate
-count=$(python -c "from backend.repository import SQLiteRepository as R; c=R().connect(); print(c.execute('select count(*) from traces').fetchone()[0]); c.close()")
+count=$(python -c "from backend.repository import StorageRepository as R; c=R().connect(); print(c.execute('select count(*) from traces').fetchone()[0]); c.close()")
 if [ "$count" = "0" ] && [ "${OTEL_DEMO_MODE:-false}" = "true" ]; then
   python -m backend.cli demo --events 24000 --services 48
   python -m backend.worker --once

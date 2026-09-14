@@ -41,6 +41,7 @@ try:
             from backend.app.services.normalization import normalize_otel_record
             from backend.app.repositories.trace_repository import TraceRepository
             from backend.app.services.aggregation import aggregate_traces
+            from backend.config import settings
             TRACESCOPE_AVAILABLE = True
             break
 except Exception:
@@ -183,8 +184,8 @@ def run_direct_mode(args: argparse.Namespace):
         print(f" Record Limit:      {args.limit:,}")
     print("=" * 80)
 
-    db_file = str(project_root / "data" / "tracescope.db")
-    repo = TraceRepository(db_path=db_file)
+    database = settings.clickhouse_database
+    repo = TraceRepository(db_path=database)
     batch = []
     total_read = 0
     total_inserted = 0
@@ -238,7 +239,7 @@ def run_direct_mode(args: argparse.Namespace):
 
     if min_ts and max_ts and not args.no_aggregate:
         print(f" Computing analytical rollups over window [{min_ts} -> {max_ts}]...")
-        res = aggregate_traces(min_ts, max_ts + 60_000)
+        res = aggregate_traces(min_ts, max_ts + 60_000, db_path=database)
         print(f" Aggregation result: {res}")
 
         try:
@@ -248,20 +249,20 @@ def run_direct_mode(args: argparse.Namespace):
             from backend.app.repositories.db_context import get_connection
 
             print(" Computing rolling baselines (median & MAD per dimension)...")
-            b_count = rebuild_baselines(db_path=db_file)
+            b_count = rebuild_baselines(db_path=database)
             print(f" Baselines computed: {b_count}")
 
             print(" Evaluating anomaly rules (Detectors 1-8)...")
-            with get_connection(db_file) as db:
+            with get_connection(database) as db:
                 windows = [r[0] for r in db.execute("SELECT DISTINCT bucket_start FROM metric_buckets WHERE bucket_size = 300 ORDER BY bucket_start").fetchall()]
             all_anomalies = []
             for w in windows:
-                found = detect_anomalies(window_start_sec=w, window_end_sec=w + 300, db_path=db_file)
+                found = detect_anomalies(window_start_sec=w, window_end_sec=w + 300, db_path=database)
                 all_anomalies.extend(found)
             print(f" Anomalies detected: {len(all_anomalies)}")
 
             print(" Processing principal intelligence and user behavioral changes...")
-            p_res = process_principal_intelligence()
+            p_res = process_principal_intelligence(db_path=database)
             print(f" Principal intelligence result: {p_res}")
         except Exception as e:
             print(f" [!] Error during anomaly / intelligence pipeline: {e}")
@@ -271,7 +272,7 @@ def run_direct_mode(args: argparse.Namespace):
 def main():
     parser = argparse.ArgumentParser(description="Send OTel ELK APM traces from the data folder to TraceScope")
     parser.add_argument("--input", "-i", type=str, default="/home/ubuntu/Viettel/Data/otel_elk_traces_2m.jsonl.gz", help="Path to .jsonl.gz, .jsonl, or .json file")
-    parser.add_argument("--mode", "-m", choices=["http", "direct"], default="http", help="Ingestion mode: 'http' (API endpoint) or 'direct' (SQLite fast bulk loader)")
+    parser.add_argument("--mode", "-m", choices=["http", "direct"], default="http", help="Ingestion mode: 'http' (API endpoint) or 'direct' (ClickHouse fast bulk loader)")
     parser.add_argument("--url", "-u", type=str, default="http://127.0.0.1:30102/api/v1/ingest", help="HTTP Ingestion endpoint URL (for --mode http)")
     parser.add_argument("--api-key", type=str, default="", help="Optional API key header value")
     parser.add_argument("--batch-size", "-b", type=int, default=500, help="Batch size per transmission or insertion")

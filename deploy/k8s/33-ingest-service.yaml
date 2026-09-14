@@ -1,3 +1,4 @@
+# ClusterIP gives Ingress a stable target while ingest pods scale behind it.
 apiVersion: v1
 kind: Service
 metadata:

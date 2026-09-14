@@ -1,12 +1,12 @@
 from datetime import datetime, timezone
 
 from backend.ingest import basic_username, import_documents, normalize
-from backend.repository import SQLiteRepository
+from backend.repository import StorageRepository
 from backend.analytics import run_jobs
 
 
 def repo(tmp_path):
-    value=SQLiteRepository(tmp_path/"test.db");value.migrate();return value
+    value=StorageRepository(tmp_path/"test.db");value.migrate();return value
 
 
 def test_basic_credentials_are_sanitized_before_storage(tmp_path):

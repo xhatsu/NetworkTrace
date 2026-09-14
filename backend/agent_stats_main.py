@@ -13,9 +13,9 @@ Run with::
 
     uvicorn backend.agent_stats_main:app --host 0.0.0.0 --port 30104
 
-This process deliberately does not start the trace writer. In Kubernetes it
-uses the authenticated storage-owner API for every agent table operation and
-therefore mounts no database volume.
+This process deliberately does not start the trace writer. It is a stateless
+receiver: deployments may use the authenticated storage-owner boundary, while
+direct ClickHouse deployments still require no mounted data volume.
 """
 from __future__ import annotations
 

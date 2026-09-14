@@ -1,3 +1,5 @@
+# RWO deliberately belongs only to the single ClickHouse StatefulSet: block
+# storage protects column-part consistency and avoids multi-writer filesystem semantics.
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
@@ -7,11 +9,10 @@ metadata:
     app.kubernetes.io/name: tracescope
     app.kubernetes.io/component: clickhouse
 spec:
-  # ClickHouse storage volume for primary transaction logs and column parts.
-  # ReadWriteOnce block storage is used for optimal I/O throughput.
+  # ClickHouse stores primary transaction logs and column parts here; no app pod mounts it.
+  # ReadWriteOnce block storage supplies the consistency and I/O characteristics required.
   accessModes:
     - ReadWriteOnce
   resources:
     requests:
       storage: 5Gi
-

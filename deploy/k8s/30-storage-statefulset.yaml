@@ -1,3 +1,5 @@
+# The app pod serves the UI and read APIs but does not mount ClickHouse data;
+# state lives in the dedicated database StatefulSet, making this UI role replaceable.
 apiVersion: apps/v1
 kind: StatefulSet
 metadata:
@@ -32,6 +34,7 @@ spec:
         fsGroup: 10001
         seccompProfile:
           type: RuntimeDefault
+      # Schema ownership is serialized before application traffic starts.
       initContainers:
         - name: migrate
           image: xhatsu101/tracescope:app-0.2.0
@@ -43,8 +46,6 @@ spec:
             - secretRef:
                 name: tracescope-secrets
           env:
-            - name: OTEL_DB_PATH
-              value: "/data/tracescope.db"
             - name: OTEL_RUN_MIGRATIONS
               value: "true"
           resources:
@@ -77,6 +78,8 @@ spec:
           env:
             - name: OTEL_RUN_MIGRATIONS
               value: "false"
+          # Separate startup/readiness/liveness avoids restarting a booting app while
+          # still withholding traffic until its ClickHouse dependency is usable.
           startupProbe:
             httpGet:
               path: /livez
@@ -112,6 +115,7 @@ spec:
           volumeMounts:
             - name: tmp
               mountPath: /tmp
+        # Derivations stay beside the API deployment for an intentionally simple single-worker cadence.
         - name: analytics-worker
           image: xhatsu101/tracescope:app-0.2.0
           imagePullPolicy: IfNotPresent

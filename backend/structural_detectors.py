@@ -5,23 +5,26 @@ import time
 from collections import defaultdict
 from typing import Any
 
-from .repository import SQLiteRepository
+from .repository import StorageRepository
 
 
 INSERT = """INSERT INTO anomalies(fingerprint,entity_type,entity_id,anomaly_type,first_detected_ms,last_detected_ms,window_start_ms,window_end_ms,current_value,baseline_value,normal_low,normal_high,absolute_difference,percent_change,current_samples,baseline_samples,persistence_buckets,severity,status,unit,explanation,rule,training_start_ms,training_end_ms,limitations_json,contributors_json,trace_ids_json,updated_at_ms)
-VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(fingerprint) DO UPDATE SET last_detected_ms=excluded.last_detected_ms,window_start_ms=excluded.window_start_ms,window_end_ms=excluded.window_end_ms,current_value=excluded.current_value,current_samples=excluded.current_samples,explanation=excluded.explanation,contributors_json=excluded.contributors_json,trace_ids_json=excluded.trace_ids_json,updated_at_ms=excluded.updated_at_ms,status=CASE WHEN anomalies.status='resolved' THEN 'open' ELSE anomalies.status END"""
+VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)"""
 
 
-def save(repo: SQLiteRepository, *, fingerprint: str, entity_type: str, entity_id: str, kind: str,
+def save(repo: StorageRepository, *, fingerprint: str, entity_type: str, entity_id: str, kind: str,
          start: int, end: int, value: float, baseline: float | None, samples: int, baseline_samples: int,
          unit: str, explanation: str, rule: str, training_start: int, training_end: int,
          contributors: list[dict[str,Any]], limitations: list[str], severity: str="medium") -> None:
     now=int(time.time()*1000);delta=value-(baseline or 0);percent=delta/baseline*100 if baseline else None
     values=(fingerprint,entity_type,entity_id,kind,now,now,start,end,value,baseline,None,None,delta,percent,samples,baseline_samples,1,severity,"open",unit,explanation,rule,training_start,training_end,json.dumps(limitations),json.dumps(contributors),json.dumps([]),now)
-    with repo.transaction() as db: db.execute(INSERT,values)
+    with repo.transaction() as db:
+        prior = db.execute("SELECT status FROM anomalies FINAL WHERE fingerprint=?", (fingerprint,)).fetchone()
+        values = (*values[:18], "open" if prior and prior[0] == "resolved" else (prior[0] if prior else "open"), *values[19:])
+        db.execute(INSERT, values)
 
 
-def detect_structural(repo: SQLiteRepository) -> int:
+def detect_structural(repo: StorageRepository) -> int:
     """Novelty, mix, dormancy, and operation-matched instance detectors."""
     with repo.connect() as db:
         bounds=db.execute("SELECT MIN(timestamp_ms),MAX(timestamp_ms) FROM events").fetchone()

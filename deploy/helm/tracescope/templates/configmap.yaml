@@ -19,3 +19,12 @@ data:
   OTEL_INGEST_TRANSACTION_RECORDS: {{ .Values.config.highTpsWriter.transactionRecords | quote }}
   OTEL_INGEST_COMMIT_TIMEOUT_SECONDS: {{ .Values.config.highTpsWriter.commitTimeoutSeconds | quote }}
   OTEL_INTERNAL_REQUEST_TIMEOUT_SECONDS: {{ .Values.config.highTpsWriter.internalRequestTimeoutSeconds | quote }}
+  OTEL_INGEST_MAX_BATCH_BYTES: {{ int .Values.config.ingestMaxBatchBytes | quote }}
+  OTEL_AGGREGATION_MAX_MEMORY_USAGE: {{ int .Values.config.aggregationMaxMemoryUsage | quote }}
+  OTEL_AGGREGATION_EXTERNAL_GROUP_BY_BYTES: {{ int .Values.config.aggregationExternalGroupByBytes | quote }}
+  OTEL_AGGREGATION_SHADOW_ENABLED: {{ .Values.config.aggregationShadowEnabled | quote }}
+  OTEL_AGGREGATION_CUTOVER: {{ .Values.config.aggregationCutover | quote }}
+  OTEL_BASELINE_CADENCE_SECONDS: {{ .Values.config.baselineCadenceSeconds | quote }}
+  OTEL_BASELINE_SERIES_BUDGET: {{ .Values.config.baselineSeriesBudget | quote }}
+  OTEL_ANOMALY_WINDOW_BUDGET: {{ .Values.config.anomalyWindowBudget | quote }}
+  OTEL_ANALYTICS_STAGE_BUDGET_SECONDS: {{ .Values.config.analyticsStageBudgetSeconds | quote }}

@@ -1,3 +1,4 @@
+"""Read derived identity intelligence from ClickHouse without reprocessing raw credentials."""
 from __future__ import annotations
 
 import json
@@ -288,7 +289,7 @@ class UserRepository:
                            "NEW_TARGET": ("target", row_dict["target_service"]), "NEW_OPERATION": ("operation", f"{row_dict['target_service']}→{row_dict['operation']}")}
                 if row_dict["change_type"] in mapping:
                     dimension, value = mapping[row_dict["change_type"]]
-                    db.execute("INSERT OR IGNORE INTO principal_baselines VALUES(?,?,?,?,?,?,?)",
+                    db.execute("INSERT INTO principal_baselines VALUES(?,?,?,?,?,?,?)",
                                (row_dict["principal_name"], dimension, value or "", row_dict["first_observed"], row_dict["first_observed"], 1, 0.0))
 
             incident_id = row_dict.get("incident_id")
@@ -368,8 +369,11 @@ class UserRepository:
 
     def update_principal_type(self, principal: str, principal_type: str) -> bool:
         with db_transaction(self.db_path) as db:
-            return bool(db.execute("UPDATE principals SET principal_type=?,updated_at=? WHERE principal_name=?",
-                                   (principal_type,int(time.time()*1000),principal)).rowcount)
+            if db.execute("SELECT 1 FROM principals FINAL WHERE principal_name=? LIMIT 1", (principal,)).fetchone() is None:
+                return False
+            db.execute("UPDATE principals SET principal_type=?,updated_at=? WHERE principal_name=?",
+                       (principal_type,int(time.time()*1000),principal))
+            return True
 
     def graph(self, principal: str | None = None, service: str | None = None,
               start_ms: int | None = None, end_ms: int | None = None, limit: int = 300) -> dict[str, Any]:

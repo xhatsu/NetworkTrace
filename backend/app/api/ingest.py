@@ -1,8 +1,12 @@
+"""Normalize diverse telemetry at the trust boundary before one durable ingest path.
+
+The router deliberately turns protocol variation into canonical traces before
+the bounded writer applies ClickHouse batching, deduplication, and backpressure.
+"""
 from __future__ import annotations
 
 import asyncio
 import json
-import sqlite3
 from typing import Any, Dict, List
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import JSONResponse
@@ -72,7 +76,7 @@ async def _commit_traces(
             detail="Timed out waiting for ingestion commit; retry with the same X-Batch-Id",
             headers={"Retry-After": "1"},
         ) from None
-    except (sqlite3.OperationalError, Exception) as exc:
+    except Exception as exc:
         if isinstance(exc, (HTTPException, IngestQueueFull, IngestCommitTimeout, StorageOwnerError)):
             raise
         raise HTTPException(
@@ -107,7 +111,7 @@ async def ingest_traces(request: Request) -> Dict[str, Any]:
 
     content_encoding = request.headers.get("content-encoding")
     try:
-        decompressed = decompress_payload(raw_body, content_encoding)
+        decompressed = decompress_payload(raw_body, content_encoding, settings.max_ingest_bytes * 4)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from None
 
@@ -192,7 +196,7 @@ async def otlp_v1_traces(request: Request) -> Dict[str, Any]:
     content_type = request.headers.get("content-type", "").lower()
     content_encoding = request.headers.get("content-encoding", "")
     try:
-        decompressed = decompress_payload(raw_body, content_encoding)
+        decompressed = decompress_payload(raw_body, content_encoding, settings.max_ingest_bytes * 4)
     except ValueError as exc:
         return JSONResponse({"error": str(exc)}, status_code=400)
     if len(decompressed) > settings.max_ingest_bytes * 4:
@@ -243,7 +247,7 @@ async def elastic_apm_ingest(request: Request) -> Dict[str, Any]:
     content_type = request.headers.get("content-type", "")
     content_encoding = request.headers.get("content-encoding", "")
     try:
-        decompressed = decompress_payload(raw_body, content_encoding)
+        decompressed = decompress_payload(raw_body, content_encoding, settings.max_ingest_bytes * 4)
     except ValueError as exc:
         return JSONResponse({"error": str(exc)}, status_code=400)
     if len(decompressed) > settings.max_ingest_bytes * 4:

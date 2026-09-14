@@ -19,13 +19,13 @@ from backend.app.services.behavioral_engine import (
     detect_explicit_auth_anomalies,
     FAMILY_CAPS,
 )
-from backend.repository import SQLiteRepository
+from backend.repository import StorageRepository
 
 
 @pytest.fixture
 def clean_db(tmp_path):
     db_file = tmp_path / "test_tracescope.db"
-    repo = SQLiteRepository(db_file)
+    repo = StorageRepository(db_file)
     repo.migrate()
     return str(db_file)
 

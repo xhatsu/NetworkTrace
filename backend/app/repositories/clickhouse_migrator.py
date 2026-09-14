@@ -1,4 +1,8 @@
-"""ClickHouse schema migrator — manages versioned migrations for ClickHouse."""
+"""Apply versioned ClickHouse schema changes exactly once per target database.
+
+The migration ledger makes app and ingest images independently deployable while
+keeping the single-store schema explicit and auditable.
+"""
 from __future__ import annotations
 
 import logging
@@ -45,7 +49,7 @@ def get_clickhouse_client(database: Optional[str] = None) -> clickhouse_connect.
 def ensure_database(database: Optional[str] = None) -> None:
     """Ensure target database exists in ClickHouse."""
     target_db = resolve_target_db(database)
-    # Connect without specifying database to create it
+    # Use the server-level connection because a newly named test database cannot be selected yet.
     sys_client = clickhouse_connect.get_client(
         host=settings.clickhouse_host,
         port=settings.clickhouse_port,
@@ -64,7 +68,7 @@ def run_clickhouse_migrations(database: Optional[str] = None) -> list[str]:
     ensure_database(target_db)
     client = get_clickhouse_client(target_db)
 
-    # Ensure schema_migrations table exists
+    # The ledger is itself idempotent so a fresh ClickHouse server can bootstrap safely.
     client.command("""
         CREATE TABLE IF NOT EXISTS schema_migrations (
             version String,
@@ -86,7 +90,7 @@ def run_clickhouse_migrations(database: Optional[str] = None) -> list[str]:
 
         log.info("Applying ClickHouse migration: %s", version)
         content = path.read_text(encoding="utf-8")
-        # Split on semicolon, taking care of comments
+        # Migrations contain one DDL statement per semicolon; discard comment-only fragments.
         statements = []
         for raw_stmt in content.split(";"):
             stmt = raw_stmt.strip()

@@ -1,8 +1,8 @@
-"""Async client for the single SQLite storage-owner service.
+"""Async client for the optional authenticated storage-owner boundary.
 
-Kubernetes edge workloads never open the SQLite database.  They normalize or
-validate public requests, then use this authenticated service boundary for all
-durable and query operations.
+ClickHouse is the canonical store, but this client preserves an isolation mode
+for deployments that centralize durable operations. Edge receivers can validate
+and normalize without inheriting storage credentials or internal-only routes.
 """
 from __future__ import annotations
 
@@ -47,6 +47,7 @@ class StorageOwnerClient:
         if self._client is None:
             raise StorageOwnerError(503, "Storage owner is not configured", "1")
         headers = dict(kwargs.pop("headers", {}))
+        # The token distinguishes trusted role-to-role calls from the public API surface.
         headers["X-TraceScope-Internal-Token"] = settings.internal_api_token
         try:
             response = await self._client.request(method, path, headers=headers, **kwargs)

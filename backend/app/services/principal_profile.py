@@ -1,3 +1,5 @@
+"""Keep profile construction at the repository boundary for one consistent user view."""
+
 from backend.app.repositories.user_repository import UserRepository
 
 

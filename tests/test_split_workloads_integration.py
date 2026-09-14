@@ -9,7 +9,7 @@ import httpx
 from backend.app.application import ROLE_AGENT_STATS, ROLE_ALL, ROLE_INGEST, create_app
 from backend.app.services.ingest_writer import ingest_writer
 from backend.app.services.storage_owner_client import storage_owner_client
-from backend.repository import SQLiteRepository
+from backend.repository import StorageRepository
 
 
 def test_split_apps_use_authenticated_storage_boundary_end_to_end(monkeypatch):
@@ -17,7 +17,7 @@ def test_split_apps_use_authenticated_storage_boundary_end_to_end(monkeypatch):
     import backend.app.api.internal_storage as internal_storage
     import backend.app.services.storage_owner_client as client_module
 
-    SQLiteRepository().migrate()
+    StorageRepository().migrate()
     token = "integration-internal-token"
     monkeypatch.setattr(
         internal_storage,
@@ -69,18 +69,20 @@ def test_split_apps_use_authenticated_storage_boundary_end_to_end(monkeypatch):
                 assert replay.status_code == 200
                 assert replay.json()["duplicate"] is True
 
-            node = "split-node-{}".format(uuid4().hex)
-            sample = {
-                "schema_version": 1,
-                "type": "agent_stats",
-                "node": node,
-                "instance_id": "split-instance",
-                "sequence": 1,
-                "observed_at": 1_787_900_100,
-                "window_seconds": 30,
-                "status": "ok",
-                "reasons": [],
-            }
+                import time
+
+                node = "split-node-{}".format(uuid4().hex)
+                sample = {
+                    "schema_version": 1,
+                    "type": "agent_stats",
+                    "node": node,
+                    "instance_id": "split-instance",
+                    "sequence": 1,
+                    "observed_at": int(time.time()),
+                    "window_seconds": 30,
+                    "status": "ok",
+                    "reasons": [],
+                }
             async with httpx.AsyncClient(
                 transport=httpx.ASGITransport(app=agent_app), base_url="http://agent"
             ) as agent:

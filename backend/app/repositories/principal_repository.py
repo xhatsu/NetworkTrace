@@ -1,3 +1,4 @@
+"""Query principal activity through aggregated dimensions, keeping identity pages responsive."""
 from __future__ import annotations
 from typing import Any, Dict, List, Optional
 from backend.app.repositories.db_context import get_connection
@@ -19,7 +20,7 @@ class PrincipalRepository:
                   COUNT(DISTINCT target_service) as services_used,
                   COUNT(DISTINCT operation) as operations_count,
                   MAX(bucket_start) as last_seen_sec
-                FROM metric_buckets
+                FROM metric_buckets FINAL
                 WHERE bucket_size = 60 AND bucket_start >= ? AND bucket_start < ?
                   AND principal_name != ''
                 GROUP BY principal_name
@@ -62,7 +63,7 @@ class PrincipalRepository:
                   SUM(request_count) as requests,
                   ROUND(SUM(error_count)*1.0 / NULLIF(SUM(request_count), 0), 4) as error_rate,
                   ROUND(MAX(latency_p95), 2) as p95_latency
-                FROM metric_buckets
+                FROM metric_buckets FINAL
                 WHERE principal_name = ? AND bucket_size = 60 AND bucket_start >= ? AND bucket_start < ?
                 GROUP BY target_service
                 ORDER BY requests DESC
@@ -75,7 +76,7 @@ class PrincipalRepository:
                   target_service,
                   SUM(request_count) as requests,
                   ROUND(MAX(latency_p95), 2) as p95_latency
-                FROM metric_buckets
+                FROM metric_buckets FINAL
                 WHERE principal_name = ? AND bucket_size = 60 AND bucket_start >= ? AND bucket_start < ?
                 GROUP BY operation, target_service
                 ORDER BY requests DESC
@@ -86,7 +87,7 @@ class PrincipalRepository:
                 SELECT
                   caller_service,
                   SUM(request_count) as requests
-                FROM metric_buckets
+                FROM metric_buckets FINAL
                 WHERE principal_name = ? AND bucket_size = 60 AND bucket_start >= ? AND bucket_start < ?
                   AND caller_service != ''
                 GROUP BY caller_service
@@ -98,7 +99,7 @@ class PrincipalRepository:
                 SELECT
                   (bucket_start % 86400) / 3600 as hour,
                   SUM(request_count) as requests
-                FROM metric_buckets
+                FROM metric_buckets FINAL
                 WHERE principal_name = ? AND bucket_size = 60 AND bucket_start >= ? AND bucket_start < ?
                 GROUP BY hour
                 ORDER BY hour ASC

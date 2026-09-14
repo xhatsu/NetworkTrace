@@ -1,3 +1,4 @@
+# A dedicated namespace keeps ClickHouse credentials and workload policies scoped together.
 apiVersion: v1
 kind: Namespace
 metadata:

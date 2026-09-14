@@ -1,3 +1,8 @@
+"""Canonicalize heterogeneous telemetry before it reaches the shared analytical store.
+
+Normalization is the privacy and consistency boundary: downstream ClickHouse
+tables receive stable dimensions, never reusable authentication secrets.
+"""
 from __future__ import annotations
 
 import base64

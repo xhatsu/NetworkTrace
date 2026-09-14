@@ -1,10 +1,10 @@
-"""Bounded, coalescing SQLite writer for high-throughput HTTP ingestion.
+"""Bounded, coalescing ClickHouse writer for high-throughput HTTP ingestion.
 
-SQLite permits only one writer at a time. Sending every concurrent request into
-its own ``BEGIN IMMEDIATE`` transaction therefore adds lock contention without
-adding write throughput. This service admits a bounded number of requests,
-serializes them through one writer thread, and coalesces nearby requests into a
-single transaction while preserving a durable-commit response contract.
+ClickHouse is TraceScope's single live store. Coalescing nearby uploads into
+large block inserts amortizes part creation and network overhead; bounded
+admission turns overload into explicit retryable backpressure instead of
+unbounded memory growth. A response is released only after the block insert
+returns, preserving the durable-commit contract for shippers that retry.
 """
 from __future__ import annotations
 
@@ -41,15 +41,23 @@ class _WriteRequest:
     traces: List[NormalizedTrace]
     batch_id: str = ""
     node: str = "unknown"
+    estimated_bytes: int = 0
     done: threading.Event = field(default_factory=threading.Event)
     result: Optional[IngestWriteResult] = None
     error: Optional[BaseException] = None
 
+    def __post_init__(self) -> None:
+        if self.estimated_bytes <= 0:
+            self.estimated_bytes = sum(
+                len(trace.model_dump_json().encode("utf-8")) for trace in self.traces
+            )
+
 
 class IngestWriter:
-    """One process-local SQLite writer with bounded request admission."""
+    """One process-local ClickHouse block writer with bounded request admission."""
 
     _TRACE_COLUMNS = [
+        "ingest_batch_id",
         "event_uid", "timestamp", "timestamp_ms", "trace_id", "span_id", "parent_span_id",
         "service_name", "service_instance", "service_environment",
         "caller_service", "caller_instance", "caller_ip",
@@ -70,6 +78,7 @@ class IngestWriter:
         queue_capacity: Optional[int] = None,
         coalesce_ms: Optional[int] = None,
         transaction_records: Optional[int] = None,
+        max_batch_bytes: Optional[int] = None,
         commit_timeout_seconds: Optional[float] = None,
     ) -> None:
         self.db_path = db_path
@@ -78,6 +87,7 @@ class IngestWriter:
             settings.ingest_coalesce_ms if coalesce_ms is None else max(0, coalesce_ms)
         ) / 1000.0
         self.transaction_records = transaction_records or settings.ingest_transaction_records
+        self.max_batch_bytes = max_batch_bytes or settings.ingest_max_batch_bytes
         self.commit_timeout_seconds = commit_timeout_seconds or settings.ingest_commit_timeout_seconds
         self._queue: queue.Queue[Optional[_WriteRequest]] = queue.Queue(maxsize=self.queue_capacity)
         self._state_lock = threading.Lock()
@@ -146,7 +156,7 @@ class IngestWriter:
         batch_id: str = "",
         node: str = "unknown",
     ) -> IngestWriteResult:
-        """Queue a write without blocking the ASGI event-loop thread."""
+        """Queue a write without blocking the ASGI event loop while it awaits durability."""
         self.start()
         request = _WriteRequest(
             traces=traces,
@@ -181,6 +191,7 @@ class IngestWriter:
         stats["queue_capacity"] = self.queue_capacity
         stats["coalesce_ms"] = int(self.coalesce_seconds * 1000)
         stats["transaction_record_limit"] = self.transaction_records
+        stats["transaction_byte_limit"] = self.max_batch_bytes
         return stats
 
     def _increment(self, key: str, amount: int = 1) -> None:
@@ -190,15 +201,19 @@ class IngestWriter:
     def _run(self) -> None:
         db = None
         columns: List[str] = []
+        pending: Optional[_WriteRequest] = None
         try:
             while True:
-                first = self._queue.get()
+                first = pending if pending is not None else self._queue.get()
+                pending = None
                 if first is None:
                     self._queue.task_done()
                     break
 
                 jobs = [first]
                 record_count = len(first.traces)
+                estimated_bytes = first.estimated_bytes
+                # A short window favors one efficient ClickHouse block without delaying uploads indefinitely.
                 deadline = time.monotonic() + self.coalesce_seconds
                 should_stop = False
                 while record_count < self.transaction_records:
@@ -213,8 +228,17 @@ class IngestWriter:
                         self._queue.task_done()
                         should_stop = True
                         break
+                    next_record_count = record_count + len(job.traces)
+                    next_estimated_bytes = estimated_bytes + job.estimated_bytes
+                    if (
+                        next_record_count > self.transaction_records
+                        or next_estimated_bytes > self.max_batch_bytes
+                    ):
+                        pending = job
+                        break
                     jobs.append(job)
-                    record_count += len(job.traces)
+                    record_count = next_record_count
+                    estimated_bytes = next_estimated_bytes
 
                 try:
                     if db is None:
@@ -248,8 +272,17 @@ class IngestWriter:
         now_ms = int(time.time() * 1000)
 
         for job in jobs:
+            # Remember IDs within this block as well as prior blocks: concurrent retries
+            # must observe the same duplicate result without inserting twice.
             if job.batch_id:
-                if job.batch_id in seen_in_batch or batch_repo.is_batch_processed(job.batch_id):
+                stored_result = db.client.query(
+                    "SELECT count() FROM traces WHERE ingest_batch_id = {batch_id:String}",
+                    parameters={"batch_id": job.batch_id},
+                )
+                stored_rows = int(stored_result.result_rows[0][0]) if stored_result.result_rows else 0
+                if job.batch_id in seen_in_batch or batch_repo.is_batch_processed(job.batch_id) or stored_rows:
+                    if stored_rows and not batch_repo.is_batch_processed(job.batch_id):
+                        batch_rows.append([job.batch_id, job.node, int(stored_rows), now_ms, "accepted"])
                     completed.append((job, IngestWriteResult(inserted=0, duplicate=True)))
                     continue
                 seen_in_batch.add(job.batch_id)
@@ -259,21 +292,22 @@ class IngestWriter:
         all_trace_rows: List[list[Any]] = []
         for job in valid_jobs:
             for trace in job.traces:
-                all_trace_rows.append(_trace_to_row(trace, columns))
+                all_trace_rows.append(_trace_to_row(trace, columns, job.batch_id))
 
         try:
+            if all_trace_rows:
+                # Persist evidence first. A retry can reconstruct a missing marker from ingest_batch_id.
+                db.client.insert(
+                    "traces",
+                    all_trace_rows,
+                    column_names=columns,
+                    database=db.database,
+                )
             if batch_rows:
                 db.client.insert(
                     "ingest_batches",
                     batch_rows,
                     column_names=["batch_id", "node", "record_count", "received_at_ms", "status"],
-                    database=db.database,
-                )
-            if all_trace_rows:
-                db.client.insert(
-                    "traces",
-                    all_trace_rows,
-                    column_names=columns,
                     database=db.database,
                 )
             for job in valid_jobs:
@@ -320,9 +354,12 @@ _DEFAULTS: Dict[str, Any] = {
 }
 
 
-def _trace_to_row(trace: NormalizedTrace, columns: List[str]) -> list[Any]:
+def _trace_to_row(trace: NormalizedTrace, columns: List[str], batch_id: str = "") -> list[Any]:
     row = []
     for col in columns:
+        if col == "ingest_batch_id":
+            row.append(batch_id)
+            continue
         val = getattr(trace, col, None)
         if val is None and col in _DEFAULTS:
             val = _DEFAULTS[col]
@@ -331,4 +368,3 @@ def _trace_to_row(trace: NormalizedTrace, columns: List[str]) -> list[Any]:
 
 
 ingest_writer = IngestWriter()
-

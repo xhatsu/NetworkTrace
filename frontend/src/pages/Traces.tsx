@@ -56,7 +56,7 @@ export function TracesPage() {
   const [principalFilter, setPrincipalFilter] = useState(params.get("principal") || "");
   const [statusFilter, setStatusFilter] = useState(params.get("status") || "");
 
-  const queryParams = new URLSearchParams();
+  const queryParams = new URLSearchParams(queryString(filters));
   if (traceIdFilter) queryParams.set("trace_id", traceIdFilter);
   if (serviceFilter) queryParams.set("service", serviceFilter);
   if (principalFilter) queryParams.set("principal", principalFilter);
@@ -210,6 +210,14 @@ type TraceDetailData = {
   waterfall: TraceSummaryItem[];
   count: number;
 };
+
+function formatAttributes(value: string): string {
+  try {
+    return JSON.stringify(JSON.parse(value), null, 2);
+  } catch {
+    return `Invalid attributes JSON\n${value}`;
+  }
+}
 
 export function TraceDetailPage() {
   const { id = "" } = useParams();
@@ -396,7 +404,7 @@ export function TraceDetailPage() {
                       <FileJson size={12} /> Attributes JSON
                     </span>
                     <pre className="max-h-56 overflow-auto rounded bg-black/40 p-2 font-mono text-[10px] text-[#c9d1d9] border border-[rgba(255,255,255,0.06)]">
-                      {JSON.stringify(JSON.parse(selectedSpan.attributes_json), null, 2)}
+                      {formatAttributes(selectedSpan.attributes_json)}
                     </pre>
                   </div>
                 )}

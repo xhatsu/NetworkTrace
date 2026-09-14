@@ -1,3 +1,4 @@
+"""Define the sanitized canonical trace accepted by the ClickHouse ingest boundary."""
 from __future__ import annotations
 from typing import Any, Optional
 from pydantic import BaseModel, Field
@@ -74,4 +75,3 @@ class NormalizedTrace(BaseModel):
             elif self.operation:
                 self.operation_key = self.operation
         return self
-

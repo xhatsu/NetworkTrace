@@ -1,8 +1,12 @@
-"""Authenticated APIs owned by the one pod allowed to mount SQLite."""
+"""Authenticated internal persistence APIs for role-isolated workloads.
+
+These routes are hidden from OpenAPI because they are a deployment boundary,
+not a public product surface. They preserve a single trusted write policy even
+when ingest and agent receivers scale separately against ClickHouse.
+"""
 from __future__ import annotations
 
 import secrets
-import sqlite3
 from typing import Annotated, Any
 
 from fastapi import APIRouter, Header, HTTPException, Query
@@ -12,7 +16,7 @@ from backend.config import settings
 from backend.app.models.trace import NormalizedTrace
 from backend.app.repositories.agent_stats_repository import AgentStatsRepository
 from backend.app.repositories.db_context import get_connection
-from backend.repository import SQLiteRepository
+from backend.repository import StorageRepository
 from backend.app.services.ingest_writer import (
     IngestCommitTimeout,
     IngestQueueFull,
@@ -20,6 +24,8 @@ from backend.app.services.ingest_writer import (
 )
 
 router = APIRouter(prefix="/internal/v1", tags=["internal"], include_in_schema=False)
+
+# Keep this router private: external callers must traverse the validated public APIs.
 
 
 def require_internal_token(
@@ -58,7 +64,7 @@ async def commit_traces(
         result = await ingest_writer.submit_async(payload.traces, payload.batch_id, payload.node)
     except IngestQueueFull:
         raise HTTPException(429, "Ingestion queue is full; retry with backoff", headers={"Retry-After": "1"}) from None
-    except (IngestCommitTimeout, sqlite3.OperationalError, Exception) as exc:
+    except Exception as exc:
         if isinstance(exc, HTTPException):
             raise
         raise HTTPException(503, "Storage commit is unavailable; retry with the same X-Batch-Id", headers={"Retry-After": "1"}) from None
@@ -70,7 +76,7 @@ async def ingestion_status(
     token: Annotated[str | None, Header(alias="X-TraceScope-Internal-Token")] = None,
 ) -> dict[str, Any]:
     require_internal_token(token)
-    with SQLiteRepository().connect() as db:
+    with StorageRepository().connect() as db:
         count, min_ts, max_ts = db.execute(
             "SELECT COUNT(*),MIN(timestamp_ms),MAX(timestamp_ms) FROM traces"
         ).fetchone()

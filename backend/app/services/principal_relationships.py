@@ -1,3 +1,4 @@
+"""Incrementally derive identity relationships from sanitized, durable trace dimensions."""
 from __future__ import annotations
 
 import hashlib
@@ -67,19 +68,25 @@ def _upsert_dimension(db, table: str, column: str, principal: str, value: str,
         return
     error_sql = ",error_count" if table in {"principal_targets", "principal_operations"} else ""
     error_value = ",?" if error_sql else ""
-    conflict_columns = f"principal_name,{column}"
-    if table == "principal_operations":
-        conflict_columns = "principal_name,target_service,operation"
-    values = (principal, *value.split("\0"), timestamp_ms, timestamp_ms)
+    key_values = value.split("\0")
+    key_columns = column.split(",")
+    where = " AND ".join(f"{name}=?" for name in ("principal_name", *key_columns))
+    params = (principal, *key_values)
+    select_cols = "first_seen,last_seen,observation_count" + (",error_count" if error_sql else "")
+    existing = db.execute(f"SELECT {select_cols} FROM {table} FINAL WHERE {where} LIMIT 1", params).fetchone()
+    if existing:
+        replacement = (principal, *key_values, min(int(existing[0]), timestamp_ms),
+                       max(int(existing[1]), timestamp_ms), int(existing[2]) + 1)
+        if error_sql:
+            replacement = (*replacement, int(existing[3]) + is_error)
+        placeholders = ",".join("?" for _ in replacement)
+        db.execute(f"INSERT INTO {table}(principal_name,{column},first_seen,last_seen,observation_count{error_sql}) "
+                   f"VALUES({placeholders})", replacement)
+        return
+    values = (principal, *key_values, timestamp_ms, timestamp_ms)
     placeholders = ",".join("?" for _ in values)
-    db.execute(f"""
-      INSERT INTO {table}(principal_name,{column},first_seen,last_seen,observation_count{error_sql})
-      VALUES({placeholders},1{error_value})
-      ON CONFLICT({conflict_columns}) DO UPDATE SET
-        first_seen=MIN(first_seen,excluded.first_seen),last_seen=MAX(last_seen,excluded.last_seen),
-        observation_count=observation_count+1
-        {',error_count=error_count+excluded.error_count' if error_sql else ''}
-    """, (*values, *([is_error] if error_sql else [])))
+    db.execute(f"INSERT INTO {table}(principal_name,{column},first_seen,last_seen,observation_count{error_sql}) "
+               f"VALUES({placeholders},1{error_value})", (*values, *([is_error] if error_sql else [])))
 
 
 def _dimension_known(db, principal: str, dimension: str, value: str) -> bool:
@@ -90,23 +97,29 @@ def _dimension_known(db, principal: str, dimension: str, value: str) -> bool:
 
 
 def _refresh_principal_counts(db, principal: str) -> None:
-    db.execute("""
-      UPDATE principals SET
-        unique_callers=(SELECT COUNT(*) FROM principal_callers WHERE principal_name=?),
-        unique_sources=(SELECT COUNT(*) FROM principal_sources WHERE principal_name=?),
-        unique_targets=(SELECT COUNT(*) FROM principal_targets WHERE principal_name=?),
-        unique_operations=(SELECT COUNT(*) FROM principal_operations WHERE principal_name=?),
-        updated_at=? WHERE principal_name=?
-    """, (principal, principal, principal, principal, int(time.time() * 1000), principal))
+    row = db.execute("SELECT principal_type,first_seen,last_seen,total_requests,created_at FROM principals FINAL "
+                     "WHERE principal_name=?", (principal,)).fetchone()
+    if not row:
+        return
+    counts = [db.execute(f"SELECT COUNT(*) FROM {table} FINAL WHERE principal_name=?", (principal,)).fetchone()[0]
+              for table in ("principal_callers", "principal_sources", "principal_targets", "principal_operations")]
+    db.execute("INSERT INTO principals(principal_name,principal_type,first_seen,last_seen,total_requests,unique_callers,"
+               "unique_sources,unique_targets,unique_operations,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?)",
+               (principal, row[0], row[1], row[2], row[3], *counts, row[4], int(time.time() * 1000)))
 
 
 def _bootstrap(db, ratio: float) -> dict[str, int]:
     bounds = db.execute(
-        "SELECT MIN(timestamp_ms),MAX(timestamp_ms),MAX(id) FROM traces WHERE principal_name<>'unknown'"
+        "SELECT MIN(timestamp_ms),MAX(timestamp_ms) FROM traces WHERE principal_name<>'unknown'"
     ).fetchone()
     if not bounds or bounds[0] is None:
         return {"processed": 0, "changes": 0, "cursor": 0, "bootstrap_cutoff_ms": 0}
-    minimum, maximum, cursor = map(int, bounds)
+    minimum, maximum = map(int, bounds)
+    cursor_row = db.execute(
+        "SELECT ingest_order,toString(row_uid) FROM traces ORDER BY ingest_order DESC,row_uid DESC LIMIT 1"
+    ).fetchone()
+    cursor_order = int(cursor_row[0]) if cursor_row else 0
+    cursor_uid = str(cursor_row[1]) if cursor_row else "00000000-0000-0000-0000-000000000000"
     cutoff = minimum + int((maximum - minimum) * ratio)
     now = int(time.time() * 1000)
 
@@ -118,10 +131,6 @@ def _bootstrap(db, ratio: float) -> dict[str, int]:
         COUNT(DISTINCT CASE WHEN caller_ip<>'' THEN caller_ip END),COUNT(DISTINCT target_service),
         COUNT(DISTINCT operation),?,? FROM traces
       WHERE principal_name<>'unknown' GROUP BY principal_name
-      ON CONFLICT(principal_name) DO UPDATE SET first_seen=excluded.first_seen,last_seen=excluded.last_seen,
-        total_requests=excluded.total_requests,unique_callers=excluded.unique_callers,
-        unique_sources=excluded.unique_sources,unique_targets=excluded.unique_targets,
-        unique_operations=excluded.unique_operations,updated_at=excluded.updated_at
     """, (now, now))
     relationship_select = """
       SELECT principal_name,COALESCE(caller_service,''),COALESCE(caller_instance,''),COALESCE(caller_ip,''),
@@ -135,11 +144,7 @@ def _bootstrap(db, ratio: float) -> dict[str, int]:
     db.execute("""
       INSERT INTO principal_relationships(principal_name,caller_service,caller_instance,source_ip,
         target_service,target_instance,target_ip,target_port,operation,http_method,first_seen,last_seen,
-        observation_count,success_count,error_count) """ + relationship_select + """
-      ON CONFLICT(principal_name,caller_service,caller_instance,source_ip,target_service,target_instance,target_ip,target_port,operation,http_method)
-      DO UPDATE SET first_seen=excluded.first_seen,last_seen=excluded.last_seen,
-        observation_count=excluded.observation_count,success_count=excluded.success_count,error_count=excluded.error_count
-    """)
+        observation_count,success_count,error_count) """ + relationship_select)
     for table, column, expression, col_extra, expr_extra in (
         ("principal_callers", "caller_service", "caller_service", "", ""),
         ("principal_sources", "source_ip", "caller_ip", "", ""),
@@ -150,17 +155,12 @@ def _bootstrap(db, ratio: float) -> dict[str, int]:
           SELECT principal_name,{expression},MIN(timestamp_ms),MAX(timestamp_ms),COUNT(*){expr_extra}
           FROM traces WHERE principal_name<>'unknown' AND COALESCE({expression},'')<>''
           GROUP BY principal_name,{expression}
-          ON CONFLICT(principal_name,{column}) DO UPDATE SET first_seen=excluded.first_seen,
-            last_seen=excluded.last_seen,observation_count=excluded.observation_count
-            {',error_count=excluded.error_count' if col_extra else ''}
         """)
     db.execute("""
       INSERT INTO principal_operations(principal_name,target_service,operation,first_seen,last_seen,observation_count,error_count)
       SELECT principal_name,target_service,operation,MIN(timestamp_ms),MAX(timestamp_ms),COUNT(*),
         SUM(CASE WHEN http_status>=400 OR outcome='failure' THEN 1 ELSE 0 END)
       FROM traces WHERE principal_name<>'unknown' GROUP BY principal_name,target_service,operation
-      ON CONFLICT(principal_name,target_service,operation) DO UPDATE SET first_seen=excluded.first_seen,
-        last_seen=excluded.last_seen,observation_count=excluded.observation_count,error_count=excluded.error_count
     """)
     db.execute("""
       INSERT INTO principal_hourly_activity(principal_name,day_of_week,hour_of_day,observation_count,error_count)
@@ -168,8 +168,6 @@ def _bootstrap(db, ratio: float) -> dict[str, int]:
         CAST(strftime('%H',timestamp_ms/1000,'unixepoch') AS INTEGER),COUNT(*),
         SUM(CASE WHEN http_status>=400 OR outcome='failure' THEN 1 ELSE 0 END)
       FROM traces WHERE principal_name<>'unknown' GROUP BY principal_name,2,3
-      ON CONFLICT(principal_name,day_of_week,hour_of_day) DO UPDATE SET
-        observation_count=excluded.observation_count,error_count=excluded.error_count
     """)
     db.execute("""
       INSERT INTO principal_daily_stats(principal_name,day_start,observation_count,error_count,
@@ -178,10 +176,6 @@ def _bootstrap(db, ratio: float) -> dict[str, int]:
         SUM(CASE WHEN http_status>=400 OR outcome='failure' THEN 1 ELSE 0 END),
         COUNT(DISTINCT caller_service),COUNT(DISTINCT caller_ip),COUNT(DISTINCT target_service),COUNT(DISTINCT operation)
       FROM traces WHERE principal_name<>'unknown' GROUP BY principal_name,2
-      ON CONFLICT(principal_name,day_start) DO UPDATE SET observation_count=excluded.observation_count,
-        error_count=excluded.error_count,unique_callers=excluded.unique_callers,
-        unique_sources=excluded.unique_sources,unique_targets=excluded.unique_targets,
-        unique_operations=excluded.unique_operations
     """)
 
     baseline_dimensions = (
@@ -199,9 +193,6 @@ def _bootstrap(db, ratio: float) -> dict[str, int]:
             COUNT(*)*1.0/SUM(COUNT(*)) OVER (PARTITION BY principal_name)
           FROM traces WHERE principal_name<>'unknown' AND timestamp_ms<=? AND {condition}
           GROUP BY principal_name,{expression}
-          ON CONFLICT(principal_name,dimension_type,dimension_value) DO UPDATE SET
-            first_seen=excluded.first_seen,last_seen=excluded.last_seen,observation_count=excluded.observation_count,
-            distribution_share=excluded.distribution_share
         """, (dimension, cutoff))
 
     before = db.total_changes
@@ -252,12 +243,11 @@ def _bootstrap(db, ratio: float) -> dict[str, int]:
               source=row[2], target=row[3], operation=row[4], new=" → ".join(row[1:5]))
 
     changes = db.total_changes - before
-    checkpoint = json.dumps({"trace_id": cursor, "bootstrap_cutoff_ms": cutoff, "ratio": ratio})
-    db.execute("INSERT INTO checkpoints(source,cursor_json,updated_at_ms) VALUES('principal_intelligence',?,?) "
-               "ON CONFLICT(source) DO UPDATE SET cursor_json=excluded.cursor_json,updated_at_ms=excluded.updated_at_ms",
+    checkpoint = json.dumps({"ingest_order": cursor_order, "row_uid": cursor_uid, "bootstrap_cutoff_ms": cutoff, "ratio": ratio})
+    db.execute("INSERT INTO checkpoints(source,cursor_json,updated_at_ms) VALUES('principal_intelligence',?,?)",
                (checkpoint, now))
     return {"processed": db.execute("SELECT COUNT(*) FROM traces WHERE principal_name<>'unknown'").fetchone()[0],
-            "changes": changes, "cursor": cursor, "bootstrap_cutoff_ms": cutoff}
+            "changes": changes, "cursor": cursor_order, "bootstrap_cutoff_ms": cutoff}
 
 
 def _process_incremental_row(db, row) -> int:
@@ -286,7 +276,9 @@ def _process_incremental_row(db, row) -> int:
         origin_rel = f"{caller}→{src_group}→{target}→{op_key}"
         record_historical_observation(db, principal_id, "origin_relationship", origin_rel, timestamp_ms)
 
-    existing = db.execute("SELECT first_seen,last_seen FROM principals WHERE principal_name=?", (principal,)).fetchone()
+    existing = db.execute("SELECT principal_type,first_seen,last_seen,total_requests,unique_callers,unique_sources,"
+                          "unique_targets,unique_operations,created_at FROM principals FINAL WHERE principal_name=?",
+                          (principal,)).fetchone()
     is_new = existing is None
 
     # Track novelty flags to avoid duplicate scoring
@@ -298,10 +290,10 @@ def _process_incremental_row(db, row) -> int:
         _emit(db, principal=principal, principal_id=principal_id, change_type="USERNAME_FIRST_SEEN", observed=timestamp_ms,
               caller=caller, source=source, target=target, operation=operation,
               new=principal, recurrence=str(timestamp_ms // 86_400_000))
-    elif timestamp_ms - existing[1] >= settings.principal_dormant_days * 86_400_000:
+    elif timestamp_ms - existing[2] >= settings.principal_dormant_days * 86_400_000:
         ready, _ = evaluate_readiness(db, principal_id, "DORMANT_REACTIVATED", timestamp_ms)
         if ready:
-            days = (timestamp_ms - existing[1]) // 86_400_000
+            days = (timestamp_ms - existing[2]) // 86_400_000
             _emit(db, principal=principal, principal_id=principal_id, change_type="DORMANT_REACTIVATED", observed=timestamp_ms,
                   old=f"inactive {days} days", new="active", recurrence=str(timestamp_ms // 86_400_000),
                   reason={"summary": f"{principal} became active after {days} inactive days."})
@@ -383,38 +375,56 @@ def _process_incremental_row(db, row) -> int:
     record_candidate_behavior(db, principal_id, "operation", op_key, timestamp_ms, timestamp_ms // 900000)
 
     now = int(time.time() * 1000)
-    db.execute("""
-      INSERT INTO principals(principal_name,principal_type,first_seen,last_seen,total_requests,created_at,updated_at)
-      VALUES(?,'unknown',?,?,1,?,?) ON CONFLICT(principal_name) DO UPDATE SET
-      first_seen=MIN(first_seen,excluded.first_seen),last_seen=MAX(last_seen,excluded.last_seen),
-      total_requests=total_requests+1,updated_at=excluded.updated_at
-    """, (principal, timestamp_ms, timestamp_ms, now, now))
+    if existing:
+        db.execute("INSERT INTO principals(principal_name,principal_type,first_seen,last_seen,total_requests,unique_callers,"
+                   "unique_sources,unique_targets,unique_operations,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?)",
+                   (principal, existing[0], min(int(existing[1]), timestamp_ms), max(int(existing[2]), timestamp_ms),
+                    int(existing[3]) + 1, existing[4], existing[5], existing[6], existing[7], existing[8], now))
+    else:
+        db.execute("INSERT INTO principals(principal_name,principal_type,first_seen,last_seen,total_requests,created_at,updated_at) "
+                   "VALUES(?,'unknown',?,?,1,?,?)", (principal, timestamp_ms, timestamp_ms, now, now))
     error = int((row["http_status"] or 0) >= 400 or row["outcome"] == "failure")
     _upsert_dimension(db, "principal_callers", "caller_service", principal, caller, timestamp_ms)
     _upsert_dimension(db, "principal_sources", "source_ip", principal, source, timestamp_ms)
     _upsert_dimension(db, "principal_targets", "target_service", principal, target, timestamp_ms, error)
     _upsert_dimension(db, "principal_operations", "target_service,operation", principal,
                       f"{target}\0{operation}", timestamp_ms, error)
-    db.execute("""
-      INSERT INTO principal_relationships(principal_name,caller_service,caller_instance,source_ip,target_service,
-        target_instance,target_ip,target_port,operation,http_method,first_seen,last_seen,observation_count,success_count,error_count)
-      VALUES(?,?,?,?,?,?,?,?,?,?,?,?,1,?,?)
-      ON CONFLICT(principal_name,caller_service,caller_instance,source_ip,target_service,target_instance,target_ip,target_port,operation,http_method)
-      DO UPDATE SET last_seen=MAX(last_seen,excluded.last_seen),observation_count=observation_count+1,
-        success_count=success_count+excluded.success_count,error_count=error_count+excluded.error_count
-    """, (principal, caller, row["caller_instance"] or "", source, target, row["target_instance"] or "",
-          row["target_ip"] or "", row["target_port"] or 0, operation, row["http_method"] or "",
-          timestamp_ms, timestamp_ms, 1-error, error))
+    relationship_key = (principal, caller, row["caller_instance"] or "", source, target,
+                        row["target_instance"] or "", row["target_ip"] or "", row["target_port"] or 0,
+                        operation, row["http_method"] or "")
+    relationship_where = " AND ".join(f"{c}=?" for c in (
+        "principal_name", "caller_service", "caller_instance", "source_ip", "target_service",
+        "target_instance", "target_ip", "target_port", "operation", "http_method"))
+    prior_relationship = db.execute(
+        f"SELECT first_seen,last_seen,observation_count,success_count,error_count FROM principal_relationships FINAL "
+        f"WHERE {relationship_where} LIMIT 1", relationship_key).fetchone()
+    if prior_relationship:
+        db.execute("INSERT INTO principal_relationships(principal_name,caller_service,caller_instance,source_ip,target_service,"
+                   "target_instance,target_ip,target_port,operation,http_method,first_seen,last_seen,observation_count,success_count,error_count) "
+                   "VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                   (*relationship_key, min(int(prior_relationship[0]), timestamp_ms),
+                    max(int(prior_relationship[1]), timestamp_ms), int(prior_relationship[2]) + 1,
+                    int(prior_relationship[3]) + 1-error, int(prior_relationship[4]) + error))
+    else:
+        db.execute("INSERT INTO principal_relationships(principal_name,caller_service,caller_instance,source_ip,target_service,"
+                   "target_instance,target_ip,target_port,operation,http_method,first_seen,last_seen,observation_count,success_count,error_count) "
+                   "VALUES(?,?,?,?,?,?,?,?,?,?,?,?,1,?,?)", (*relationship_key, timestamp_ms, timestamp_ms, 1-error, error))
     day = (timestamp_ms // 86_400_000) * 86_400_000
     dow, hour = map(int, time.strftime("%w %H", time.gmtime(timestamp_ms / 1000)).split())
-    db.execute("INSERT INTO principal_hourly_activity VALUES(?,?,?,?,?) ON CONFLICT(principal_name,day_of_week,hour_of_day) "
-               "DO UPDATE SET observation_count=observation_count+1,error_count=error_count+excluded.error_count",
-               (principal, dow, hour, 1, error))
-    db.execute("""
-      INSERT INTO principal_daily_stats VALUES(?,?,?,?,?,?,?,?)
-      ON CONFLICT(principal_name,day_start) DO UPDATE SET observation_count=observation_count+1,
-        error_count=error_count+excluded.error_count
-    """, (principal, day, 1, error, 0, 0, 0, 0))
+    prior_hour = db.execute("SELECT observation_count,error_count FROM principal_hourly_activity FINAL WHERE principal_name=? AND day_of_week=? AND hour_of_day=?", (principal, dow, hour)).fetchone()
+    if prior_hour:
+        db.execute("INSERT INTO principal_hourly_activity VALUES(?,?,?,?,?)",
+                   (principal, dow, hour, int(prior_hour[0]) + 1, int(prior_hour[1]) + error))
+    else:
+        db.execute("INSERT INTO principal_hourly_activity VALUES(?,?,?,?,?)", (principal, dow, hour, 1, error))
+    prior_day = db.execute("SELECT observation_count,error_count,unique_callers,unique_sources,unique_targets,unique_operations "
+                           "FROM principal_daily_stats FINAL WHERE principal_name=? AND day_start=?", (principal, day)).fetchone()
+    if prior_day:
+        db.execute("INSERT INTO principal_daily_stats VALUES(?,?,?,?,?,?,?,?)",
+                   (principal, day, int(prior_day[0]) + 1, int(prior_day[1]) + error,
+                    int(prior_day[2]), int(prior_day[3]), int(prior_day[4]), int(prior_day[5])))
+    else:
+        db.execute("INSERT INTO principal_daily_stats VALUES(?,?,?,?,?,?,?,?)", (principal, day, 1, error, 0, 0, 0, 0))
     _refresh_principal_counts(db, principal)
     return 1
 
@@ -427,19 +437,23 @@ def process_principal_intelligence(db_path: Optional[str] = None) -> dict[str, i
         if not checkpoint_row:
             return _bootstrap(db, settings.principal_bootstrap_ratio)
         checkpoint = json.loads(checkpoint_row[0])
-        cursor = int(checkpoint.get("trace_id", 0))
+        cursor_order = int(checkpoint.get("ingest_order", 0))
+        cursor_uid = str(checkpoint.get("row_uid", "00000000-0000-0000-0000-000000000000"))
         processed = 0
         while True:
             rows = db.execute(
-                "SELECT * FROM traces WHERE id>? ORDER BY id LIMIT 10000", (cursor,)
+                "SELECT * FROM traces WHERE (ingest_order,row_uid)>(?,toUUID(?)) "
+                "ORDER BY ingest_order,row_uid LIMIT 10000", (cursor_order, cursor_uid)
             ).fetchall()
             if not rows:
                 break
             for row in rows:
                 processed += _process_incremental_row(db, row)
-                cursor = row["id"]
-        checkpoint["trace_id"] = cursor
+                cursor_order = int(row["ingest_order"])
+                cursor_uid = str(row["row_uid"])
+        checkpoint["ingest_order"] = cursor_order
+        checkpoint["row_uid"] = cursor_uid
         db.execute("UPDATE checkpoints SET cursor_json=?,updated_at_ms=? WHERE source='principal_intelligence'",
                    (json.dumps(checkpoint), int(time.time() * 1000)))
-        return {"processed": processed, "changes": db.total_changes, "cursor": cursor,
+        return {"processed": processed, "changes": db.total_changes, "cursor": cursor_order,
                 "bootstrap_cutoff_ms": int(checkpoint.get("bootstrap_cutoff_ms", 0))}

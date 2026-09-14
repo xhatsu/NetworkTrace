@@ -1,3 +1,4 @@
+"""Expose derived user intelligence without leaking authentication source material."""
 from __future__ import annotations
 
 from datetime import datetime

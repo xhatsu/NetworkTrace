@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import Iterable
 
 from .fixtures import synthetic_documents
-from .repository import SQLiteRepository
+from .repository import StorageRepository
 from .worker import run_jobs
 from .app.repositories.trace_repository import TraceRepository
 from .app.services.normalization import normalize_otel_record
@@ -48,7 +48,7 @@ def main() -> None:
     imp=sub.add_parser("import-file"); imp.add_argument("path",type=Path); imp.add_argument("--batch-size",type=int,default=2000); imp.add_argument("--limit",type=int,default=None)
     sub.add_parser("sync-elasticsearch")
     sub.add_parser("analyze")
-    args=parser.parse_args(); repo=SQLiteRepository(); repo.migrate()
+    args=parser.parse_args(); repo=StorageRepository(); repo.migrate()
     if args.command=="migrate": result={"status":"migrated"}
     elif args.command=="demo": result=import_documents(synthetic_documents(args.events,args.services))
     elif args.command=="import-file": result=import_documents(stream_records(args.path),args.limit,args.batch_size)

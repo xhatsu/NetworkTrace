@@ -14,6 +14,9 @@ Validation rules (from spec):
   - reasons must be a list of bounded enum values only
   - Duplicate (node, instance_id, sequence) -> HTTP 200, accepted: false
   - Invalid document -> HTTP 400
+
+The receiver validates before persistence so independently scaled fleet agents
+cannot turn malformed health data into durable ClickHouse cardinality pressure.
 """
 from __future__ import annotations
 
@@ -22,12 +25,14 @@ from typing import Any, Dict
 
 from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse
+from starlette.concurrency import run_in_threadpool
 
 from backend.app.repositories.agent_stats_repository import AgentStatsRepository
 from backend.app.services.storage_owner_client import StorageOwnerError, storage_owner_client
 
 router = APIRouter(tags=["agent"])
 
+# Bound untrusted agent payloads before JSON parsing to protect a high-fan-in receiver.
 _MAX_BODY_BYTES = 16 * 1024  # 16 KiB per spec
 
 _VALID_STATUSES = {"ok", "degraded"}
@@ -125,10 +130,11 @@ async def agent_stats(request: Request) -> Dict[str, Any]:
         return JSONResponse({"ok": False, "error": err}, status_code=400)
 
     try:
+        # The optional internal boundary retains role isolation without changing this public protocol.
         if storage_owner_client.enabled:
             accepted = bool((await storage_owner_client.store_agent_sample(body))["accepted"])
         else:
-            accepted = AgentStatsRepository().upsert(body)
+            accepted = await run_in_threadpool(AgentStatsRepository().upsert, body)
     except StorageOwnerError as exc:
         return _remote_error_response(exc)
 
@@ -147,7 +153,7 @@ async def agent_stats_latest(node: str | None = None) -> Dict[str, Any]:
         items = (
             await storage_owner_client.agent_latest(node)
             if storage_owner_client.enabled
-            else AgentStatsRepository().get_latest(node)
+            else await run_in_threadpool(AgentStatsRepository().get_latest, node)
         )
     except StorageOwnerError as exc:
         return _remote_error_response(exc)
@@ -165,7 +171,7 @@ async def agent_stats_history(node: str, limit: int = 120, instance_id: str | No
         items = (
             await storage_owner_client.agent_history(node, limit, instance_id)
             if storage_owner_client.enabled
-            else AgentStatsRepository().get_history(node, limit, instance_id=instance_id)
+            else await run_in_threadpool(AgentStatsRepository().get_history, node, limit, instance_id)
         )
     except StorageOwnerError as exc:
         return _remote_error_response(exc)
@@ -179,7 +185,7 @@ async def agent_stats_node_detail(node: str, instance_id: str | None = None) -> 
         all_node_items = (
             await storage_owner_client.agent_latest(node)
             if storage_owner_client.enabled
-            else AgentStatsRepository().get_latest(node)
+            else await run_in_threadpool(AgentStatsRepository().get_latest, node)
         )
     except StorageOwnerError as exc:
         return _remote_error_response(exc)
@@ -209,7 +215,7 @@ async def agent_stats_delete_node(node: str, instance_id: str | None = None) -> 
         result = (
             await storage_owner_client.delete_agent(node, instance_id)
             if storage_owner_client.enabled
-            else AgentStatsRepository().delete_instance(node, instance_id=instance_id)
+            else await run_in_threadpool(AgentStatsRepository().delete_instance, node, instance_id)
         )
     except StorageOwnerError as exc:
         return _remote_error_response(exc)

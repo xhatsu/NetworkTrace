@@ -2,7 +2,7 @@ services:
   api:
     build: .
     environment:
-      OTEL_DB_PATH: /data/tracescope.db
+      OTEL_DATA_DIR: /data
       OTEL_DEMO_MODE: "true"
       OTEL_CORS_ORIGINS: http://localhost:5173
       OTEL_RETENTION_DAYS: "30"

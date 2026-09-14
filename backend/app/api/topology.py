@@ -1,3 +1,4 @@
+"""Return dependency graphs from materialized edges for bounded interactive reads."""
 from __future__ import annotations
 import time
 from typing import Any, Dict, Optional

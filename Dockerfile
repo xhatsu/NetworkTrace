@@ -14,7 +14,7 @@ COPY docs ./docs
 COPY --from=ui /src/frontend/dist ./frontend/dist
 COPY docker-entrypoint.sh ./docker-entrypoint.sh
 RUN chmod +x ./docker-entrypoint.sh
-ENV OTEL_DB_PATH=/data/tracescope.db \
+ENV OTEL_DATA_DIR=/data \
     OTEL_DEMO_MODE=true \
     OTEL_RETENTION_DAYS=30 \
     OTEL_CLICKHOUSE_HOST=127.0.0.1 \

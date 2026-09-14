@@ -9,15 +9,18 @@ from uuid import uuid4
 import httpx
 import pytest
 
-from backend.app.services.ingest_writer import IngestQueueFull, IngestWriter, ingest_writer
+from backend.app.services.ingest_writer import (
+    IngestQueueFull, IngestWriter, IngestWriteResult, _WriteRequest, ingest_writer,
+)
+from backend.app.repositories.db_context import get_connection
 from backend.app.services.normalization import normalize_otel_record
 from backend.main import app
-from backend.repository import SQLiteRepository
+from backend.repository import StorageRepository
 
 
 @pytest.fixture(scope="module", autouse=True)
 def setup_api_database():
-    SQLiteRepository().migrate()
+    StorageRepository().migrate()
 
 
 def _trace(index: int):
@@ -34,9 +37,161 @@ def _trace(index: int):
     return trace
 
 
+def test_trace_ids_are_unique_and_composite_cursor_does_not_skip_large_blocks(tmp_path):
+    db_path = tmp_path / "unique-ids.db"
+    StorageRepository(db_path).migrate()
+    writer = IngestWriter(db_path=db_path, coalesce_ms=0, commit_timeout_seconds=10)
+    try:
+        assert writer.submit([_trace(i) for i in range(10_001)]).inserted == 10_001
+        with get_connection(db_path) as db:
+            count, ids, row_uids = db.execute(
+                "SELECT count(),uniqExact(id),uniqExact(row_uid) FROM traces"
+            ).fetchone()
+            assert (count, ids, row_uids) == (10_001, 10_001, 10_001)
+            cursor_order = 0
+            cursor_uid = "00000000-0000-0000-0000-000000000000"
+            seen = 0
+            while True:
+                rows = db.execute(
+                    "SELECT ingest_order,toString(row_uid) FROM traces "
+                    "WHERE (ingest_order,row_uid)>(?,toUUID(?)) ORDER BY ingest_order,row_uid LIMIT 10000",
+                    (cursor_order, cursor_uid),
+                ).fetchall()
+                if not rows:
+                    break
+                seen += len(rows)
+                cursor_order, cursor_uid = int(rows[-1][0]), str(rows[-1][1])
+            assert seen == 10_001
+    finally:
+        writer.shutdown()
+
+
+def test_retry_repairs_marker_after_trace_insert_succeeds(tmp_path, monkeypatch):
+    db_path = tmp_path / "marker-recovery.db"
+    StorageRepository(db_path).migrate()
+    db = get_connection(db_path)
+    writer = IngestWriter(db_path=db_path)
+    existing = {row[0] for row in db.client.query(f"DESCRIBE TABLE {db.database}.traces").result_rows}
+    columns = [column for column in writer._TRACE_COLUMNS if column in existing]
+    original_insert = db.client.insert
+    failed = False
+
+    def fail_marker_once(table, *args, **kwargs):
+        nonlocal failed
+        if table == "ingest_batches" and not failed:
+            failed = True
+            raise RuntimeError("injected marker failure")
+        return original_insert(table, *args, **kwargs)
+
+    monkeypatch.setattr(db.client, "insert", fail_marker_once)
+    first = _WriteRequest([_trace(55)], batch_id="recoverable-batch", node="node")
+    writer._write(db, "", columns, [first])
+    assert isinstance(first.error, RuntimeError)
+
+    retry = _WriteRequest([_trace(55)], batch_id="recoverable-batch", node="node")
+    writer._write(db, "", columns, [retry])
+    assert retry.result == IngestWriteResult(inserted=0, duplicate=True)
+    assert db.execute("SELECT count() FROM traces WHERE ingest_batch_id='recoverable-batch'").fetchone()[0] == 1
+    assert db.execute("SELECT count() FROM ingest_batches WHERE batch_id='recoverable-batch'").fetchone()[0] == 1
+
+
+def test_marker_insert_failure_midflight_repairs_every_batch_without_duplicates(tmp_path, monkeypatch):
+    db_path = tmp_path / "marker-midflight-recovery.db"
+    StorageRepository(db_path).migrate()
+    db = get_connection(db_path)
+    writer = IngestWriter(db_path=db_path)
+    existing = {row[0] for row in db.client.query(f"DESCRIBE TABLE {db.database}.traces").result_rows}
+    columns = [column for column in writer._TRACE_COLUMNS if column in existing]
+    original_insert = db.client.insert
+
+    def fail_markers(table, *args, **kwargs):
+        if table == "ingest_batches":
+            raise RuntimeError("injected multi-marker failure")
+        return original_insert(table, *args, **kwargs)
+
+    monkeypatch.setattr(db.client, "insert", fail_markers)
+    first_jobs = [
+        _WriteRequest([_trace(56)], batch_id="recoverable-a", node="node"),
+        _WriteRequest([_trace(57)], batch_id="recoverable-b", node="node"),
+    ]
+    writer._write(db, "", columns, first_jobs)
+    assert all(isinstance(job.error, RuntimeError) for job in first_jobs)
+    monkeypatch.setattr(db.client, "insert", original_insert)
+
+    retries = [
+        _WriteRequest([_trace(56)], batch_id="recoverable-a", node="node"),
+        _WriteRequest([_trace(57)], batch_id="recoverable-b", node="node"),
+    ]
+    writer._write(db, "", columns, retries)
+    assert all(job.result == IngestWriteResult(inserted=0, duplicate=True) for job in retries)
+    assert db.execute("SELECT count() FROM traces WHERE ingest_batch_id LIKE 'recoverable-%'").fetchone()[0] == 2
+    assert db.execute("SELECT count() FROM ingest_batches WHERE batch_id LIKE 'recoverable-%'").fetchone()[0] == 2
+
+
+def test_lost_success_response_retry_is_duplicate(tmp_path):
+    db_path = tmp_path / "lost-response.db"
+    StorageRepository(db_path).migrate()
+    db = get_connection(db_path)
+    writer = IngestWriter(db_path=db_path)
+    existing = {row[0] for row in db.client.query(f"DESCRIBE TABLE {db.database}.traces").result_rows}
+    columns = [column for column in writer._TRACE_COLUMNS if column in existing]
+
+    committed = _WriteRequest([_trace(58)], batch_id="lost-response", node="node")
+    writer._write(db, "", columns, [committed])
+    # The caller discards the successful result, exactly as if the HTTP response
+    # were lost after the durable commit, then resubmits the same batch.
+    retry = _WriteRequest([_trace(58)], batch_id="lost-response", node="node")
+    writer._write(db, "", columns, [retry])
+    assert committed.result == IngestWriteResult(inserted=1, duplicate=False)
+    assert retry.result == IngestWriteResult(inserted=0, duplicate=True)
+    assert db.execute("SELECT count() FROM traces WHERE ingest_batch_id='lost-response'").fetchone()[0] == 1
+
+
+def test_same_dedup_key_in_different_batches_is_at_least_once(tmp_path):
+    db_path = tmp_path / "cross-batch-semantics.db"
+    StorageRepository(db_path).migrate()
+    writer = IngestWriter(db_path=db_path, coalesce_ms=0)
+    trace = _trace(59)
+    try:
+        first = writer.submit([trace], batch_id="different-a", node="node")
+        second = writer.submit([trace], batch_id="different-b", node="node")
+        assert first.inserted == second.inserted == 1
+        with get_connection(db_path) as db:
+            row = db.execute(
+                "SELECT count(),uniqExact(dedup_key),uniqExact(ingest_batch_id) "
+                "FROM traces WHERE dedup_key=?",
+                (trace.dedup_key,),
+            ).fetchone()
+        # Batch IDs are the idempotency boundary. A repeated span in a different
+        # batch is intentionally stored and counted twice under current semantics.
+        assert tuple(row) == (2, 1, 2)
+    finally:
+        writer.shutdown()
+
+
+def test_retry_in_different_coalesced_insert_block_is_duplicate(tmp_path):
+    db_path = tmp_path / "different-block-retry.db"
+    StorageRepository(db_path).migrate()
+    db = get_connection(db_path)
+    writer = IngestWriter(db_path=db_path)
+    existing = {row[0] for row in db.client.query(f"DESCRIBE TABLE {db.database}.traces").result_rows}
+    columns = [column for column in writer._TRACE_COLUMNS if column in existing]
+
+    original = _WriteRequest([_trace(60)], batch_id="block-retry", node="node")
+    companion_a = _WriteRequest([_trace(61)], batch_id="block-a", node="node")
+    writer._write(db, "", columns, [original, companion_a])
+    retry = _WriteRequest([_trace(60)], batch_id="block-retry", node="node")
+    companion_b = _WriteRequest([_trace(62)], batch_id="block-b", node="node")
+    writer._write(db, "", columns, [companion_b, retry])
+
+    assert retry.result == IngestWriteResult(inserted=0, duplicate=True)
+    assert companion_b.result == IngestWriteResult(inserted=1, duplicate=False)
+    assert db.execute("SELECT count() FROM traces WHERE ingest_batch_id='block-retry'").fetchone()[0] == 1
+
+
 def test_concurrent_uploads_are_coalesced_and_batch_dedup_is_atomic(tmp_path):
     db_path = tmp_path / "coalesced.db"
-    SQLiteRepository(db_path).migrate()
+    StorageRepository(db_path).migrate()
     writer = IngestWriter(
         db_path=db_path,
         queue_capacity=64,
@@ -65,13 +220,43 @@ def test_concurrent_uploads_are_coalesced_and_batch_dedup_is_atomic(tmp_path):
         assert sum(not result.duplicate for result in duplicate_results) == 1
         assert sum(result.inserted for result in duplicate_results) == 1
 
-        with SQLiteRepository(db_path).connect() as db:
+        with StorageRepository(db_path).connect() as db:
             assert db.execute("SELECT COUNT(*) FROM traces").fetchone()[0] == 21
             assert db.execute(
                 "SELECT COUNT(*) FROM ingest_batches WHERE batch_id=?", (shared_batch_id,)
             ).fetchone()[0] == 1
     finally:
         writer.shutdown()
+
+
+def test_writer_flushes_before_coalesced_byte_cap(tmp_path, monkeypatch):
+    db_path = tmp_path / "byte-cap.db"
+    StorageRepository(db_path).migrate()
+    writer = IngestWriter(
+        db_path=db_path,
+        coalesce_ms=100,
+        transaction_records=100,
+        max_batch_bytes=10,
+    )
+    requests = [
+        _WriteRequest([_trace(700)], estimated_bytes=6),
+        _WriteRequest([_trace(701)], estimated_bytes=4),
+        _WriteRequest([_trace(702)], estimated_bytes=1),
+    ]
+    written = []
+
+    def capture_write(_db, _insert_sql, _columns, jobs):
+        written.append([job.estimated_bytes for job in jobs])
+
+    monkeypatch.setattr(writer, "_write", capture_write)
+    for request in requests:
+        writer._queue.put(request)
+    writer._queue.put(None)
+
+    writer._run()
+
+    assert written == [[6, 4], [1]]
+    assert writer.snapshot()["transaction_byte_limit"] == 10
 
 
 def test_saturated_ingest_returns_retryable_429(monkeypatch):
@@ -93,7 +278,7 @@ def test_saturated_ingest_returns_retryable_429(monkeypatch):
 
 def test_writer_rejects_when_bounded_queue_is_full(tmp_path, monkeypatch):
     db_path = tmp_path / "backpressure.db"
-    SQLiteRepository(db_path).migrate()
+    StorageRepository(db_path).migrate()
     writer = IngestWriter(
         db_path=db_path,
         queue_capacity=1,

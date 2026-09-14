@@ -1,3 +1,4 @@
+"""Build dashboard-ready estate summaries from precomputed ClickHouse rollups."""
 from __future__ import annotations
 import time
 from typing import Any, Dict, Optional

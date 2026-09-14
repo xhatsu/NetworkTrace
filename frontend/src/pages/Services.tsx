@@ -49,19 +49,20 @@ export function ServicesPage() {
   const { filters } = useFilters();
   const nav = useNavigate();
   const [filterQuery, setFilterQuery] = useState("");
+  const qs = queryString(filters);
 
   const query = useQuery({
-    queryKey: ["services"],
-    queryFn: () => api<{ items: Service[] }>("/api/v1/services?limit=500"),
+    queryKey: ["services", qs],
+    queryFn: () => api<{ items: Service[] }>(`/api/v1/services?${qs}&limit=500`),
   });
   const filteredItems = (query.data?.items || []).filter((s) => {
     if (!filterQuery) return true;
     const q = filterQuery.toLowerCase();
     return (
-      s.name.toLowerCase().includes(q) ||
-      s.service_group.toLowerCase().includes(q) ||
-      s.service_module.toLowerCase().includes(q) ||
-      s.environment.toLowerCase().includes(q)
+      (s.name || "").toLowerCase().includes(q) ||
+      (s.service_group || "").toLowerCase().includes(q) ||
+      (s.service_module || "").toLowerCase().includes(q) ||
+      (s.environment || "").toLowerCase().includes(q)
     );
   });
 

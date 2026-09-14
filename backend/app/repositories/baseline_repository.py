@@ -1,3 +1,4 @@
+"""Persist robust behavioral expectations for reuse across detector runs and API reads."""
 from __future__ import annotations
 import time
 from typing import Any, Dict, List, Optional
@@ -17,16 +18,6 @@ class BaselineRepository:
           rps_median, rps_mad, latency_p50_median, latency_p95_median, latency_p95_mad,
           error_rate_median, error_rate_mad, updated_at
         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        ON CONFLICT(dimension_type, dimension_key, hour_of_day, day_of_week) DO UPDATE SET
-          sample_count=excluded.sample_count,
-          rps_median=excluded.rps_median,
-          rps_mad=excluded.rps_mad,
-          latency_p50_median=excluded.latency_p50_median,
-          latency_p95_median=excluded.latency_p95_median,
-          latency_p95_mad=excluded.latency_p95_mad,
-          error_rate_median=excluded.error_rate_median,
-          error_rate_mad=excluded.error_rate_mad,
-          updated_at=excluded.updated_at
         """
         now = int(time.time() * 1000)
         with db_transaction(self.db_path) as db:
@@ -46,7 +37,7 @@ class BaselineRepository:
         with get_connection(self.db_path) as db:
             if hour_of_day is not None and day_of_week is not None:
                 row = db.execute("""
-                    SELECT * FROM baseline_metrics
+                    SELECT * FROM baseline_metrics FINAL
                     WHERE dimension_type = ? AND dimension_key = ? AND hour_of_day = ? AND day_of_week = ?
                 """, (dimension_type, dimension_key, hour_of_day, day_of_week)).fetchone()
                 if row:
@@ -63,7 +54,7 @@ class BaselineRepository:
                   AVG(error_rate_median) as error_rate_median,
                   AVG(error_rate_mad) as error_rate_mad,
                   SUM(sample_count) as sample_count
-                FROM baseline_metrics
+                FROM baseline_metrics FINAL
                 WHERE dimension_type = ? AND dimension_key = ?
             """, (dimension_type, dimension_key)).fetchone()
             if row and row["sample_count"]:

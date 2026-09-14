@@ -1,3 +1,4 @@
+"""Define bounded incident state so repeated evidence cannot inflate operator workload forever."""
 from __future__ import annotations
 from typing import Any, Dict, List, Optional
 from pydantic import BaseModel, Field

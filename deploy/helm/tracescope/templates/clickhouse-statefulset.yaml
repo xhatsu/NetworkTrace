@@ -44,6 +44,11 @@ spec:
               value: {{ .Values.clickhouse.database | quote }}
             - name: CLICKHOUSE_USER
               value: {{ .Values.clickhouse.user | quote }}
+            - name: CLICKHOUSE_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "tracescope.secretName" . }}
+                  key: CLICKHOUSE_PASSWORD
             - name: CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT
               value: "1"
           startupProbe:

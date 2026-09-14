@@ -1,3 +1,5 @@
+# PDBs protect availability during voluntary disruptions without pretending the singleton
+# ClickHouse/RWO owner can tolerate a concurrent replica.
 apiVersion: policy/v1
 kind: PodDisruptionBudget
 metadata:
@@ -21,6 +23,7 @@ metadata:
   name: tracescope-ingest
   namespace: tracescope
 spec:
+  # Retain quorum-like receiver capacity while allowing one replica to drain.
   minAvailable: 2
   selector:
     matchLabels:
@@ -39,4 +42,3 @@ spec:
     matchLabels:
       app.kubernetes.io/name: tracescope
       app.kubernetes.io/component: clickhouse
-

@@ -1,3 +1,4 @@
+"""Compare rollups with robust baselines instead of treating one noisy bucket as truth."""
 from __future__ import annotations
 import time
 from datetime import datetime, timezone
@@ -5,7 +6,47 @@ from typing import Any, Dict, List, Optional
 from backend.app.models.anomaly import AnomalyEvent, AnomalyReason
 from backend.app.repositories.db_context import get_connection
 from backend.app.repositories.baseline_repository import BaselineRepository
-from backend.app.repositories.anomaly_repository import AnomalyRepository
+from backend.app.repositories.anomaly_repository import AnomalyRepository, deterministic_anomaly_id
+
+
+def detect_revised_anomalies(
+    db_path: Optional[str] = None,
+    max_windows: Optional[int] = None,
+) -> List[AnomalyEvent]:
+    """Evaluate every completed/revised five-minute bucket exactly after discovery.
+
+    Markers are deleted only after all selected windows have been evaluated, so a
+    detector failure is retryable.  The anomaly repository's deterministic IDs
+    make repeated evaluation idempotent (completed in delivery phase 5).
+    """
+    with get_connection(db_path) as db:
+        limit_clause = " LIMIT ?" if max_windows is not None else ""
+        args = (max(1, max_windows),) if max_windows is not None else ()
+        rows = db.execute(
+            "SELECT DISTINCT bucket_ms FROM dirty_buckets FINAL "
+            "WHERE reason='aggregation-revised' ORDER BY bucket_ms" + limit_clause,
+            args,
+        ).fetchall()
+    if not rows:
+        return []
+
+    found: List[AnomalyEvent] = []
+    bucket_values = [int(row[0]) for row in rows]
+    for bucket_ms in bucket_values:
+        bucket_start_sec = bucket_ms // 1000
+        found.extend(detect_anomalies(
+            bucket_start_sec,
+            bucket_start_sec + 300,
+            db_path,
+        ))
+
+    with get_connection(db_path) as db:
+        for bucket_ms in bucket_values:
+            db.execute(
+                "DELETE FROM dirty_buckets WHERE reason='aggregation-revised' AND bucket_ms=?",
+                (bucket_ms,),
+            )
+    return found
 
 def detect_anomalies(
     window_start_sec: Optional[int] = None,
@@ -17,7 +58,7 @@ def detect_anomalies(
 
     with get_connection(db_path) as db:
         if window_end_sec is None:
-            max_b = db.execute("SELECT MAX(bucket_start) FROM metric_buckets WHERE bucket_size = 300").fetchone()[0]
+            max_b = db.execute("SELECT MAX(bucket_start) FROM metric_buckets FINAL WHERE bucket_size = 300").fetchone()[0]
             if not max_b:
                 return []
             window_end_sec = max_b + 300
@@ -35,7 +76,7 @@ def detect_anomalies(
               SUM(request_count) as request_count,
               SUM(error_count) as error_count,
               MAX(latency_p95) as latency_p95
-            FROM metric_buckets
+            FROM metric_buckets FINAL
             WHERE bucket_size = 300 AND bucket_start >= ? AND bucket_start < ?
             GROUP BY target_service, caller_service, principal_name, operation
         """, (window_start_sec, window_end_sec)).fetchall()
@@ -180,8 +221,8 @@ def detect_anomalies(
 
     # Relationship and identity detectors
     with get_connection(db_path) as db:
-        historical_caller_targets = {f"{row[0]}->{row[1]}" for row in db.execute("SELECT caller_service, target_service FROM service_edges WHERE first_seen < ?", (window_start_sec,)).fetchall()}
-        historical_principal_targets = {f"{row[0]}->{row[1]}" for row in db.execute("SELECT principal_name, target_service FROM principal_service_edges WHERE first_seen < ?", (window_start_sec,)).fetchall()}
+        historical_caller_targets = {f"{row[0]}->{row[1]}" for row in db.execute("SELECT caller_service, target_service FROM service_edges FINAL WHERE first_seen < ?", (window_start_sec,)).fetchall()}
+        historical_principal_targets = {f"{row[0]}->{row[1]}" for row in db.execute("SELECT principal_name, target_service FROM principal_service_edges FINAL WHERE first_seen < ?", (window_start_sec,)).fetchall()}
 
     for r in current_rows:
         c = r["caller_service"]
@@ -363,6 +404,7 @@ def detect_anomalies(
             anomaly.first_seen = window_start_sec * 1000
         if anomaly.last_seen is None:
             anomaly.last_seen = window_end_sec * 1000
+        anomaly.id = deterministic_anomaly_id(anomaly)
 
     if anomalies:
         anomaly_repo.save_anomalies(anomalies)

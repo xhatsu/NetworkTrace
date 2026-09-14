@@ -11,7 +11,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterable, Iterator
 
-from .repository import SQLiteRepository
+from .repository import StorageRepository
 
 
 SENSITIVE_KEYS = {"labels.http_request_header_authorization", "http.request.headers.authorization", "authorization"}
@@ -248,7 +248,7 @@ class ImportResult:
 EVENT_COLUMNS = ("event_uid","timestamp_ms","ingested_ms","trace_id","transaction_id","parent_id","service_name","environment","node_name","service_group","service_module","operation","duration_us","sampled","outcome","http_method","status_code","account_username","account_namespace","span_kind","event_type","peer_service","peer_address","host_address","url_domain","url_port","url_path","source_file","source_offset","created_at_ms","client_ip","source_ip","attributes_json")
 
 
-def import_documents(repository: SQLiteRepository, documents: Iterable[dict[str, Any]], source: str = "import", batch_size: int = 2000) -> ImportResult:
+def import_documents(repository: StorageRepository, documents: Iterable[dict[str, Any]], source: str = "import", batch_size: int = 2000) -> ImportResult:
     result = ImportResult(); batch: list[dict[str, Any]] = []
     def flush() -> None:
         if not batch: return
@@ -295,7 +295,7 @@ def import_documents(repository: SQLiteRepository, documents: Iterable[dict[str,
     return result
 
 
-def import_file(repository: SQLiteRepository, path: Path, batch_size: int = 2000, limit: int | None = None) -> ImportResult:
+def import_file(repository: StorageRepository, path: Path, batch_size: int = 2000, limit: int | None = None) -> ImportResult:
     docs: Iterable[dict[str, Any]] = stream_documents(path)
     if limit is not None:
         import itertools

@@ -6,6 +6,9 @@ Only transaction documents are ingested into request traces.
 
 SECURITY LAW:
 Authorization headers, tokens, and raw passwords are never persisted.
+
+APM compatibility is normalized here so every receiver contributes the same
+sanitized dimensions to ClickHouse analytics and detector baselines.
 """
 from __future__ import annotations
 

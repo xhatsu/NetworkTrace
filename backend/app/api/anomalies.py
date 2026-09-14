@@ -1,3 +1,4 @@
+"""Expose explainable anomaly lifecycle views without coupling clients to storage details."""
 from __future__ import annotations
 from datetime import datetime, timezone
 from typing import Any, Dict, Literal, Optional

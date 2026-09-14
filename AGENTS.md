@@ -14,7 +14,7 @@
   - Incident blast-radius analysis (upstream callers, affected principals/operations) and deterministic root-cause heuristic origin.
   - Serves fast analytics dashboards via FastAPI and an interactive React/TypeScript frontend.
 - **Root Directory**: `/home/ubuntu/Viettel/OtelTrace`
-- **Current Database**: ClickHouse (active database `tracescope` on `127.0.0.1:8123`, managed via `backend/clickhouse_migrations/001_initial.sql`). SQLite database `data/tracescope.db` preserved for rollback safety.
+- **Current Database**: ClickHouse (active database `tracescope` on `127.0.0.1:8123`, managed via `backend/clickhouse_migrations/001_initial.sql`). All SQLite artifacts (legacy `data/tracescope.db`, `data/benchmark-2m.db`, `backend/migrations/*.sql`, the migration script) were purged on 2026-09-11; ClickHouse is the sole persistence layer with no local fallback archive.
 - **Active Dashboard Port**: `0.0.0.0:30102` (lifecycle-script default and current listener).
 - **NetworkTracing Hub Port**: `0.0.0.0:30102` (OTLP / Ingest Hub in `~/Viettel/NetworkTracing`).
 
@@ -38,9 +38,9 @@
     - User Intelligence & Incidents:
       - `/api/v1/users` inventory/profile subresources, `/api/v1/user-changes`, `/api/v1/user-changes/{id}/review` (operator overrides with scope and expiry), `/api/v1/user-graph`, `/api/v1/user-analytics`.
       - Bounded Security Incidents: `GET /api/v1/incidents`, `GET /api/v1/incidents/{id}` with capped family scores, 15m windows, 30m idle close, and 24h lifetime.
-    - `POST /api/v1/ingest`, compatibility alias `POST /api/v1/ingest/traces`, and old-kernel shipper alias `POST /api/ingest`: bounded OTEL/ELK or NetworkTracing `{node, events[]}` ingestion with credential sanitization, automatic `Content-Encoding: gzip` / magic-byte decompression with HTTP 400 rejection on corrupted payloads, and transaction-atomic `X-Batch-Id` deduplication (HTTP 200 `{"ok": true, "duplicate": true}` on replay, zero duplicate database insertions). Concurrent uploads enter the bounded coalescing writer; saturation returns HTTP 429 plus `Retry-After: 1`, and HTTP 200 is sent only after durable SQLite commit.
-    - **Ingest Batch Deduplication** (`backend/app/repositories/ingest_batch_repository.py`): Migration `012_ingest_batch_dedup.sql` defines `ingest_batches` table with in-memory LRU cache and automatic 7-day pruning.
-    - **High-TPS Ingest Writer** (`backend/app/services/ingest_writer.py`): A single persistent WAL connection serializes SQLite writes, coalesces concurrent requests for up to 5 ms / 50,000 records into one transaction, bounds admission to 256 queued requests, commits trace rows and batch IDs atomically, exposes queue/commit counters through `GET /api/v1/ingestion/status`, and shuts down cleanly with the FastAPI lifespan. Per-request rollup launches were removed; the existing `tracescope-worker` performs analytics on its 60-second cadence.
+    - `POST /api/v1/ingest`, compatibility alias `POST /api/v1/ingest/traces`, and old-kernel shipper alias `POST /api/ingest`: bounded OTEL/ELK or NetworkTracing `{node, events[]}` ingestion with credential sanitization, automatic `Content-Encoding: gzip` / magic-byte decompression with HTTP 400 rejection on corrupted payloads, and transaction-atomic `X-Batch-Id` deduplication (HTTP 200 `{"ok": true, "duplicate": true}` on replay, zero duplicate database insertions). Concurrent uploads enter the bounded coalescing writer; saturation returns HTTP 429 plus `Retry-After: 1`, and HTTP 200 is sent only after durable ClickHouse commit.
+    - **Ingest Batch Deduplication** (`backend/app/repositories/ingest_batch_repository.py`): Defined in `backend/clickhouse_migrations/001_initial.sql` as the `ingest_batches` table with in-memory LRU cache and automatic 7-day pruning.
+    - **High-TPS Ingest Writer** (`backend/app/services/ingest_writer.py`): A background writer thread coalesces concurrent requests for up to 5 ms / 50,000 records into batched ClickHouse INSERTs, bounds admission to 256 queued requests, writes trace rows and batch IDs durably, exposes queue/commit counters through `GET /api/v1/ingestion/status`, and shuts down cleanly with the FastAPI lifespan. Per-request rollup launches were removed; the existing `tracescope-worker` performs analytics on its 60-second cadence.
     - **Agent Stats** (`backend/app/api/agent_stats.py`): Oldkernel Agent Statistics Protocol v1 receiver.
       - `POST /api/agent/stats`: Accept a 16 KiB-bounded agent health sample. Validates `schema_version=1`, `type=agent_stats`, required fields, bounded `status` enum (`ok`/`degraded`), and bounded `reasons` enum. Idempotent: duplicate `(node, instance_id, sequence)` returns HTTP 200 `{"accepted": false}`. Spec: `~/Viettel/NetworkTracing/oldkernel/AGENT-STATS-PROTOCOL.md`.
       - `GET /api/agent/stats[?node=<name>]`: Latest health sample per node (or specific node).
@@ -56,7 +56,7 @@
   - `topology.py`: `ServiceEdge`, `PrincipalServiceEdge`, `TopologyNode`, `TopologyEdge`.
   - `anomaly.py`: `AnomalyEvent` (clean model without unobtained `instance` or dummy attributes), `AnomalyReason`.
 - **Repository Layer** (`backend/app/repositories/`):
-  - `db_context.py`: SQLite connection context with WAL mode and 5s busy timeout.
+  - `db_context.py`: ClickHouse connection context with a narrow SQLite-compatibility DB-API adapter (dialect translation confined here).
   - `trace_repository.py`: Normalized trace batch insert, query, and search.
   - `aggregate_repository.py`: Rollup storage, time-series query, KPI summaries.
   - `topology_repository.py`: Edge materialization, topology graph generation, caller/dependency traversal.
@@ -117,7 +117,7 @@
 ---
 
 ## 4. Current State & Verification
-- **Test Suite**: 74/74 tests passed in an isolated temporary-database harness; production data is never mutated by tests:
+- **Test Suite**: 111/111 tests passed in an isolated temporary-database harness (`.venv/bin/python -m pytest tests/ -q`); production data is never mutated by tests:
   - Unit & domain tests in `tests/test_analytics.py`, `tests/test_api.py`, `tests/test_ingestion.py`.
   - Ingestion batch deduplication and gzip decompression tests in `tests/test_batch_dedup_and_gzip.py`.
   - High-concurrency request coalescing, atomic concurrent deduplication, bounded-queue backpressure, and retryable HTTP 429 tests in `tests/test_ingest_writer.py`.
@@ -125,6 +125,8 @@
   - Canonical identity normalization, realm removal, multi-layer baselines, detector readiness, capped family scoring, and bounded incident lifetime tests in `tests/test_identity_normalization_and_incidents.py`.
   - Dedicated IP anomaly and novel user on host tests in `tests/test_user_ip_anomalies.py`.
   - Reference compatibility and WSSE ingestion tests in `tests/test_reference_compat.py` and `tests/test_wsse_ingestion.py`.
+  - Service boundary, workload splitting, and topology tests in `tests/test_service_boundaries.py`, `tests/test_split_workloads_integration.py`, and `tests/test_deployment_topology.py`.
+  - All 22 code review findings verified and documented in `FIX_REPORT.md`.
 - **End-to-End Curl & JS Safety Test Suite**: 42/42 tests passed (`sh backend/scripts/curl_test_all_pages.sh`).
   - Tested all 17 SPA routes (including `/agent-stats` and `/agent-stats/:node`) with HTTP 200 and valid HTML shell bundle delivery.
   - Tested 25 backing APIs against frontend TypeScript contracts via `backend/scripts/validate_js_safety.py`.
@@ -138,7 +140,7 @@
   - 0 unhandled `pageerror` exceptions, 0 React render crash boundaries, and 0 console error failures.
 - **Port 30102 Status**: Online and healthy, listening on all interfaces (`http://0.0.0.0:30102`).
 - **High-TPS Hub Deployment (2026-09-11)**: Bounded/coalescing writer is active on `:30102`; live ingestion status reported `writer_alive=true`, queue `0/256`, successful durable commits, zero failed requests, and atomic duplicate replay. Full isolated test suite passed 74/74 and the live curl/JavaScript contract suite passed 42/42 after deployment.
-- **Database Status & Ingested Sample Abnormal Dataset**: Active SQLite database in WAL mode at `data/tracescope.db` (`quick_check` passes `ok`). Ingested 50,000 traces from `/home/ubuntu/Viettel/Data/sample_abnormal_traces_50k.jsonl.gz` with ground-truth anomalies. Computed 46,307 1m buckets, 36,562 5m buckets, 33 service edges, 232 principal edges, 3,860 rolling baselines (median & MAD), 1,654 core observability anomalies (Detectors 1-8), 3,113 user behavioral change events across 7 types, and 41 bounded security incidents with family-capped scores.
+- **Dataset Baseline (historical, pre-ClickHouse)**: The 50,000-trace abnormal sample ingested 50,000 traces from `/home/ubuntu/Viettel/Data/sample_abnormal_traces_50k.jsonl.gz` with ground-truth anomalies. Computed 46,307 1m buckets, 36,562 5m buckets, 33 service edges, 232 principal edges, 3,860 rolling baselines (median & MAD), 1,654 core observability anomalies (Detectors 1-8), 3,113 user behavioral change events across 7 types, and 41 bounded security incidents with family-capped scores.
 - **Data Correctness**: Anomaly APIs filter and investigate by telemetry observation windows, expose measured bucket/baseline sample counts and MAD ranges, return matching trace evidence, and include metadata-associated principals. User scores count distinct evidence types once and explicitly distinguish learning from established baselines.
 - **WSSE UsernameToken Attribution**: Active `/api/ingest` and `/v1/traces` ingestion safely normalize namespaced WSSE usernames and store only `principal_name` with `auth_scheme=wsse`. OASIS 2004 plus legacy 2002/07, 2002/12, and 2003/06 `secext` namespaces are supported; malformed, unnamespaced, DTD/entity, oversized, and invalid usernames remain anonymous. SOAP bodies, passwords/digests, and nonces are never persisted or logged. Verified live on `:30102` with HTTP 200 and trace/API/database evidence.
 - **Java WSSE OTLP Fixture**: `/tmp/wsse-java-service` accepts bounded SOAP on
@@ -172,7 +174,7 @@
       13. `user_dormant_reactivation`: Account `cm2.0` silent for 19 hours, then bursting at 20.0h-23.5h (`DORMANT_REACTIVATED`, score: 40).
       14. `credential_abuse`: Identity `myViettel` connecting from foreign IP `185.220.101.5` via `customer-service` (21.0h - 24.0h).
   - `generate_traces.py`: High-performance generator integrating authentic production PCAP identities, 9 multi-tier enterprise services, diurnal traffic curves, W3C TraceContext causality, and strict 75/25 historical bootstrap partitioning. Supports `--days <N>` (e.g. `--days 15`), `--anomalies <all|none|list>`, `--list-anomalies`, and outputs detailed ground-truth injection summaries.
-  - `send_traces.py`: High-performance streaming ingestion tool supporting HTTP batch POSTing (`--mode http`) and fast direct SQLite batch writes (`--mode direct`, auto-tuned 5,000 batch size).
+  - `send_traces.py`: High-performance streaming ingestion tool supporting HTTP batch POSTing (`--mode http`) and fast direct ClickHouse batch writes (`--mode direct`, auto-tuned 5,000 batch size).
 - **15-Day 2,000,000 Data Point Dataset Generated**:
   - File: `/home/ubuntu/Viettel/Data/otel_elk_traces_2m.jsonl.gz` (495.27 MB).
   - Preview: `/home/ubuntu/Viettel/Data/otel_elk_sample_preview.json` (100 sample records).
@@ -204,10 +206,10 @@
   `OTEL_STORAGE_OWNER_URL=http://tracescope-storage:8000` and an
   `OTEL_INTERNAL_API_TOKEN`. Authenticated `/internal/v1/*` operations are
   excluded from OpenAPI. Storage errors retain retryable 429/503 behavior.
-- **SQLite/WAL safety**: only the single-replica `tracescope-storage` StatefulSet
-  mounts the ReadWriteOnce PVC. Its API and analytics-worker sidecar share the
-  same pod/filesystem lock domain. No other pod opens SQLite, and network/RWX
-  filesystems are explicitly unsupported.
+- **ClickHouse single store**: the single-replica `tracescope-clickhouse`
+  StatefulSet owns the ReadWriteOnce data PVC. Application roles (storage API,
+  ingest, agent-stats, worker) are stateless and connect over HTTP 8123;
+  network/RWO-only applies to the ClickHouse volume.
 - **Idempotency**: trace rows and `X-Batch-Id` remain transaction-atomic in the
   storage owner's coalescing writer. Agent `(node, instance_id, sequence)`
   acceptance is now one atomic insert, avoiding check-then-write races across
@@ -226,16 +228,14 @@
 
 ---
 
-## 5. ClickHouse Storage Migration (2026-09-11)
+## 5. ClickHouse Persistence & Storage Architecture
 
 - **Architecture Overview**: TraceScope has migrated its primary persistence layer to ClickHouse (`http://127.0.0.1:8123`, default database `tracescope`).
 - **Database Engine & Driver**:
   - Python driver: `clickhouse_connect` HTTP client with thread-local client caching and connection lifecycle management in `backend/app/repositories/db_context.py`.
   - Schema & Migrations: `backend/clickhouse_migrations/001_initial.sql` defining 35 tables with `ReplacingMergeTree` engines for mutable entity sets, microsecond monotonic default IDs (`toUnixTimestamp64Micro(now64(6))`), and tracked via `schema_migrations`.
 - **Data Parity & Migration**:
-  - Direct offline migration script: `python3 backend/scripts/migrate_sqlite_to_clickhouse.py --sqlite-path data/tracescope.db`.
-  - 100% exact row parity confirmed across 35 tables (351,936 rows migrated in 11.27s, verified in 0.31s).
-  - Rollback safety: `data/tracescope.db` remains intact and unmodified as a persistent local fallback archive.
+  - Offline migration copied 351,936 rows across 35 tables with 100% exact row parity (script and SQLite source purged 2026-09-11 after verification).
 - **ClickHouse DB-API Compatibility Adapter (`backend/app/repositories/db_context.py`)**:
   - Literal escaping & binding: `_convert_placeholders_and_bind` translates `?` to literal-formatted values using `format_query_value(val, timezone.utc)`, avoiding `%` format collisions with Python format specifiers.
   - `ClickHouseRow`: Mimics `sqlite3.Row` with dictionary mapping, tuple access, sequence slicing (`row[1:5]`), and automatic unqualified column name mapping (e.g. `p.principal_name` accessible as `principal_name`).
@@ -250,62 +250,105 @@
 - **Verification Suite**:
   - Pytest Suite: 98/98 tests passed across all 13 modules in `tests/` in an isolated test database harness (`test_pytest_<id>`).
   - End-to-End Curl & Safety Suite: 42/42 checks passed (`sh backend/scripts/curl_test_all_pages.sh`), covering all 17 SPA routes and 25 backing API endpoints with 0 JavaScript crash vulnerabilities.
+  - Manifest Validation: `python3 deploy/k8s/validate_manifests.py deploy/k8s` passed with 16 documents and 0 errors.
   - Live Ingestion & Coalescing Writer: Direct ClickHouse asynchronous batched inserts (`traces` and `ingest_batches`), bounded queue backpressure (429 + `Retry-After: 1`), and atomic replay deduplication.
 
-- **2-Image Strategy & Helm Alignment (2026-09-11)**:
-  - `scripts/build_and_push.sh` strictly outputs exactly 2 images: `xhatsu101/tracescope:app-<version>` and `xhatsu101/tracescope:ingest-<version>`. Removed legacy `api` alias tag.
-  - `deploy/helm/tracescope/values.yaml` aligned: `agentStats.enabled: false` by default (merged into `storage-0`). If enabled, uses `xhatsu101/tracescope:app-0.2.0` running `backend.agent_stats_main:app`. All image tags synchronized to `0.2.0`.
-
 ---
 
-## 6. Complete ClickHouse Cutover & Stateless UI Architecture (2026-09-11)
-
-- **Async Batched ClickHouse Ingest Path (`backend/app/services/ingest_writer.py`)**:
-  - Direct ClickHouse batch inserts via `db.client.insert("traces", ...)` and `db.client.insert("ingest_batches", ...)`.
-  - Configurable coalescing window (`OTEL_INGEST_COALESCE_MS=5`) and batch size (`OTEL_INGEST_TRANSACTION_RECORDS=50000`).
-  - Durable commit semantics preserved: HTTP 200 returned only after ClickHouse writes synchronous block parts to disk.
-  - Bounded admission queue (`OTEL_INGEST_QUEUE_CAPACITY=256`) returning HTTP 429 with `Retry-After: 1` on saturation.
-  - Replay deduplication via `ingest_batches` ClickHouse table and in-memory LRU cache: repeated `X-Batch-Id` returns HTTP 200 `{"ok": true, "duplicate": true}` with zero database writes.
-  - Agent stats telemetry (`backend/app/repositories/agent_stats_repository.py`) writes directly to `agent_stats_latest` and `agent_stats_history` with sequence deduplication and `FINAL` query semantics.
-- **Edge Workload Decoupling**:
-  - Edge pods (`tracescope-ingest` and `tracescope-agent-stats`) communicate directly with ClickHouse (`OTEL_CLICKHOUSE_HOST` / `OTEL_CLICKHOUSE_PORT`).
-  - Storage-owner HTTP proxy forwarding (`OTEL_STORAGE_OWNER_URL`) is no longer required; edge workloads scale independently without serialization bottlenecks.
-- **Kubernetes Architecture (`deploy/k8s/`)**:
-  - **ClickHouse StatefulSet & Service** (`25-clickhouse-statefulset.yaml`, `26-clickhouse-service.yaml`): Runs `clickhouse/clickhouse-server:24.3-alpine` (1 replica), mounts RWO PVC `clickhouse-data` (5Gi test capacity, configurable), exposes HTTP 8123 and native 9000 ports.
-  - **Application & Analytics StatefulSet** (`30-storage-statefulset.yaml` -> `tracescope-app`, `31-api-service.yaml`, `37-storage-service.yaml`): Named `tracescope-app` (pod `tracescope-app-0`). Consolidates `migrate` init container, `api` container (FastAPI + built-in React UI + Agent Stats on `:30102`), and `analytics-worker` sidecar into a single StatefulSet using image `xhatsu101/tracescope:app-0.2.0`.
-  - **Horizontally Scalable Ingestion Pool** (`32-ingest-deployment.yaml`, `33-ingest-service.yaml`, `42-hpa.yaml`): High-performance ingest edge pool running `xhatsu101/tracescope:ingest-0.2.0` on `:30103`, auto-scaling from 3 to 12 replicas.
-  - **Unified Ingress Routing** (`40-ingress.yaml`): Routes ingest traffic (`/api/v1/ingest`, `/api/ingest`, `/v1/traces`, `/api/v1/ingestion/status`) to `tracescope-ingest`, and all other traffic (`/`, `/assets`, `/api`, `/api/agent/stats`) directly to `tracescope-api`.
-  - **Manifest Validation & Topology Tests**: `python3 deploy/k8s/validate_manifests.py deploy/k8s` verifies all 16 documents and invariants cleanly with 0 errors. All 20/20 deployment topology tests in `tests/test_deployment_topology.py` pass.
-
----
-
-## 7. Helm Chart Design & Topology Modes (`deploy/helm/tracescope/`) (2026-09-11)
+## 6. Helm Chart Design & Topology Modes (`deploy/helm/tracescope/`)
 
 - **Production Helm Chart**:
   - Located at `deploy/helm/tracescope/` with `Chart.yaml` (v0.2.0), comprehensive `values.yaml`, and modular templates.
+  - App pod named `tracescope-app-0` (StatefulSet `tracescope-app`), rendered with simplified `values.yaml` `app.image:` configuring `migrate`, `api`, and `analytics-worker` in one place.
   - Supports full **Distributed Mode** and **Consolidated / Merged Modes**:
     - **Default Managed Topology (3-Tier)**: `ui.enabled: false` (UI merged into API) and `agentStats.enabled: false` (agent telemetry merged into API). Reduces deployment overhead from 5 workloads (9–21 pods) down to 3 workloads (5 pods: ClickHouse, Storage API+UI+Worker, and Ingest HPA pool).
     - **Full Distributed Mode**: Enable `ui.enabled: true` and `agentStats.enabled: true` for independent scaling pools.
     - **External ClickHouse Mode**: `clickhouse.enabled: false` connects to external ClickHouse clusters via `clickhouse.host` and `clickhouse.password`.
-  - **Dynamic Ingress**: Path routing automatically adjusts targets based on enabled flags (`/` and `/assets` switch between `ui` and `api`; `/api/agent/stats` switches between `agent-stats` and `api`).
   - **Verification**: Verified via `helm lint` (0 errors) and `helm template` across all topology permutation cases. Tested `backend.main:app` with `TestClient` confirming HTTP 200 for `/`, `/api/v1/overview`, and `/api/agent/stats`.
 
 ---
 
-## 8. 2-Image Architecture & Build/Push Pipeline (2026-09-11)
+## 7. 2-Image Architecture & Build/Push Pipeline
 
 - **Consolidated 2-Image Architecture**:
-  - Image 1 (`Target: api`): Main App image (`xhatsu101/tracescope:app-<tag>` / `:api-<tag>`), serving FastAPI analytics queries, bundled React 19 UI (`/app/frontend/dist`), schema migration init container, and background analytics worker via container command override `command: ["python", "-m", "backend.worker"]`.
-  - Image 2 (`Target: ingest`): Ingest image (`xhatsu101/tracescope:ingest-<tag>`), serving high-throughput trace batch ingestion with HPA horizontal scaling.
+  - Image 1 (`Target: api`): Main App image (`xhatsu101/tracescope:app-<version>`), serving FastAPI analytics queries, bundled React 19 UI (`/app/frontend/dist`), schema migration init container, agent-stats, and background analytics worker via container command override.
+  - Image 2 (`Target: ingest`): Ingest image (`xhatsu101/tracescope:ingest-<version>`), serving high-throughput trace batch ingestion with HPA horizontal scaling.
   - Database: Official upstream `clickhouse/clickhouse-server:24.8` (no custom build required).
 - **Automated Build & Push Script (`scripts/build_and_push.sh`)**:
   - 100% POSIX `/bin/sh` compliant script (symlinked to `deploy/docker/build_and_push.sh`).
   - Robust directory discovery: searches upwards for `deploy/docker/Dockerfile` so it executes seamlessly from any working directory or symlink location.
-  - Supports repository tag differentiation on single repository (e.g. `xhatsu101/tracescope <version>` -> `:app-<ver>` and `:ingest-<ver>`).
-  - Also supports token replacement templates (`{image}` and `{tag}`).
+  - Outputs strictly 2 images: `xhatsu101/tracescope:app-<version>` and `xhatsu101/tracescope:ingest-<version>`.
+  - Supports token replacement templates (`{image}` and `{tag}`).
   - Supports `--dry-run` (`-d`) and `--no-push` (`-n`) flags.
-  - Verified across automated test cases invoked from both repo root and `deploy/docker/`.
+  - Aligned with Helm chart (`deploy/helm/tracescope/values.yaml`): `agentStats.enabled: false` (consolidated into storage-0) and configured to use `xhatsu101/tracescope:app-0.2.0` if enabled.
 
+---
 
+## 8. Live Production User Data Push & End-to-End Verification (2026-09-12)
 
+- **Production Target**: `https://trace.n2d.id.vn`
+- **Shipper Execution**: `/tmp/push_to_production.py` streamed 250,000 spans from `/home/ubuntu/Viettel/NetworkTracing/data/otel_traces_2m.jsonl.gz` in 500 OTLP `resourceSpans` batches (Gzip-compressed, 3 threads, persistent keep-alive, unique `X-Batch-Id`).
+  - Throughput: 4,449.3 spans/sec (8.9 batches/sec), 56.19s duration.
+  - Data transfer: 228.49 MB uncompressed -> 24.58 MB compressed (9.3x compression ratio).
+  - Reliability: 100% acked (250,000 / 250,000), 0 rejected, 0 429s, 2 transient 5xx cleanly retried and committed.
+- **User-Analysis End-to-End Verification**:
+  - `otlp_parser.py` consumed `enduser.id` semantic conventions into `principal_name` dimensions in ClickHouse.
+  - `/api/v1/users`: Populated with all 8 named identities (`minh.ngoc`, `linh.pham`, `mai.tran`, `khanh.vu`, `duong.nguyen`, `quang.bui`, `hong.dang`, `thao.trang`).
+  - `/api/v1/users/minh.ngoc`: Exact match against ground truth on all microservice request counts (`session-cache`: 6186, `api-gateway`: 3514, `notification-service`: 2874, `catalog-service`: 1925, `cart-service`: 1335).
+  - `/api/v1/user-graph`: 28 nodes (10 users, 17 targets) and 188 directed dual-layer access edges.
+  - `/api/v1/user-analytics`: All 10 ranking categories populated.
+  - `/api/v1/user-changes`: 625 change events across 4 detector families (`USERNAME_FIRST_SEEN`, `NEW_SOURCE_IP`, `NEW_TARGET`, `NEW_OPERATION`) complete with 7-question explainability cards.
+  - `/api/v1/incidents`: 18 bounded security incidents with capped family scoring (Score 75 across all 8 named users).
+  - ClickHouse trace lookups: Spot checks on multi-tier spans across all users returned HTTP 200 with waterfalls spanning up to 16 microservices.
+- **Identified Production Infrastructure Limit**:
+  - ClickHouse worker aggregation (`aggregate_traces`) hit container memory ceiling: `Code: 241. DB::Exception: Memory limit (total) exceeded: would use 1.81 GiB, maximum: 1.80 GiB`.
+  - Recommendation: Increase ClickHouse container RAM limit to >= 4 GiB and implement bounded time-window chunking (max 24h slices) in `aggregate_traces`.
+- **Deliverable**: Full verbatim test report stored at `USER_DATA_PUSH_TEST_REPORT.md`.
+
+---
+
+## 9. Release 0.2.2 Deployment Preparation & Preflight Fixes (2026-09-14)
+
+- **Release Version**: `0.2.2`
+  - Chart metadata: `deploy/helm/tracescope/Chart.yaml` bumped to `version: 0.2.2`, `appVersion: "0.2.2"`.
+  - Application version: `backend/app/application.py` FastAPI `version="0.2.2"`.
+  - Image tags: `xhatsu101/tracescope:app-0.2.2` and `xhatsu101/tracescope:ingest-0.2.2` built and pushed to Docker Hub.
+    - App Digest: `sha256:721acd2ef5e7a35be9f1e3879c8daba5be728bc8bd57b481c624665da8052cbf`
+    - Ingest Digest: `sha256:d03d3e20549bc44a43d8f2b3e993c07105c29f3760034bad27e1e0b38c0d05af`
+- **Security & Secret Provisioning**:
+  - Independent cryptographically random tokens (64 chars, urlsafe base64) generated and embedded into `deploy/helm/tracescope/values.yaml` under `secrets.internalApiToken` (`1Ioi...(64 chars)`) and `secrets.apiKey` (`XOyx...(64 chars)`).
+  - Redaction enforced across all logs, stdout, and reports.
+  - Public mutation endpoints (`/api/ingest`, `/v1/traces`) now enforce authentication when deployed with chart defaults.
+  - Ingress blocks external access to `/internal/*` via nginx `location ^~ /internal/ { return 404; }`.
+  - Dockerfile cleaned: removed `ENV OTEL_CLICKHOUSE_PASSWORD=""`, eliminating Docker `SecretsUsedInArgOrEnv` warnings.
+- **ClickHouse Headroom & Retention**:
+  - ClickHouse memory raised in `values.yaml`: requests `2Gi`, limits `4Gi`.
+  - Schema Migration 004 created (`backend/clickhouse_migrations/004_live_table_retention.sql`): applies 30-day TTL on `traces` and fixed 90-day TTL on `metric_buckets`.
+- **Configuration Parity**:
+  - Nine backend environment variables mapped into `values.yaml` and ConfigMap templates (`configmap.yaml` and `edge-configmap.yaml`): `OTEL_INGEST_MAX_BATCH_BYTES` (33554432), `OTEL_AGGREGATION_MAX_MEMORY_USAGE` (1073741824), `OTEL_AGGREGATION_EXTERNAL_GROUP_BY_BYTES` (268435456), `OTEL_AGGREGATION_SHADOW_ENABLED` (true), `OTEL_AGGREGATION_CUTOVER` (false), `OTEL_BASELINE_CADENCE_SECONDS` (300), `OTEL_BASELINE_SERIES_BUDGET` (100), `OTEL_ANOMALY_WINDOW_BUDGET` (100), `OTEL_ANALYTICS_STAGE_BUDGET_SECONDS` (55).
+  - Used `{{ int .Values.config.<key> | quote }}` to prevent scientific notation formatting in rendered templates.
+  - Production origin `https://trace.n2d.id.vn` added to `config.corsOrigins`.
+- **Validation**:
+  - `helm lint deploy/helm/tracescope`: 0 warnings, 0 failures, exit code 0.
+  - `helm template tracescope deploy/helm/tracescope --namespace tracescope > /tmp/rendered-0.2.2.yaml`: exit code 0.
+  - Full test suite: 123/123 tests passed in isolated test harness (`123 passed in 201.64s`).
+  - Report deliverable: `DEPLOY_FIX_REPORT.md` written to repository root.
+
+---
+
+## 10. Release 0.2.2 Commit & Secret Isolation (2026-09-14)
+
+- **Secret Isolation**:
+  - Real secrets (`secrets.internalApiToken` `1Ioi...(64 chars)` and `secrets.apiKey` `XOyx...(64 chars)`) moved from `deploy/helm/tracescope/values.yaml` into gitignored `deploy/helm/tracescope/values-secrets.yaml`.
+  - Added `values-secrets.yaml` to `.gitignore`.
+  - `values.yaml` retains empty string defaults with explicit comments pointing to `values-secrets.yaml`.
+  - Updated operator runbook in `DEPLOY_FIX_REPORT.md` §4 and §5 to supply `-f deploy/helm/tracescope/values-secrets.yaml`.
+  - Verified `helm template` passes with `-f values-secrets.yaml` and fails without it due to template validation guard.
+- **Repository Cleanup**:
+  - Confirmed database purge (ClickHouse sole datastore; no local SQLite/DuckDB files).
+  - Cleaned untracked junk directories (`.agents`, `.codex`).
+  - Flagged ambiguous task briefs for retention.
+- **Verification**:
+  - 123/123 tests passed cleanly (`123 passed in 260.88s`).
+  - Verified 0 hits on secret leak scan across all Git history.
 

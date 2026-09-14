@@ -1,3 +1,4 @@
+"""Provide trace search and waterfall retrieval while retaining stable public contracts."""
 from __future__ import annotations
 from typing import Any, Dict, List, Optional
 from fastapi import APIRouter, HTTPException, Query
@@ -17,8 +18,8 @@ async def list_traces(
     source_ip: Optional[str] = None,
     status: Optional[str] = None,
     trace_id: Optional[str] = None,
-    limit: int = 50,
-    offset: int = 0
+    limit: int = Query(50, ge=1, le=500),
+    offset: int = Query(0, ge=0, le=1_000_000)
 ) -> Dict[str, Any]:
     start_ms = from_time if (from_time and from_time > 10_000_000_000) else (from_time * 1000 if from_time else None)
     end_ms = to_time if (to_time and to_time > 10_000_000_000) else (to_time * 1000 if to_time else None)

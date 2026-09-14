@@ -1,3 +1,4 @@
+# Only stateless ingest scales automatically; the ClickHouse RWO owner stays singleton.
 apiVersion: autoscaling/v2
 kind: HorizontalPodAutoscaler
 metadata:
@@ -11,6 +12,7 @@ spec:
   minReplicas: 3
   maxReplicas: 12
   behavior:
+    # Avoid flapping during bursty shipper retries, which would amplify backpressure.
     scaleDown:
       stabilizationWindowSeconds: 300
   metrics:
@@ -20,4 +22,3 @@ spec:
         target:
           type: Utilization
           averageUtilization: 70
-

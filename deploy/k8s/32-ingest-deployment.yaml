@@ -1,3 +1,5 @@
+# Ingest replicas are stateless: normalization and bounded batching can scale
+# horizontally because ClickHouse, not a mounted volume, is the durable authority.
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -25,6 +27,7 @@ spec:
         app.kubernetes.io/component: ingest
         app.kubernetes.io/part-of: tracescope
     spec:
+      # Spread replicas so one node failure does not remove all public receivers.
       topologySpreadConstraints:
         - maxSkew: 1
           topologyKey: kubernetes.io/hostname
@@ -48,12 +51,21 @@ spec:
               containerPort: 8000
           envFrom:
             - configMapRef:
-                name: tracescope-config
-            - secretRef:
-                name: tracescope-secrets
+                name: tracescope-edge-config
           env:
             - name: OTEL_RUN_MIGRATIONS
               value: "false"
+            - name: OTEL_INTERNAL_API_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: tracescope-secrets
+                  key: OTEL_INTERNAL_API_TOKEN
+            - name: OTEL_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: tracescope-secrets
+                  key: OTEL_API_KEY
+          # Probe separation prevents load from reaching a pod before its writer/client is initialized.
           startupProbe:
             httpGet:
               path: /livez
@@ -74,6 +86,7 @@ spec:
             periodSeconds: 20
             timeoutSeconds: 3
             failureThreshold: 3
+          # CPU-based HPA needs requests; limits stop malformed upload pressure from starving neighbors.
           resources:
             requests:
               cpu: 200m

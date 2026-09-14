@@ -4,9 +4,9 @@ A standalone, lightweight HTTP distribution server for zero-friction NetworkTrac
 
 ## Features
 
-- **Port 30105**: Dedicated bootstrap & distribution server, separate from telemetry ingestion & dashboard (:30102).
+- **Port 30105**: Dedicated bootstrap & distribution server, separate from telemetry ingestion & dashboard on active hub port `:30102`.
 - **One-Liner Agent Bootstrap**: Instant deployment on any remote host without manual file copying.
-- **Dynamic Endpoint Target**: The bootstrap script automatically downloads from port 30105 and targets the hub at port 30102.
+- **Dynamic Endpoint Target**: The bootstrap script automatically downloads from port 30105 and targets the active hub at port 30102 (the legacy port `:31115` is obsolete and unused).
 - **Pure POSIX `/bin/sh`**: Compatible with any standard Linux environment. Supports both `curl` and `wget`.
 - **Zero code changes**: Operates in this dedicated `bootstrap/` folder without modifying any core repository code.
 

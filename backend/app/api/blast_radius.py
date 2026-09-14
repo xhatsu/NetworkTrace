@@ -1,3 +1,4 @@
+"""Serve impact traversal as a read path over materialized ClickHouse topology evidence."""
 from __future__ import annotations
 import time
 from typing import Any, Dict, Optional

@@ -20,6 +20,7 @@ set -eu
 
 IMAGE_PATTERN=""
 VERSION=""
+PLATFORM=""
 DRY_RUN=0
 NO_PUSH=0
 
@@ -44,19 +45,23 @@ Arguments:
       Version tag string (e.g. "0.2.0", "v1.0.0", "latest").
 
 Options:
+  -p, --platform  Target platform(s), e.g. "linux/amd64" or "linux/amd64,linux/arm64"
   -n, --no-push   Build images only; do not push to remote registry
   -d, --dry-run   Print the commands and tags without executing them
   -h, --help      Show this help message and exit
 
 Examples:
+  # Multi-arch build and push (x86_64 + ARM64):
+  sh scripts/build_and_push.sh xhatsu101/tracescope 0.2.0 --platform linux/amd64,linux/arm64
+
+  # x86_64 only build and push:
+  sh scripts/build_and_push.sh xhatsu101/tracescope 0.2.0 --platform linux/amd64
+
   # Tag diff on single repository xhatsu101/tracescope:
   sh scripts/build_and_push.sh xhatsu101/tracescope 0.2.0
 
   # Build only (dry run):
   sh scripts/build_and_push.sh xhatsu101/tracescope 0.2.0 --dry-run
-
-  # Explicit pattern:
-  sh scripts/build_and_push.sh "xhatsu101/tracescope:{image}-{tag}" v1.0.0
 HELP_EOF
     exit 0
 }
@@ -73,6 +78,15 @@ while [ $# -gt 0 ]; do
             ;;
         -n|--no-push)
             NO_PUSH=1
+            shift
+            ;;
+        -p|--platform)
+            shift
+            if [ $# -eq 0 ]; then
+                echo "Error: --platform requires an argument." >&2
+                exit 1
+            fi
+            PLATFORM="$1"
             shift
             ;;
         -*)
@@ -206,6 +220,11 @@ echo "================================================================="
 echo " Repository root : $REPO_ROOT"
 echo " Dockerfile      : $DOCKERFILE"
 echo " Target Version  : $VERSION"
+if [ -n "$PLATFORM" ]; then
+    echo " Platform(s)     : $PLATFORM"
+else
+    echo " Platform(s)     : default (host architecture)"
+fi
 echo " Image 1 (App)   : $APP_IMAGE"
 echo " Image 2 (Ingest): $INGEST_IMAGE"
 if [ "$NO_PUSH" -eq 1 ]; then
@@ -221,11 +240,21 @@ echo "================================================================="
 if [ "$DRY_RUN" -eq 1 ]; then
     echo ""
     echo "[DRY RUN] Would execute:"
-    echo "  docker build -f $DOCKERFILE --target api -t $APP_IMAGE $REPO_ROOT"
-    echo "  docker build -f $DOCKERFILE --target ingest -t $INGEST_IMAGE $REPO_ROOT"
-    if [ "$NO_PUSH" -eq 0 ]; then
-        echo "  docker push $APP_IMAGE"
-        echo "  docker push $INGEST_IMAGE"
+    if [ -n "$PLATFORM" ]; then
+        if [ "$NO_PUSH" -eq 1 ]; then
+            echo "  docker buildx build --platform $PLATFORM -f $DOCKERFILE --target api -t $APP_IMAGE $REPO_ROOT"
+            echo "  docker buildx build --platform $PLATFORM -f $DOCKERFILE --target ingest -t $INGEST_IMAGE $REPO_ROOT"
+        else
+            echo "  docker buildx build --platform $PLATFORM -f $DOCKERFILE --target api -t $APP_IMAGE --push $REPO_ROOT"
+            echo "  docker buildx build --platform $PLATFORM -f $DOCKERFILE --target ingest -t $INGEST_IMAGE --push $REPO_ROOT"
+        fi
+    else
+        echo "  docker build -f $DOCKERFILE --target api -t $APP_IMAGE $REPO_ROOT"
+        echo "  docker build -f $DOCKERFILE --target ingest -t $INGEST_IMAGE $REPO_ROOT"
+        if [ "$NO_PUSH" -eq 0 ]; then
+            echo "  docker push $APP_IMAGE"
+            echo "  docker push $INGEST_IMAGE"
+        fi
     fi
     echo ""
     echo "Dry run complete."
@@ -236,6 +265,44 @@ fi
 if ! command -v docker > /dev/null 2>&1; then
     echo "Error: 'docker' command not found in PATH." >&2
     exit 1
+fi
+
+if [ -n "$PLATFORM" ]; then
+    if [ "$NO_PUSH" -eq 1 ]; then
+        echo ""
+        echo "==> [1/2] Building Main App Image ($PLATFORM, Target: api): $APP_IMAGE..."
+        docker buildx build --platform "$PLATFORM" -f "$DOCKERFILE" --target api -t "$APP_IMAGE" "$REPO_ROOT"
+
+        echo ""
+        echo "==> [2/2] Building Ingest Image ($PLATFORM, Target: ingest): $INGEST_IMAGE..."
+        docker buildx build --platform "$PLATFORM" -f "$DOCKERFILE" --target ingest -t "$INGEST_IMAGE" "$REPO_ROOT"
+
+        echo ""
+        echo "================================================================="
+        echo " Build successful! (--no-push was specified; skipping push)"
+        echo " Images built for platform(s): $PLATFORM"
+        echo "   - $APP_IMAGE"
+        echo "   - $INGEST_IMAGE"
+        echo "================================================================="
+        exit 0
+    else
+        echo ""
+        echo "==> [1/2] Building and pushing Main App Image ($PLATFORM, Target: api): $APP_IMAGE..."
+        docker buildx build --platform "$PLATFORM" -f "$DOCKERFILE" --target api -t "$APP_IMAGE" --push "$REPO_ROOT"
+
+        echo ""
+        echo "==> [2/2] Building and pushing Ingest Image ($PLATFORM, Target: ingest): $INGEST_IMAGE..."
+        docker buildx build --platform "$PLATFORM" -f "$DOCKERFILE" --target ingest -t "$INGEST_IMAGE" --push "$REPO_ROOT"
+
+        echo ""
+        echo "================================================================="
+        echo " Successfully built and pushed 2 multi-platform TraceScope images!"
+        echo " Platform(s): $PLATFORM"
+        echo "   1. Main App: $APP_IMAGE"
+        echo "   2. Ingest:   $INGEST_IMAGE"
+        echo "================================================================="
+        exit 0
+    fi
 fi
 
 echo ""

@@ -8,14 +8,14 @@ import httpx
 import pytest
 
 from backend.main import app
-from backend.repository import SQLiteRepository
+from backend.repository import StorageRepository
 from backend.app.repositories.trace_repository import TraceRepository
 from backend.app.repositories.ingest_batch_repository import IngestBatchRepository
 
 
 @pytest.fixture(scope="module", autouse=True)
 def setup_db():
-    SQLiteRepository().migrate()
+    StorageRepository().migrate()
 
 
 @pytest.fixture
@@ -40,7 +40,7 @@ def client():
 
 def test_batch_repository_unit_operations(tmp_path):
     db_file = str(tmp_path / "test_batches.db")
-    SQLiteRepository(db_file).migrate()
+    StorageRepository(db_file).migrate()
     repo = IngestBatchRepository(db_file)
     IngestBatchRepository.clear_cache()
 
@@ -153,3 +153,11 @@ def test_magic_bytes_gzip_without_header(client):
     assert resp.status_code == 200
     assert resp.json()["status"] == "success"
     assert resp.json()["inserted"] == 1
+
+
+def test_gzip_decompression_stops_at_hard_output_cap():
+    from backend.app.services.otlp_parser import decompress_payload
+
+    compressed = gzip.compress(b"A" * 1_000_001)
+    with pytest.raises(ValueError, match="exceeds maximum size"):
+        decompress_payload(compressed, "gzip", max_bytes=1_000_000)

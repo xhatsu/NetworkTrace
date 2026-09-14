@@ -1,3 +1,4 @@
+"""Maintain materialized service relationships for predictable topology and impact queries."""
 from __future__ import annotations
 import time
 from typing import Any, Dict, List, Optional
@@ -15,16 +16,6 @@ class TopologyRepository:
               caller_service, target_service, first_seen, last_seen, request_count,
               error_count, error_rate, avg_latency, p95_latency, principal_count, operation_count
             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            ON CONFLICT(caller_service, target_service) DO UPDATE SET
-              first_seen=MIN(service_edges.first_seen, excluded.first_seen),
-              last_seen=MAX(service_edges.last_seen, excluded.last_seen),
-              request_count=service_edges.request_count + excluded.request_count,
-              error_count=service_edges.error_count + excluded.error_count,
-              error_rate=ROUND((service_edges.error_count + excluded.error_count)*1.0/(service_edges.request_count + excluded.request_count), 4),
-              avg_latency=excluded.avg_latency,
-              p95_latency=excluded.p95_latency,
-              principal_count=MAX(service_edges.principal_count, excluded.principal_count),
-              operation_count=MAX(service_edges.operation_count, excluded.operation_count)
             """
             with db_transaction(self.db_path) as db:
                 db.executemany(sql_edge, [[
@@ -39,12 +30,6 @@ class TopologyRepository:
               principal_name, caller_service, target_service, first_seen, last_seen,
               request_count, error_rate, p95_latency
             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-            ON CONFLICT(principal_name, caller_service, target_service) DO UPDATE SET
-              first_seen=MIN(principal_service_edges.first_seen, excluded.first_seen),
-              last_seen=MAX(principal_service_edges.last_seen, excluded.last_seen),
-              request_count=principal_service_edges.request_count + excluded.request_count,
-              error_rate=excluded.error_rate,
-              p95_latency=excluded.p95_latency
             """
             with db_transaction(self.db_path) as db:
                 db.executemany(sql_pe, [[
@@ -67,7 +52,7 @@ class TopologyRepository:
                   ROUND(MAX(latency_p95), 2) as p95_latency,
                   COUNT(DISTINCT principal_name) as principal_count,
                   COUNT(DISTINCT operation) as operation_count
-                FROM metric_buckets
+                FROM metric_buckets FINAL
                 WHERE bucket_size = 60 AND bucket_start >= ? AND bucket_start < ?
                   AND caller_service != '' AND target_service != ''
                 GROUP BY caller_service, target_service
@@ -87,7 +72,7 @@ class TopologyRepository:
                       p95_latency,
                       principal_count,
                       operation_count
-                    FROM service_edges
+                    FROM service_edges FINAL
                     ORDER BY request_count DESC
                     LIMIT 200
                 """).fetchall()
@@ -98,7 +83,7 @@ class TopologyRepository:
             # Prefetch top principals per edge in 1 grouped query
             p_rows = db.execute("""
                 SELECT caller_service, target_service, principal_name, SUM(request_count) as requests
-                FROM metric_buckets
+                FROM metric_buckets FINAL
                 WHERE bucket_size=60 AND bucket_start >= ? AND bucket_start < ?
                   AND caller_service != '' AND target_service != '' AND principal_name != ''
                 GROUP BY caller_service, target_service, principal_name
@@ -114,7 +99,7 @@ class TopologyRepository:
             # Prefetch top operations per edge in 1 grouped query
             op_rows = db.execute("""
                 SELECT caller_service, target_service, operation, SUM(request_count) as requests
-                FROM metric_buckets
+                FROM metric_buckets FINAL
                 WHERE bucket_size=60 AND bucket_start >= ? AND bucket_start < ?
                   AND caller_service != '' AND target_service != '' AND operation != ''
                 GROUP BY caller_service, target_service, operation
@@ -202,7 +187,7 @@ class TopologyRepository:
                 SELECT caller_service as name, SUM(request_count) as requests,
                        ROUND(MAX(latency_p95), 2) as p95_latency,
                        ROUND(SUM(error_count)*1.0 / NULLIF(SUM(request_count), 0), 4) as error_rate
-                FROM metric_buckets
+                FROM metric_buckets FINAL
                 WHERE target_service = ? AND bucket_size=60 AND bucket_start >= ? AND bucket_start < ?
                 GROUP BY caller_service ORDER BY requests DESC
             """, (service, start_sec, end_sec)).fetchall()]
@@ -211,7 +196,7 @@ class TopologyRepository:
                 SELECT target_service as name, SUM(request_count) as requests,
                        ROUND(MAX(latency_p95), 2) as p95_latency,
                        ROUND(SUM(error_count)*1.0 / NULLIF(SUM(request_count), 0), 4) as error_rate
-                FROM metric_buckets
+                FROM metric_buckets FINAL
                 WHERE caller_service = ? AND bucket_size=60 AND bucket_start >= ? AND bucket_start < ?
                 GROUP BY target_service ORDER BY requests DESC
             """, (service, start_sec, end_sec)).fetchall()]

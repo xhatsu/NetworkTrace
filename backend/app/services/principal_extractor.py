@@ -1,3 +1,4 @@
+"""Offer a compatibility identity extractor that always returns scrubbed values."""
 from __future__ import annotations
 
 from typing import Any

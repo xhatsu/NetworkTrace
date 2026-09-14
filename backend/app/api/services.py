@@ -1,3 +1,4 @@
+"""Serve service health from rollups so UI queries do not scan raw trace volume."""
 from __future__ import annotations
 import time
 from typing import Any, Dict, List, Optional
@@ -21,7 +22,7 @@ def _time_window(from_t: Optional[int], to_t: Optional[int]) -> tuple[int, int]:
     return now - 3600, now
 
 @router.get("/services")
-async def list_services(
+def list_services(
     from_time: Optional[int] = Query(None, alias="from"),
     to_time: Optional[int] = Query(None, alias="to"),
     q: Optional[str] = None,
@@ -57,9 +58,9 @@ async def list_services(
         meta_rows = {r["name"]: dict(r) for r in db.execute("SELECT name, environment, service_group, service_module, first_seen_ms, last_seen_ms FROM services").fetchall()}
         for r in rows:
             m = meta_rows.get(r["name"], {})
-            r["environment"] = m.get("environment", "production")
-            r["service_group"] = m.get("service_group", "Core")
-            r["service_module"] = m.get("service_module", "Default")
+            r["environment"] = m.get("environment") or "production"
+            r["service_group"] = m.get("service_group") or "Core"
+            r["service_module"] = m.get("service_module") or "Default"
             r["first_seen_ms"] = m.get("first_seen_ms", start_sec * 1000)
             r["last_seen_ms"] = m.get("last_seen_ms", end_sec * 1000)
             r["rps"] = round((r["total_requests"] or 0) / time_span, 2)
@@ -68,6 +69,9 @@ async def list_services(
         if not rows:
             rows = [dict(r) for r in db.execute("SELECT name, environment, service_group, service_module, first_seen_ms, last_seen_ms FROM services ORDER BY last_seen_ms DESC LIMIT ?", (limit,)).fetchall()]
             for r in rows:
+                r["environment"] = r.get("environment") or "production"
+                r["service_group"] = r.get("service_group") or "Core"
+                r["service_module"] = r.get("service_module") or "Default"
                 r["total_requests"] = 0
                 r["rps"] = 0.0
                 r["p95_latency"] = 0.0
@@ -76,7 +80,7 @@ async def list_services(
         return {"items": rows, "count": len(rows)}
 
 @router.get("/services/{service}")
-async def get_service_detail(
+def get_service_detail(
     service: str,
     from_time: Optional[int] = Query(None, alias="from"),
     to_time: Optional[int] = Query(None, alias="to")
@@ -199,7 +203,7 @@ async def get_service_detail(
     }
 
 @router.get("/services/{service}/metrics")
-async def get_service_metrics(
+def get_service_metrics(
     service: str,
     from_time: Optional[int] = Query(None, alias="from"),
     to_time: Optional[int] = Query(None, alias="to"),
@@ -210,7 +214,7 @@ async def get_service_metrics(
     return agg_repo.query_series(start_sec, end_sec, bucket_size=bucket, service=service)
 
 @router.get("/services/{service}/dependencies")
-async def get_service_deps(
+def get_service_deps(
     service: str,
     from_time: Optional[int] = Query(None, alias="from"),
     to_time: Optional[int] = Query(None, alias="to")

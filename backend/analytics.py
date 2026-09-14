@@ -9,7 +9,7 @@ from typing import Any
 
 from .config import settings
 from .histogram import Histogram
-from .repository import SQLiteRepository
+from .repository import StorageRepository
 
 
 def _aggregate_rows(rows: list[Any]) -> dict[str, Any]:
@@ -36,7 +36,7 @@ def _aggregate_rows(rows: list[Any]) -> dict[str, Any]:
     return result
 
 
-def rebuild_rollups(repository: SQLiteRepository) -> int:
+def rebuild_rollups(repository: StorageRepository) -> int:
     """Idempotently rebuild minute buckets with memory bounded to one minute of input."""
     now = int(time.time()*1000)
     with repository.transaction() as db:
@@ -63,7 +63,7 @@ def rebuild_rollups(repository: SQLiteRepository) -> int:
     written+=flush();return written
 
 
-def rebuild_topology(repository: SQLiteRepository) -> int:
+def rebuild_topology(repository: StorageRepository) -> int:
     with repository.connect() as db:
         mappings = [dict(m) for m in db.execute("SELECT address,service_name,valid_from_ms,valid_to_ms,confidence FROM address_mappings ORDER BY confidence DESC").fetchall()]
         client_events = [dict(r) for r in db.execute("""
@@ -131,7 +131,7 @@ def _wilson(successes: int, total: int, z: float = 1.96) -> tuple[float,float]:
     return max(0,centre-margin),min(1,centre+margin)
 
 
-def detect_anomalies(repository: SQLiteRepository) -> int:
+def detect_anomalies(repository: StorageRepository) -> int:
     with repository.connect() as db:
         services=[r[0] for r in db.execute("SELECT DISTINCT service_name FROM latency_rollups WHERE operation='' AND account_username=''")]
         estate_latest=db.execute("SELECT MAX(bucket_ms) FROM latency_rollups WHERE operation='' AND account_username=''").fetchone()[0]
@@ -197,18 +197,21 @@ def detect_anomalies(repository: SQLiteRepository) -> int:
             severity="critical" if abs(delta)>max(abs(expected),1) else "high" if abs(delta)>max(abs(expected)*.5,.5) else "medium"
             limitations=["Sampling coverage is unknown; values describe observed records.","No causal attribution is inferred."]
             with repository.transaction() as db:
+                prior = db.execute("SELECT status FROM anomalies FINAL WHERE fingerprint=?", (fingerprint,)).fetchone()
+                anomaly_status = "open" if prior and prior[0] == "resolved" else (prior[0] if prior else "open")
                 db.execute("""INSERT INTO anomalies(fingerprint,entity_type,entity_id,anomaly_type,first_detected_ms,last_detected_ms,window_start_ms,window_end_ms,current_value,baseline_value,normal_low,normal_high,absolute_difference,percent_change,current_samples,baseline_samples,persistence_buckets,severity,status,unit,explanation,rule,training_start_ms,training_end_ms,limitations_json,contributors_json,trace_ids_json,updated_at_ms)
                 VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
-                ON CONFLICT(fingerprint) DO UPDATE SET last_detected_ms=excluded.last_detected_ms,window_start_ms=excluded.window_start_ms,window_end_ms=excluded.window_end_ms,current_value=excluded.current_value,baseline_value=excluded.baseline_value,normal_low=excluded.normal_low,normal_high=excluded.normal_high,absolute_difference=excluded.absolute_difference,percent_change=excluded.percent_change,current_samples=excluded.current_samples,baseline_samples=excluded.baseline_samples,explanation=excluded.explanation,updated_at_ms=excluded.updated_at_ms,status=CASE WHEN anomalies.status='resolved' THEN 'open' ELSE anomalies.status END""",
-                (fingerprint,"service",service,kind,now,now,rows[-2]["bucket_ms"],current["bucket_ms"]+60_000,value,expected,normal_low,normal_high,delta,pct,samples,base_samples,2,severity,"open",unit,explanation,"Two consecutive buckets outside a robust matching-bucket median ± max(3×1.4826×MAD, absolute floor); minimum count and impact required. Proportions additionally use Wilson intervals.",baseline[0]["bucket_ms"],baseline[-1]["bucket_ms"]+60_000,json.dumps(limitations),json.dumps(contributors),json.dumps(trace_ids),now))
+                """, (fingerprint,"service",service,kind,now,now,rows[-2]["bucket_ms"],current["bucket_ms"]+60_000,value,expected,normal_low,normal_high,delta,pct,samples,base_samples,2,severity,anomaly_status,unit,explanation,"Two consecutive buckets outside a robust matching-bucket median ± max(3×1.4826×MAD, absolute floor); minimum count and impact required. Proportions additionally use Wilson intervals.",baseline[0]["bucket_ms"],baseline[-1]["bucket_ms"]+60_000,json.dumps(limitations),json.dumps(contributors),json.dumps(trace_ids),now))
             found+=1
     from .structural_detectors import detect_structural
     return found + detect_structural(repository)
 
 
-def run_jobs(repository: SQLiteRepository) -> dict[str,int]:
+def run_jobs(repository: StorageRepository) -> dict[str,int]:
     started=int(time.time()*1000)
-    with repository.transaction() as db: db.execute("INSERT INTO jobs(name,status,started_at_ms,detail) VALUES ('analytics','running',?,'') ON CONFLICT(name) DO UPDATE SET status='running',started_at_ms=excluded.started_at_ms,detail=''",(started,))
+    with repository.transaction() as db:
+        db.execute("DELETE FROM jobs WHERE name='analytics'")
+        db.execute("INSERT INTO jobs(name,status,started_at_ms,detail) VALUES ('analytics','running',?,'')",(started,))
     retained=0
     if settings.retention_days>0:
         cutoff=int(time.time()*1000)-settings.retention_days*86_400_000

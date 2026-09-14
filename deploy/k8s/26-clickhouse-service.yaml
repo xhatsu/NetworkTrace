@@ -1,3 +1,4 @@
+# ClusterIP keeps the analytical store private to in-cluster application roles.
 apiVersion: v1
 kind: Service
 metadata:

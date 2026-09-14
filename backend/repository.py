@@ -1,7 +1,11 @@
+"""Compatibility repository surface retained while ClickHouse is the live store.
+
+The historical class names let dashboard and migration callers evolve without
+changing public API behavior during the single-store cutover.
+"""
 from __future__ import annotations
 
 import json
-import sqlite3
 import time
 from contextlib import contextmanager
 from pathlib import Path
@@ -18,10 +22,10 @@ class TraceRepository(Protocol):
     def dashboard_series(self, start_ms: int, end_ms: int, filters: dict[str, str | None]) -> list[dict[str, Any]]: ...
 
 
-class SQLiteRepository:
+class StorageRepository:
     def __init__(self, path: Path | str | None = None):
+        # ``path`` selects an isolated ClickHouse database (tests); production uses the settings database.
         self._custom_path = str(path) if path else None
-        self.path = Path(path) if path else settings.db_path
 
     def connect(self) -> Any:
         return get_connection(self._custom_path)
@@ -219,5 +223,7 @@ class SQLiteRepository:
 
     def patch_anomaly(self, anomaly_id: int, status: str, suppressed_until_ms: int | None) -> bool:
         with self.transaction() as db:
-            changed = db.execute("UPDATE anomalies SET status=?,suppressed_until_ms=?,updated_at_ms=? WHERE id=?", (status,suppressed_until_ms,int(time.time()*1000),anomaly_id)).rowcount
-        return bool(changed)
+            if db.execute("SELECT 1 FROM anomalies FINAL WHERE id=? LIMIT 1", (anomaly_id,)).fetchone() is None:
+                return False
+            db.execute("UPDATE anomalies SET status=?,suppressed_until_ms=?,updated_at_ms=? WHERE id=?", (status,suppressed_until_ms,int(time.time()*1000),anomaly_id))
+        return True

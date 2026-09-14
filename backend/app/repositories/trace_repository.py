@@ -1,3 +1,4 @@
+"""Provide the canonical raw-trace persistence boundary used by ingestion and exploration."""
 from __future__ import annotations
 from typing import Any, Dict, List, Optional
 from backend.app.models.trace import NormalizedTrace

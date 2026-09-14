@@ -11,13 +11,13 @@ from backend.app.services.aggregation import aggregate_traces
 from backend.app.services.normalization import normalize_otel_record
 from backend.app.services.principal_relationships import process_principal_intelligence
 from backend.fixtures import synthetic_documents
-from backend.repository import SQLiteRepository
+from backend.repository import StorageRepository
 from backend.config import settings
 from backend.app.repositories.db_context import db_transaction, get_connection
 
 @pytest.fixture(scope="module", autouse=True)
 def populated_database():
-    SQLiteRepository().migrate()
+    StorageRepository().migrate()
     traces = [trace for doc in synthetic_documents(300, 8) if (trace := normalize_otel_record(doc))]
     TraceRepository().insert_traces(traces)
     aggregate_traces()
@@ -299,9 +299,7 @@ def test_anomaly_uses_observation_window_and_measured_evidence(client):
         db.execute("""INSERT INTO baseline_metrics(
           dimension_type,dimension_key,hour_of_day,day_of_week,sample_count,
           rps_median,rps_mad,latency_p50_median,latency_p95_median,latency_p95_mad,
-          error_rate_median,error_rate_mad,updated_at) VALUES('service',?,?,?,?,?,?,?,?,?,?,?,?)
-          ON CONFLICT(dimension_type,dimension_key,hour_of_day,day_of_week) DO UPDATE SET
-          sample_count=excluded.sample_count,rps_median=excluded.rps_median,rps_mad=excluded.rps_mad""",
+          error_rate_median,error_rate_mad,updated_at) VALUES('service',?,?,?,?,?,?,?,?,?,?,?,?)""",
           (bucket["target_service"], dt.hour, dt.weekday(), 7, 0.1, 0.02, 1, 2, 0.3, 0, 0, end_ms))
         cursor = db.execute("""INSERT INTO anomaly_events(
           detected_at,anomaly_type,severity,score,confidence,target_service,baseline_value,

@@ -15,12 +15,12 @@ from backend.app.repositories.db_context import get_connection
 from backend.app.services.aggregation import aggregate_traces
 from backend.app.services.anomaly_detection import detect_anomalies
 from backend.app.services.principal_relationships import process_principal_intelligence
-from backend.repository import SQLiteRepository
+from backend.repository import StorageRepository
 
 
 @pytest.fixture(scope="module", autouse=True)
 def user_ip_env():
-    SQLiteRepository().migrate()
+    StorageRepository().migrate()
 
     now = int(time.time() * 1000)
     base_ts = now - 10 * 86_400_000  # 10 days ago
@@ -399,7 +399,7 @@ def test_existing_user_only_behavior_preserved():
     process_principal_intelligence()
     with get_connection() as db:
         change = db.execute(
-            "SELECT * FROM principal_change_events WHERE principal_name='alice' AND change_type='NEW_OPERATION' ORDER BY id DESC"
+            "SELECT * FROM principal_change_events WHERE principal_name='alice' AND change_type='NEW_OPERATION' ORDER BY detected_at DESC, id DESC"
         ).fetchone()
         assert change is not None
         assert change["new_value"] == "refund" or "refund" in str(change["new_value"])

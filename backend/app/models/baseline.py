@@ -1,3 +1,4 @@
+"""Define robust normal-behavior summaries persisted independently of detector code."""
 from __future__ import annotations
 from pydantic import BaseModel
 

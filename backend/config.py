@@ -1,3 +1,8 @@
+"""Centralize deployment knobs so every role shares one ClickHouse contract.
+
+Keeping storage, batching, and role settings here prevents independently scaled
+edge pods from silently adopting incompatible durability or backpressure rules.
+"""
 from __future__ import annotations
 
 import os
@@ -7,7 +12,8 @@ from pathlib import Path
 
 @dataclass(frozen=True)
 class Settings:
-    db_path: Path = Path(os.getenv("OTEL_DB_PATH", str(Path(__file__).resolve().parent.parent / "data" / "tracescope.db")))
+    # Namespace for side files (policy.json); durable telemetry lives in ClickHouse.
+    data_dir: Path = Path(os.getenv("OTEL_DATA_DIR", str(Path(__file__).resolve().parent.parent / "data")))
     clickhouse_host: str = os.getenv("OTEL_CLICKHOUSE_HOST", "127.0.0.1")
     clickhouse_port: int = int(os.getenv("OTEL_CLICKHOUSE_PORT", "8123"))
     clickhouse_database: str = os.getenv("OTEL_CLICKHOUSE_DATABASE", "tracescope")
@@ -34,7 +40,39 @@ class Settings:
     ingest_queue_capacity: int = max(1, int(os.getenv("OTEL_INGEST_QUEUE_CAPACITY", "256")))
     ingest_coalesce_ms: int = max(0, int(os.getenv("OTEL_INGEST_COALESCE_MS", "5")))
     ingest_transaction_records: int = max(1, int(os.getenv("OTEL_INGEST_TRANSACTION_RECORDS", "50000")))
+    ingest_max_batch_bytes: int = max(
+        1, int(os.getenv("OTEL_INGEST_MAX_BATCH_BYTES", str(32 * 1024 * 1024)))
+    )
     ingest_commit_timeout_seconds: float = max(1.0, float(os.getenv("OTEL_INGEST_COMMIT_TIMEOUT_SECONDS", "65")))
+    aggregation_max_memory_usage: int = max(
+        1, int(os.getenv("OTEL_AGGREGATION_MAX_MEMORY_USAGE", str(1024 * 1024 * 1024)))
+    )
+    aggregation_external_group_by_bytes: int = max(
+        1,
+        int(os.getenv(
+            "OTEL_AGGREGATION_EXTERNAL_GROUP_BY_BYTES", str(256 * 1024 * 1024)
+        )),
+    )
+    # Shadow states are enabled by default for development comparison only.
+    # Serving stays on exact metric_buckets unless an operator explicitly cuts over.
+    aggregation_shadow_enabled: bool = os.getenv(
+        "OTEL_AGGREGATION_SHADOW_ENABLED", "true"
+    ).lower() == "true"
+    aggregation_cutover: bool = os.getenv(
+        "OTEL_AGGREGATION_CUTOVER", "false"
+    ).lower() == "true"
+    baseline_cadence_seconds: int = max(
+        60, int(os.getenv("OTEL_BASELINE_CADENCE_SECONDS", "300"))
+    )
+    baseline_series_budget: int = max(
+        1, int(os.getenv("OTEL_BASELINE_SERIES_BUDGET", "100"))
+    )
+    anomaly_window_budget: int = max(
+        1, int(os.getenv("OTEL_ANOMALY_WINDOW_BUDGET", "100"))
+    )
+    analytics_stage_budget_seconds: float = max(
+        1.0, float(os.getenv("OTEL_ANALYTICS_STAGE_BUDGET_SECONDS", "55"))
+    )
     principal_bootstrap_ratio: float = min(0.95, max(0.5, float(os.getenv("OTEL_PRINCIPAL_BOOTSTRAP_RATIO", "0.75"))))
     principal_learning_days: int = int(os.getenv("OTEL_PRINCIPAL_LEARNING_DAYS", "7"))
     principal_dormant_days: int = int(os.getenv("OTEL_PRINCIPAL_DORMANT_DAYS", "30"))

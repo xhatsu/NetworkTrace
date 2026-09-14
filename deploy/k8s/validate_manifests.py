@@ -1,14 +1,12 @@
 #!/usr/bin/env python3
-"""Static validator for the TraceScope Kubernetes manifests.
+"""Statically protect TraceScope's ClickHouse deployment invariants.
 
 No cluster and no kubectl required: parses every YAML document under this
 directory and enforces the invariants this application actually depends on —
-in particular the SQLite single-writer contract: exactly one workload (the
-single-replica ``tracescope-storage`` StatefulSet) mounts the ReadWriteOnce
-data volume and runs migrations, every other workload is a stateless replica
-that mounts no SQLite volume and forwards writes through
-``OTEL_STORAGE_OWNER_URL``, and no HorizontalPodAutoscaler may target the
-storage owner.
+in particular the ClickHouse single-store contract: exactly one database
+StatefulSet mounts the ReadWriteOnce data volume, schema changes are serialized,
+and horizontally scaled application roles remain storage-free. No
+HorizontalPodAutoscaler may target the durable database owner.
 
 Usage::
 
@@ -106,6 +104,7 @@ def validate(directory: Path) -> tuple[list[str], list[dict[str, Any]]]:
     seen: dict[tuple[str, str], str] = {}
     workloads: dict[str, dict[str, Any]] = {}
     services: dict[str, dict[str, Any]] = {}
+    configmaps: dict[str, dict[str, Any]] = {}
 
     # ---- structure / identity -------------------------------------------
     for doc in documents:
@@ -137,6 +136,8 @@ def validate(directory: Path) -> tuple[list[str], list[dict[str, Any]]]:
             workloads[str(name)] = doc
         elif kind == "Service":
             services[str(name)] = doc
+        elif kind == "ConfigMap":
+            configmaps[str(name)] = doc
 
     # ---- Workload and single-storage-owner invariants -------------------
     data_owners: list[str] = []
@@ -250,6 +251,20 @@ def validate(directory: Path) -> tuple[list[str], list[dict[str, Any]]]:
             errors.append("{} must start with at least {} replicas".format(edge_name, minimum_replicas))
         if _mounts_data(edge):
             errors.append("{} must not mount the ClickHouse data PVC".format(edge_name))
+        for container in _containers(edge):
+            refs = [item.get("configMapRef", {}).get("name") for item in container.get("envFrom") or []]
+            if "tracescope-config" in refs:
+                errors.append("{} must not import the storage ClickHouse config".format(edge_name))
+            env = _container_env(container)
+            for env_name in env:
+                if env_name.startswith("OTEL_CLICKHOUSE_"):
+                    errors.append("{} must not receive {}".format(edge_name, env_name))
+
+    edge_data = (configmaps.get("tracescope-edge-config") or {}).get("data") or {}
+    if edge_data.get("OTEL_STORAGE_OWNER_URL") != "http://tracescope-api:30102":
+        errors.append("tracescope-edge-config must route OTEL_STORAGE_OWNER_URL to tracescope-api:30102")
+    if any(str(key).startswith("OTEL_CLICKHOUSE_") for key in edge_data):
+        errors.append("tracescope-edge-config must not contain ClickHouse credentials")
 
     # ---- UI workload (optional standalone; default merged into tracescope-storage) ----
     ui = workloads.get("tracescope-ui")
@@ -280,6 +295,14 @@ def validate(directory: Path) -> tuple[list[str], list[dict[str, Any]]]:
                     pvc_name
                 )
             )
+
+    ingresses = [d for d in documents if d.get("kind") == "Ingress"]
+    for ingress in ingresses:
+        annotations = ingress.get("metadata", {}).get("annotations") or {}
+        if "location ^~ /internal/ { return 404; }" not in annotations.get(
+            "nginx.ingress.kubernetes.io/server-snippet", ""
+        ):
+            errors.append("Ingress must explicitly deny the /internal/ prefix")
     if not any(pvc.get("metadata", {}).get("name") == DATA_CLAIM for pvc in pvcs):
         errors.append("no PersistentVolumeClaim for {}".format(DATA_CLAIM))
 

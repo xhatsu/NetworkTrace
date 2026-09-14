@@ -2,42 +2,54 @@
 
 ## Product structure
 
-The desktop shell has a narrow estate navigation rail, a persistent investigation filter bar, a visible freshness indicator, and four routes: Overview, Services, Accounts, Topology, and Anomalies. Filter state is encoded in the URL. Overview presents eight estate signals, comparative trends, a latency/failure heatmap, ranked service and operation tables, account distribution, and recent anomalies. Service and account routes preserve the same time window and drill into operations, callers, dependencies, instances, account usage, traces, and relevant anomalies. Canvas topology has an equivalent sortable edge table and selection panel.
+The desktop shell has an estate navigation rail, a persistent investigation filter bar, a visible freshness indicator, and primary routes: Overview (`/`), Topology (`/topology`), Anomalies (`/anomalies`), Services (`/services`), Principals (`/principals`), Traces (`/traces`), User Intelligence (`/users`, `/user-changes`, `/user-graph`, `/user-analytics`), and Agent Fleet (`/agent-stats`, `/agent-stats/:node`). Filter state is encoded in the URL. Overview presents estate health KPIs, comparative series, ranked services and principals, and recent anomalies. Service and principal routes preserve the same time window and drill into operations, callers, dependencies, instances, hourly activity cycles, and traces. Canvas topology provides interactive graphical inspection with an Edge Inspector drawer and tabular edge details.
 
-React components are split into the shell/filter controls, reusable chart/card/table primitives, page-level data loaders, and an isolated `TopologyCanvas`. TanStack Query owns API caching/refetching; Recharts renders accessible SVG charts; the topology alone uses Canvas.
+React components are split into the shell/filter controls, reusable chart/card/table primitives, page-level data loaders, and an isolated `TopologyCanvas`. TanStack Query owns API caching/refetching; Recharts renders responsive SVG charts; the topology and user graph use HTML5 Canvas.
 
 ## Storage
 
-Migrations create:
+ClickHouse (`http://127.0.0.1:8123`, database `tracescope`) is the sole persistence store, managed via `backend/clickhouse_migrations/001_initial.sql`:
 
-- `events`: sanitized transaction facts keyed by a deterministic `event_uid`; indexed by timestamp, service/time, operation/time, account/time, trace, parent, outcome, and status.
-- `services`, `accounts`: first/last-seen inventory.
-- `latency_rollups`: minute/service/operation/account aggregates with mergeable histogram JSON; only common dimensions are materialized.
-- `topology_edges`: time-bucketed confirmed or inferred directed relationships with evidence text.
-- `anomalies`, `anomaly_occurrences`: lifecycle and recurrence groups, current/baseline values, samples, evidence, representative traces, and detector details.
-- `checkpoints`, `jobs`, `schema_migrations`: idempotent ingestion, worker state, and migration history.
+- `traces`: sanitized transaction and span evidence with canonical observation fields (`principal_id`, `caller_service`, `target_service`, `operation_key`, `auth_result`, `auth_evidence`), monotonic microsecond row IDs, and `ReplacingMergeTree` engine.
+- `ingest_batches`: batch tracking for transaction-atomic replay deduplication (`X-Batch-Id`).
+- `services`, `accounts`, `principals`: entity inventory and first/last-seen metadata.
+- `metric_buckets`: 1-minute (`60s`) and 5-minute (`300s`) rollups with exact p50, p95, and p99 percentiles.
+- `service_edges`, `principal_service_edges`: time-bucketed confirmed or inferred directed relationships.
+- `baselines`: rolling median and MAD baselines partitioned by hour-of-day and day-of-week.
+- `anomalies`, `anomaly_occurrences`: detected observability incidents, explainability cards, and recurrence tracking.
+- `principal_profiles`, `principal_relationships`, `principal_change_events`, `security_incidents`: User Intelligence behavioral profiles, change detection events, and bounded security incidents with family score caps.
+- `agent_stats_latest`, `agent_stats_history`: Oldkernel Agent Statistics Protocol v1 health samples.
+- `checkpoints`, `jobs`, `schema_migrations`: worker checkpoints, job execution history, and migration versions.
 
-SQLite runs in WAL mode with a 5 s busy timeout. Imports use bounded batches and `BEGIN IMMEDIATE` short transactions. A single worker process owns analytical writes. The repository protocol keeps SQL behind `SQLiteRepository`, allowing replacement without changing route or detector code.
+The repository layer connects via `clickhouse_connect` using a lightweight compatibility adapter in `backend/app/repositories/db_context.py` that handles parameter binding, row mapping, and dialect translation.
 
 ## API
 
-`GET /api/v1/dashboard/summary`, `/series`, `/heatmap`, `/rankings`; `GET /services`, `/services/{name}`; `GET /accounts`, `/accounts/{username}`; `GET /topology`; `GET/PATCH /anomalies`, `/anomalies/{id}`; `GET /traces/{trace_id}`; `GET /ingestion/status`; and `POST /ingestion/import` (local admin workflow only, disabled unless configured). Query models validate ISO time, a maximum 31-day interactive range, enumerated breakdowns, and bounded pagination.
+Primary REST API endpoints served on port 30102:
+- System health & readiness: `GET /api/v1/health`, `GET /livez`, `GET /readyz`
+- Estate overview: `GET /api/v1/overview`
+- Service inventory & details: `GET /api/v1/services`, `GET /api/v1/services/{service}`
+- Principal behavioral explorer: `GET /api/v1/principals`, `GET /api/v1/principals/{principal}`
+- Topology: `GET /api/v1/topology`, `GET /api/v1/topology/service/{service}`
+- Anomalies & Incidents: `GET /api/v1/anomalies`, `GET /api/v1/anomalies/{id}`, `PATCH /api/v1/anomalies/{id}`, `GET /api/v1/incidents`, `GET /api/v1/incidents/{id}`
+- Traces: `GET /api/v1/traces`, `GET /api/v1/traces/{trace_id}`
+- Blast radius traversal: `GET /api/v1/blast-radius/{service}`
+- User Intelligence: `GET /api/v1/users`, `GET /api/v1/user-changes`, `POST /api/v1/user-changes/{id}/review`, `GET /api/v1/user-graph`, `GET /api/v1/user-analytics`
+- Agent statistics: `POST /api/agent/stats`, `GET /api/agent/stats`, `GET /api/agent/stats/{node}`, `GET /api/agent/stats/{node}/history`, `DELETE /api/agent/stats/{node}`
+- Ingestion: `POST /api/v1/ingest`, `POST /api/v1/ingest/traces`, `POST /api/ingest`, `POST /v1/traces`, `GET /api/v1/ingestion/status`
+- Legacy dashboard compatibility: `/api/v1/dashboard/summary`, `/api/v1/dashboard/series`, `/api/v1/dashboard/rankings`, `/api/v1/dashboard/heatmap`, `/api/v1/accounts`, `/api/v1/events`
 
 ## Ingestion and jobs
 
-The importer streams JSON arrays, Elasticsearch `hits.hits`, bulk-style NDJSON, and one-object-per-line NDJSON. `_source` wins over `fields`, so an Elasticsearch hit is one event. Dot paths and nested paths are both accepted. Basic authorization is decoded in memory only; the username is stored, while the raw header and password are discarded before event construction, logging, hashing, or persistence. Invalid credentials become an unknown account marker without error detail.
+The importer streams JSON arrays, Elasticsearch `hits.hits`, bulk-style NDJSON, and one-object-per-line NDJSON. Ingestion endpoints also accept OTLP JSON (`/v1/traces`) and NetworkTracing old-kernel envelopes (`{"node":"host","events":[...]}`). HTTP Basic authorization and namespaced WSSE `UsernameToken` credentials are sanitized in memory only: authenticated usernames are extracted while raw passwords, nonces, and secrets are discarded before storage, logging, or hashing. Unauthenticated transactions safely default to `unknown`. Payloads support automatic gzip decompression (`Content-Encoding: gzip` or magic bytes) and enforce transaction-atomic replay deduplication via `X-Batch-Id`.
 
-The optional Elasticsearch reader uses a read-only search request sorted by `@timestamp,_id`, an incremental `search_after` checkpoint, and a configurable lookback for late arrivals. Deterministic event IDs make replay harmless. The worker recomputes affected minute rollups and edges, then baselines and anomalies. Late arrivals overwrite only impacted rollup buckets; they do not increment an existing aggregate.
-
-Retention and `PRAGMA optimize` run as worker jobs. Interactive endpoints read aggregates and bounded indexed detail rows; they do not perform detection.
+All HTTP ingestion paths utilize a dedicated high-TPS coalescing writer (`backend/app/services/ingest_writer.py`) that coalesces incoming requests arriving within 5 ms up to 50,000 records into batched ClickHouse INSERTs, backed by a 256-request bounded queue. Saturated admission returns HTTP 429 with `Retry-After: 1`, while durable commits write directly to ClickHouse. The background worker (`backend/worker.py`) executes on a 60-second cadence, computing rollups (`metric_buckets`), service and principal edges, rolling baselines, and detector evaluations without blocking request ingestion.
 
 ## Baselines and anomaly rules
 
-For each current one-minute entity bucket, the preferred baseline is matching minute-of-week buckets over prior weeks. With less history, the fallback is the preceding 24 one-minute buckets, excluding the two persistence buckets. Numeric traffic and latency detectors use the median plus/minus `max(3 × 1.4826 × MAD, absolute_floor)`. Zero-MAD fallback uses an empirical 10th–90th range plus a measurement-specific absolute floor. Sparse series require more history and never infer a drop from absent data.
+For each current entity bucket, rollups compute exact p50, p95, and p99 percentiles from raw samples in complete 60s and 300s windows. Rolling medians and Median Absolute Deviation (MAD) baselines are computed across matching minute-of-week and hour-of-day slots. Numeric traffic and latency detectors trigger when deviations exceed median plus/minus `max(3 × 1.4826 × MAD, absolute_floor)`.
 
-Error, auth-denial, and slow rates use Wilson proportion intervals and both a minimum count and absolute percentage-point impact. Novel account and dependency relationships compare first-seen time with the baseline window and require persistence/volume. Mix changes use total-variation distance. Dormant return requires a prior observation, a configurable absence period, and renewed minimum traffic. Instance imbalance compares operation-matched instance medians and shares, not unlike workloads.
-
-Cold starts are labeled insufficient history. Missing buckets and known ingestion gaps suppress traffic-drop evaluation. Zero baselines yield absolute change only. Sampling changes are called out and can suppress volume detectors; unknown sampling is stated as a limitation. Two consecutive anomalous buckets are required by default. Recurrences share an entity/type fingerprint. See `docs/ANOMALIES.md` for detector-specific thresholds.
+Error, auth-denial, and slow rates use robust proportion comparisons. Novel identity, service relationship, and dependency edges compare first-seen timestamps against the historical baseline cutoff and require minimum sample counts. User Intelligence and behavioral engines monitor identity fanout, account switching, off-hours access, dormant reactivation, and IP-user novel associations, grouping related deviations into bounded security incidents. Recurrences share an entity/type fingerprint. See `docs/ANOMALIES.md` for detector-specific thresholds.
 
 ## Topology evidence and rendering
 
@@ -47,4 +59,4 @@ The API returns grouped nodes by default, with service nodes revealed by group/m
 
 ## Assumptions and limitations
 
-The current event model treats transaction documents and server spans marked `span.kind=server` as server work; malformed or ambiguous span kinds are not counted as inbound RPS. Inferred topology depends on explicit destination-service fields until an authoritative mapping feed is provided. SQLite is appropriate for this single-node evaluation, but prolonged raw retention at millions of events requires aggressive retention or a production analytical store. Histograms trade exact tail values for bounded storage. Browser graph performance depends on grouping; rendering all 300 nodes and all edges is intentionally not the default.
+The current event model treats transaction documents and server spans marked `span.kind=server` as server work; malformed or ambiguous span kinds are not counted as inbound RPS. Inferred topology depends on explicit destination-service fields until an authoritative mapping feed is provided. ClickHouse is the primary persistence engine, providing high-throughput columnar analytics and bounded disk retention. Exact percentiles are computed directly from raw trace samples in complete rollup windows, eliminating the quantile distortion of fixed logarithmic histograms. Browser graph performance depends on grouping; rendering all 300 nodes and all edges simultaneously is intentionally not the default.

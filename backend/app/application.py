@@ -13,8 +13,8 @@ Two additional roles isolate independently deployable Kubernetes workloads:
 Role isolation is enforced at *router mount* and *lifespan* time:
 
 * the ingest role never mounts the analytics read/write routers or the SPA;
-* Kubernetes ingest and agent-stats roles call the storage owner over HTTP and
-  never open SQLite; local role launches retain their historical direct mode;
+* role-isolated deployments may call the authenticated storage owner over HTTP,
+  while direct ClickHouse mode remains available for stateless edge workloads;
 * only the ``all`` role serves the compiled SPA and the legacy dashboard APIs.
 
 See ``deploy/k8s/README.md`` for the storage / single-writer contract that these
@@ -23,20 +23,21 @@ roles are deployed under.
 from __future__ import annotations
 
 import json
-import sqlite3
+import hmac
 from contextlib import asynccontextmanager
 from datetime import datetime
 from pathlib import Path
 from typing import Annotated, Any
 
-from fastapi import Depends, FastAPI, HTTPException, Query
+from fastapi import Depends, FastAPI, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
+from starlette.concurrency import run_in_threadpool
 
 from backend.config import settings
 from backend.models import AnomalyPatch, Page, QueryFilters, epoch_ms
-from backend.repository import SQLiteRepository
+from backend.repository import StorageRepository
 
 from backend.app.api.overview import router as overview_router
 from backend.app.api.services import router as services_router
@@ -66,9 +67,8 @@ ROLE_INGEST = "ingest"
 ROLE_AGENT_STATS = "agent-stats"
 VALID_ROLES = (ROLE_ALL, ROLE_INGEST, ROLE_AGENT_STATS)
 
-# The monolith/storage owner starts the SQLite writer. An ingest role starts a
-# local writer only in backwards-compatible non-Kubernetes mode, when no
-# storage-owner URL is configured.
+# The all role owns the in-process writer. An ingest role uses it only when the
+# optional internal-storage boundary is absent, keeping standalone launches compatible.
 
 # Analytics / read-mostly routers (dashboard, topology, traces, users, ...).
 _ANALYTICS_ROUTERS = (
@@ -102,12 +102,11 @@ def create_app(role: str = ROLE_ALL) -> FastAPI:
             "Unknown TraceScope role {!r}; expected one of {}".format(role, VALID_ROLES)
         )
 
-    repo = SQLiteRepository()
+    repo = StorageRepository()
 
     @asynccontextmanager
     async def lifespan(_app: FastAPI):
-        # Only one pod in the fleet is configured to run migrations
-        # (OTEL_RUN_MIGRATIONS); the rest wait for the schema owner.
+        # One designated role runs migrations so horizontally scaled pods never race schema changes.
         if settings.run_migrations:
             repo.migrate()
         owns_writer = role == ROLE_ALL or (
@@ -127,7 +126,7 @@ def create_app(role: str = ROLE_ALL) -> FastAPI:
 
     app = FastAPI(
         title="TraceScope API",
-        version="0.2.0",
+        version="0.2.2",
         docs_url="/api/docs",
         redoc_url=None,
         lifespan=lifespan,
@@ -139,6 +138,16 @@ def create_app(role: str = ROLE_ALL) -> FastAPI:
         allow_methods=["GET", "POST", "PATCH", "DELETE", "OPTIONS"],
         allow_headers=["*"],
     )
+
+    @app.middleware("http")
+    async def authenticate_public_mutations(request: Request, call_next):
+        """Apply one mutation policy to every public write route."""
+        if request.method not in {"GET", "HEAD", "OPTIONS"} and not request.url.path.startswith("/internal/"):
+            expected = settings.api_key
+            supplied = request.headers.get("x-api-key")
+            if expected and (supplied is None or not hmac.compare_digest(supplied, expected)):
+                return JSONResponse(status_code=401, content={"detail": "Valid X-API-Key required"})
+        return await call_next(request)
     # Exposed for tests / diagnostics: which workload surface this app serves.
     app.state.tracescope_role = role
 
@@ -176,8 +185,10 @@ def create_app(role: str = ROLE_ALL) -> FastAPI:
                 return JSONResponse(status_code=503, content={"status": "not-ready"})
             return {"status": "ready", "service_role": role}
         try:
-            with repo.connect() as db:
-                db.execute("SELECT 1").fetchone()
+            def check_store() -> None:
+                with repo.connect() as db:
+                    db.execute("SELECT 1").fetchone()
+            await run_in_threadpool(check_store)
         except Exception:
             return JSONResponse(status_code=503, content={"status": "not-ready"})
         if role in (ROLE_ALL, ROLE_INGEST) and not storage_owner_client.enabled:
@@ -190,14 +201,8 @@ def create_app(role: str = ROLE_ALL) -> FastAPI:
     if role in (ROLE_ALL, ROLE_INGEST):
         _register_ingestion_status_route(app, repo)
 
-    @app.exception_handler(sqlite3.Error)
     @app.exception_handler(Exception)
     async def database_error(_request, exc):
-        if isinstance(exc, (sqlite3.Error,)):
-            return JSONResponse(
-                status_code=503,
-                content={"detail": "Analytics store is temporarily unavailable"},
-            )
         import clickhouse_connect.driver.exceptions as ch_exc
         if isinstance(exc, (ch_exc.ClickHouseError,)):
             return JSONResponse(
@@ -276,7 +281,7 @@ def filter_dict(f: QueryFilters) -> dict[str, str | None]:
 # --------------------------------------------------------------------------
 # Legacy dashboard / read routes (only the ``all`` monolith served these)
 # --------------------------------------------------------------------------
-def _register_dashboard_routes(app: FastAPI, repo: SQLiteRepository) -> None:
+def _register_dashboard_routes(app: FastAPI, repo: StorageRepository) -> None:
     @app.get("/api/v1/dashboard/summary")
     async def dashboard_summary(f: Filters):
         return repo.dashboard_summary(f.start_ms, f.end_ms, filter_dict(f))
@@ -361,7 +366,7 @@ def _register_dashboard_routes(app: FastAPI, repo: SQLiteRepository) -> None:
         return {"items": rows, "limit": limit, "offset": offset, "partial": len(rows) == limit}
 
 
-def _register_ingestion_status_route(app: FastAPI, repo: SQLiteRepository) -> None:
+def _register_ingestion_status_route(app: FastAPI, repo: StorageRepository) -> None:
     @app.get("/api/v1/ingestion/status")
     async def ingestion_status():
         if storage_owner_client.enabled:
@@ -393,7 +398,12 @@ def _mount_spa(app: FastAPI) -> None:
     async def serve_spa(full_path: str):
         if full_path.startswith("api/"):
             raise HTTPException(404, "Not Found")
-        target_file = frontend_dist / full_path
+        resolved_dist = frontend_dist.resolve()
+        target_file = (resolved_dist / full_path).resolve()
+        try:
+            target_file.relative_to(resolved_dist)
+        except ValueError:
+            raise HTTPException(404, "Not Found") from None
         if full_path and target_file.is_file():
             return FileResponse(str(target_file))
         index_file = frontend_dist / "index.html"

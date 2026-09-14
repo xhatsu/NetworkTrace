@@ -1,3 +1,5 @@
+# ClickHouse is intentionally singleton here: one RWO volume and one canonical store
+# are simpler and safer than allowing application replicas to own persistence.
 apiVersion: apps/v1
 kind: StatefulSet
 metadata:
@@ -9,6 +11,7 @@ metadata:
     app.kubernetes.io/part-of: tracescope
 spec:
   serviceName: tracescope-clickhouse
+  # A single replica is coupled to the RWO claim; scale readers/writers, not the volume owner.
   replicas: 1
   podManagementPolicy: OrderedReady
   updateStrategy:
@@ -46,8 +49,14 @@ spec:
               value: "tracescope"
             - name: CLICKHOUSE_USER
               value: "default"
+            - name: CLICKHOUSE_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: tracescope-secrets
+                  key: OTEL_CLICKHOUSE_PASSWORD
             - name: CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT
               value: "1"
+          # Startup tolerates recovery of durable parts; readiness prevents clients using it before /ping succeeds.
           startupProbe:
             httpGet:
               path: /ping
@@ -68,6 +77,7 @@ spec:
             periodSeconds: 15
             timeoutSeconds: 3
             failureThreshold: 3
+          # Requests reserve enough memory for merges while limits contain one tenant's impact.
           resources:
             requests:
               cpu: 500m
@@ -80,6 +90,7 @@ spec:
             readOnlyRootFilesystem: false
             capabilities:
               drop: ["ALL"]
+          # Only this workload mounts the RWO data claim.
           volumeMounts:
             - name: data
               mountPath: /var/lib/clickhouse

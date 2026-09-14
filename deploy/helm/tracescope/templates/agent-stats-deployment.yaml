@@ -52,12 +52,20 @@ spec:
               containerPort: 8000
           envFrom:
             - configMapRef:
-                name: {{ include "tracescope.fullname" . }}-config
-            - secretRef:
-                name: {{ include "tracescope.secretName" . }}
+                name: {{ include "tracescope.fullname" . }}-edge-config
           env:
             - name: OTEL_RUN_MIGRATIONS
               value: "false"
+            - name: OTEL_INTERNAL_API_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "tracescope.secretName" . }}
+                  key: OTEL_INTERNAL_API_TOKEN
+            - name: OTEL_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "tracescope.secretName" . }}
+                  key: OTEL_API_KEY
           startupProbe:
             httpGet:
               path: /livez
