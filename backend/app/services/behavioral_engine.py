@@ -163,7 +163,16 @@ def evaluate_readiness(
         (principal_id, p_name)
     ).fetchone()
 
-    if not row or not row[0] or row[3] == 0:
+    return evaluate_readiness_from_stats(row, detector, current_time_ms)
+
+
+def evaluate_readiness_from_stats(
+    row, detector: str, current_time_ms: int
+) -> tuple[bool, str]:
+    """Apply the readiness rules to a precomputed principal aggregate."""
+    if detector in {"AUTH_FAILURE_BURST", "FAILURE_THEN_SUCCESS", "SOURCE_IDENTITY_FANOUT", "DATA_QUALITY_GAP", "NEW_PRINCIPAL_ON_SOURCE"}:
+        return True, "ready"
+    if not row or row[0] is None or int(row[3]) == 0:
         return False, "insufficient_history"
 
     first_seen_ms, last_seen_ms, active_days, total_obs = row
@@ -198,6 +207,28 @@ def evaluate_readiness(
         return False, "insufficient_history"
 
     return True, "ready"
+
+
+INCIDENT_COLUMNS = (
+    "incident_id", "principal_id", "environment", "category", "scope",
+    "started_at", "last_seen_at", "closed_at", "status", "score", "priority",
+    "confidence", "family_scores_json", "contributing_event_ids_json",
+    "suppressed_contributions_json", "successor_id", "review_notes", "reviewed_by",
+    "reviewed_at", "created_at", "updated_at",
+)
+
+
+def insert_incident_version(db, incident: dict[str, Any], **changes: Any) -> dict[str, Any]:
+    """Persist a complete replacement row; never issue a ClickHouse mutation."""
+    replacement = dict(incident)
+    replacement.update(changes)
+    columns = ",".join(INCIDENT_COLUMNS)
+    placeholders = ",".join("?" for _ in INCIDENT_COLUMNS)
+    db.execute(
+        f"INSERT INTO incidents ({columns}) VALUES ({placeholders})",
+        tuple(replacement.get(column) for column in INCIDENT_COLUMNS),
+    )
+    return replacement
 
 
 # -----------------------------------------------------------------------------
@@ -281,14 +312,17 @@ def record_candidate_behavior(
 # -----------------------------------------------------------------------------
 
 def get_or_create_incident(
-    db, principal_id: str, environment: str, category: str, scope: str, current_time_ms: int
+    db, principal_id: str, environment: str, category: str, scope: str, current_time_ms: int,
+    incident_cache: Optional[Dict[Tuple[str, str, str], dict[str, Any]]] = None,
 ) -> dict[str, Any]:
     """
     Finds an open incident for this principal + context within 30 minutes of last activity,
     under the 24-hour lifetime cap. If older than 24 hours, marks resolved and starts a successor.
     """
-    row = db.execute("""
-        SELECT * FROM incidents
+    cache_key = (principal_id, environment, category)
+    cached = incident_cache.get(cache_key) if incident_cache is not None else None
+    row = cached or db.execute("""
+        SELECT * FROM incidents FINAL
         WHERE principal_id = ? AND environment = ? AND category = ? AND status IN ('open', 'investigating')
         ORDER BY started_at DESC LIMIT 1
     """, (principal_id, environment, category)).fetchone()
@@ -300,29 +334,52 @@ def get_or_create_incident(
         # Check if inactive > 30 minutes
         if current_time_ms - inc["last_seen_at"] > 30 * 60 * 1000:
             # Close stale incident
-            db.execute("UPDATE incidents SET status = 'resolved', closed_at = ?, updated_at = ? WHERE incident_id = ?",
-                       (current_time_ms, now, inc["incident_id"]))
+            resolved = dict(inc, status="resolved", closed_at=current_time_ms, updated_at=now)
+            if incident_cache is None:
+                insert_incident_version(db, resolved)
         # Check if lifetime exceeds 24 hours
         elif current_time_ms - inc["started_at"] >= 24 * 3600 * 1000:
             succ_id = f"inc_{uuid.uuid4().hex[:16]}"
-            db.execute("UPDATE incidents SET status = 'resolved', closed_at = ?, successor_id = ?, updated_at = ? WHERE incident_id = ?",
-                       (current_time_ms, succ_id, now, inc["incident_id"]))
+            resolved = dict(inc, status="resolved", closed_at=current_time_ms,
+                            successor_id=succ_id, updated_at=now)
+            if incident_cache is None:
+                insert_incident_version(db, resolved)
             # Create successor
-            db.execute("""
+            if incident_cache is None:
+                db.execute("""
                 INSERT INTO incidents (incident_id, principal_id, environment, category, scope, started_at, last_seen_at, status, score, priority, confidence, family_scores_json, contributing_event_ids_json, suppressed_contributions_json, created_at, updated_at)
                 VALUES (?, ?, ?, ?, ?, ?, ?, 'open', 0, 'low', 1.0, '{}', '[]', '[]', ?, ?)
-            """, (succ_id, principal_id, environment, category, scope, current_time_ms, current_time_ms, now, now))
-            return dict(db.execute("SELECT * FROM incidents WHERE incident_id = ?", (succ_id,)).fetchone())
+                """, (succ_id, principal_id, environment, category, scope, current_time_ms, current_time_ms, now, now))
+                return dict(db.execute("SELECT * FROM incidents FINAL WHERE incident_id = ?", (succ_id,)).fetchone())
+            successor = {column: None for column in INCIDENT_COLUMNS}
+            successor.update({"incident_id": succ_id, "principal_id": principal_id, "environment": environment,
+                              "category": category, "scope": scope, "started_at": current_time_ms,
+                              "last_seen_at": current_time_ms, "status": "open", "score": 0, "priority": "low",
+                              "confidence": 1.0, "family_scores_json": "{}", "contributing_event_ids_json": "[]",
+                              "suppressed_contributions_json": "[]", "created_at": now, "updated_at": now})
+            incident_cache[cache_key] = successor
+            return successor
         else:
+            if incident_cache is not None:
+                incident_cache[cache_key] = inc
             return inc
 
     # Create new incident
     new_inc_id = f"inc_{uuid.uuid4().hex[:16]}"
-    db.execute("""
+    if incident_cache is None:
+        db.execute("""
         INSERT INTO incidents (incident_id, principal_id, environment, category, scope, started_at, last_seen_at, status, score, priority, confidence, family_scores_json, contributing_event_ids_json, suppressed_contributions_json, created_at, updated_at)
         VALUES (?, ?, ?, ?, ?, ?, ?, 'open', 0, 'low', 1.0, '{}', '[]', '[]', ?, ?)
-    """, (new_inc_id, principal_id, environment, category, scope, current_time_ms, current_time_ms, now, now))
-    return dict(db.execute("SELECT * FROM incidents WHERE incident_id = ?", (new_inc_id,)).fetchone())
+        """, (new_inc_id, principal_id, environment, category, scope, current_time_ms, current_time_ms, now, now))
+        return dict(db.execute("SELECT * FROM incidents FINAL WHERE incident_id = ?", (new_inc_id,)).fetchone())
+    created = {column: None for column in INCIDENT_COLUMNS}
+    created.update({"incident_id": new_inc_id, "principal_id": principal_id, "environment": environment,
+                    "category": category, "scope": scope, "started_at": current_time_ms,
+                    "last_seen_at": current_time_ms, "status": "open", "score": 0, "priority": "low",
+                    "confidence": 1.0, "family_scores_json": "{}", "contributing_event_ids_json": "[]",
+                    "suppressed_contributions_json": "[]", "created_at": now, "updated_at": now})
+    incident_cache[cache_key] = created
+    return created
 
 
 def recalculate_incident_score(db, incident_id: str):
@@ -403,24 +460,15 @@ def recalculate_incident_score(db, incident_id: str):
     priority = investigation_priority(total_score)
     now = int(time.time() * 1000)
 
-    db.execute("""
-        UPDATE incidents SET
-          score = ?,
-          priority = ?,
-          family_scores_json = ?,
-          suppressed_contributions_json = ?,
-          contributing_event_ids_json = ?,
-          updated_at = ?
-        WHERE incident_id = ?
-    """, (
-        total_score,
-        priority,
-        json.dumps(family_scores, separators=(',', ':')),
-        json.dumps(suppressed, separators=(',', ':')),
-        json.dumps([e["id"] for e in events], separators=(',', ':')),
-        now,
-        incident_id
-    ))
+    current = db.execute("SELECT * FROM incidents FINAL WHERE incident_id = ?", (incident_id,)).fetchone()
+    if current:
+        insert_incident_version(
+            db, dict(current), score=total_score, priority=priority,
+            family_scores_json=json.dumps(family_scores, separators=(',', ':')),
+            suppressed_contributions_json=json.dumps(suppressed, separators=(',', ':')),
+            contributing_event_ids_json=json.dumps([e["id"] for e in events], separators=(',', ':')),
+            updated_at=now,
+        )
 
 
 # -----------------------------------------------------------------------------
@@ -448,6 +496,10 @@ def emit_behavioral_change(
     representative_traces: Optional[List[str]] = None,
     custom_summary: Optional[str] = None,
     category_override: Optional[str] = None,
+    _incident_cache: Optional[Dict[Tuple[str, str, str], dict[str, Any]]] = None,
+    _event_rows: Optional[List[tuple]] = None,
+    _override_cache: Optional[Dict[str, bool]] = None,
+    _defer_incident_score: bool = False,
 ) -> int:
     """Emits an explainable Behavioral Change Event and links it to an active Incident."""
     fam = EVENT_FAMILY.get(change_type, "behavioral")
@@ -461,7 +513,11 @@ def emit_behavioral_change(
 
     # Check operator override
     scope_key = f"{principal_id}|{change_type}|{new_value}"
-    if is_operator_accepted(db, "change_rule", scope_key, detected_at):
+    accepted = (_override_cache.get(scope_key) if _override_cache is not None and scope_key in _override_cache
+                else is_operator_accepted(db, "change_rule", scope_key, detected_at))
+    if _override_cache is not None:
+        _override_cache[scope_key] = accepted
+    if accepted:
         return 0
 
     # Format plain-language 7 questions
@@ -506,6 +562,7 @@ def emit_behavioral_change(
         category=category,
         scope=f"{target_service or 'global'}:{caller_service or 'direct'}",
         current_time_ms=detected_at,
+        incident_cache=_incident_cache,
     )
     incident_id = incident["incident_id"]
 
@@ -514,26 +571,33 @@ def emit_behavioral_change(
     now = int(time.time() * 1000)
     event_id = (int(hashlib.sha256(fingerprint.encode()).hexdigest()[:15], 16) % 9000000000000000) + 1
 
-    db.execute("""
+    event_values = (
+        event_id, fingerprint, principal_name, change_type, base_imp, base_pts, detected_at,
+        caller_service or None, source_ip or None, target_service or None, operation or None,
+        old_value or None, new_value or None, detected_at,
+        json.dumps(explanation, separators=(',', ':')), now,
+        incident_id, principal_id, environment, base_imp, category, fam, attribution_method
+    )
+    if _event_rows is None:
+        db.execute("""
       INSERT INTO principal_change_events (
         id, fingerprint, principal_name, change_type, severity, score, detected_at,
         caller_service, source_ip, target_service, operation, old_value, new_value,
         first_observed, reason_json, status, updated_at, incident_id, principal_id,
         environment, base_importance, category, family, reliability
       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'new', ?, ?, ?, ?, ?, ?, ?, ?)
-    """, (
-        event_id, fingerprint, principal_name, change_type, base_imp, base_pts, detected_at,
-        caller_service or None, source_ip or None, target_service or None, operation or None,
-        old_value or None, new_value or None, detected_at,
-        json.dumps(explanation, separators=(',', ':')), now,
-        incident_id, principal_id, environment, base_imp, category, fam, attribution_method
-    ))
+        """, event_values)
+    else:
+        _event_rows.append((*event_values[:15], "new", *event_values[15:]))
 
     # Update incident last_seen_at and recalculate score
-    db.execute("UPDATE incidents SET last_seen_at = MAX(last_seen_at, ?), updated_at = ? WHERE incident_id = ?",
-               (detected_at, now, incident_id))
-    recalculate_incident_score(db, incident_id)
+    incident.update(last_seen_at=max(int(incident["last_seen_at"]), detected_at), updated_at=now)
+    if not _defer_incident_score:
+        insert_incident_version(db, incident)
+        recalculate_incident_score(db, incident_id)
 
+    if _event_rows is not None:
+        return event_id
     event_id_row = db.execute("SELECT id FROM principal_change_events WHERE fingerprint = ?", (fingerprint,)).fetchone()
     return event_id_row[0] if (event_id_row and event_id_row[0]) else event_id
 
