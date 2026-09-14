@@ -126,7 +126,7 @@ def create_app(role: str = ROLE_ALL) -> FastAPI:
 
     app = FastAPI(
         title="TraceScope API",
-        version="0.2.2",
+        version="0.2.3",
         docs_url="/api/docs",
         redoc_url=None,
         lifespan=lifespan,
