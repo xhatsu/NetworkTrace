@@ -8,6 +8,8 @@ This file tracks the current state, accessibility, conveniences, and guides for 
 - **Working Directory**: `/home/ubuntu/Viettel/OtelTrace`
 - **Dashboard URL**: `http://0.0.0.0:30102` (lifecycle-script default and current listener)
 - **NetworkTracing Hub URL**: `http://0.0.0.0:30102` (OTLP / Ingest Hub)
+- **Ingest NodePort**: `http://<node-ip>:30103/api/ingest` (Plain HTTP / non-SSL NodePort entrypoint for legacy C++ shippers such as `nt-ship-cpp` / `nt-sniff-cpp` without TLS compiled in)
+- **Ingress HTTP NodePort**: `http://<node-ip>:31561` (Cluster Ingress-Nginx NodePort for plain HTTP routing across `/api/ingest`, `/api/agent/stats`, `/api`, and `/`)
 - **UI Design System**: Redesigned following the Behavioral Observability specification:
   - Typography: `Inter` (`cv01`, `ss03`) + `JetBrains Mono` for tabular metrics and percentiles, with application-wide 120% base font scaling (`html { font-size: 120%; }`, 13px chart ticks, scaled canvas labels, and proportional pixel utility adjustments).
   - Aesthetics: Linear & Sentry developer tooling palette (`#08090a` canvas, `#0e1116` panels, whisper-thin borders `rgba(255,255,255,0.07)`)

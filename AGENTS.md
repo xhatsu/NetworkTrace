@@ -18,6 +18,8 @@
 - **Current Database**: ClickHouse (active database `tracescope` on `127.0.0.1:8123`, managed via `backend/clickhouse_migrations/001_initial.sql`). All SQLite artifacts (legacy `data/tracescope.db`, `data/benchmark-2m.db`, `backend/migrations/*.sql`, the migration script) were purged on 2026-09-11; ClickHouse is the sole persistence layer with no local fallback archive.
 - **Active Dashboard Port**: `0.0.0.0:30102` (lifecycle-script default and current listener).
 - **NetworkTracing Hub Port**: `0.0.0.0:30102` (OTLP / Ingest Hub in `~/Viettel/NetworkTracing`).
+- **Ingest NodePort**: `http://<node-ip>:30103/api/ingest` (Plain HTTP / non-SSL NodePort entrypoint for legacy C++ shippers such as `nt-ship-cpp` / `nt-sniff-cpp`).
+- **Ingress HTTP NodePort**: `http://<node-ip>:31561` (Cluster Ingress-Nginx plain HTTP NodePort routing `/api/ingest`, `/api/agent/stats`, `/api`, and `/` without TLS).
 
 ---
 

@@ -73,3 +73,98 @@ Secret Name resolution
 {{- printf "%s-secrets" (include "tracescope.fullname" .) -}}
 {{- end -}}
 {{- end }}
+
+{{/*
+Ingress path routing rules
+*/}}
+{{- define "tracescope.ingressPaths" -}}
+- path: /api/v1/ingest
+  pathType: Prefix
+  backend:
+    service:
+      name: {{ include "tracescope.fullname" . }}-ingest
+      port:
+        number: 30103
+- path: /api/ingest
+  pathType: Prefix
+  backend:
+    service:
+      name: {{ include "tracescope.fullname" . }}-ingest
+      port:
+        number: 30103
+- path: /api/v1/ingestion/status
+  pathType: Prefix
+  backend:
+    service:
+      name: {{ include "tracescope.fullname" . }}-ingest
+      port:
+        number: 30103
+- path: /v1/traces
+  pathType: Prefix
+  backend:
+    service:
+      name: {{ include "tracescope.fullname" . }}-ingest
+      port:
+        number: 30103
+- path: /v1/metrics
+  pathType: Prefix
+  backend:
+    service:
+      name: {{ include "tracescope.fullname" . }}-ingest
+      port:
+        number: 30103
+- path: /v1/logs
+  pathType: Prefix
+  backend:
+    service:
+      name: {{ include "tracescope.fullname" . }}-ingest
+      port:
+        number: 30103
+- path: /api/agent/stats
+  pathType: Prefix
+  backend:
+    service:
+      {{- if .Values.agentStats.enabled }}
+      name: {{ include "tracescope.fullname" . }}-agent-stats
+      port:
+        number: 30104
+      {{- else }}
+      name: {{ include "tracescope.fullname" . }}-api
+      port:
+        number: 30102
+      {{- end }}
+- path: /api
+  pathType: Prefix
+  backend:
+    service:
+      name: {{ include "tracescope.fullname" . }}-api
+      port:
+        number: 30102
+- path: /assets
+  pathType: Prefix
+  backend:
+    service:
+      {{- if .Values.ui.enabled }}
+      name: {{ include "tracescope.fullname" . }}-ui
+      port:
+        number: 80
+      {{- else }}
+      name: {{ include "tracescope.fullname" . }}-api
+      port:
+        number: 30102
+      {{- end }}
+- path: /
+  pathType: Prefix
+  backend:
+    service:
+      {{- if .Values.ui.enabled }}
+      name: {{ include "tracescope.fullname" . }}-ui
+      port:
+        number: 80
+      {{- else }}
+      name: {{ include "tracescope.fullname" . }}-api
+      port:
+        number: 30102
+      {{- end }}
+{{- end }}
+

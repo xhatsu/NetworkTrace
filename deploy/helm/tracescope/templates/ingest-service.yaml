@@ -6,12 +6,15 @@ metadata:
     {{- include "tracescope.labels" . | nindent 4 }}
     app.kubernetes.io/component: ingest
 spec:
-  type: ClusterIP
+  type: {{ .Values.ingest.service.type | default "ClusterIP" }}
   selector:
     {{- include "tracescope.selectorLabels" . | nindent 4 }}
     app.kubernetes.io/component: ingest
   ports:
     - name: http
-      port: 30103
+      port: {{ .Values.ingest.service.port | default 30103 }}
       targetPort: http
       protocol: TCP
+      {{- if and (eq (.Values.ingest.service.type | default "ClusterIP") "NodePort") .Values.ingest.service.nodePort }}
+      nodePort: {{ .Values.ingest.service.nodePort }}
+      {{- end }}

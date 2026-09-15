@@ -7,13 +7,16 @@ metadata:
     {{- include "tracescope.labels" . | nindent 4 }}
     app.kubernetes.io/component: agent-stats
 spec:
-  type: ClusterIP
+  type: {{ .Values.agentStats.service.type | default "ClusterIP" }}
   selector:
     {{- include "tracescope.selectorLabels" . | nindent 4 }}
     app.kubernetes.io/component: agent-stats
   ports:
     - name: http
-      port: 30104
+      port: {{ .Values.agentStats.service.port | default 30104 }}
       targetPort: http
       protocol: TCP
+      {{- if and (eq (.Values.agentStats.service.type | default "ClusterIP") "NodePort") .Values.agentStats.service.nodePort }}
+      nodePort: {{ .Values.agentStats.service.nodePort }}
+      {{- end }}
 {{- end }}

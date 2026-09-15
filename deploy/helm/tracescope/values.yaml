@@ -93,6 +93,10 @@ ingest:
     limits:
       cpu: "1"
       memory: 2Gi
+  service:
+    type: NodePort
+    port: 30103
+    nodePort: 30103
 
 # -----------------------------------------------------------------------------
 # Agent Stats Workload (Stateless Deployment)
@@ -188,6 +192,8 @@ ingress:
     nginx.ingress.kubernetes.io/proxy-send-timeout: "70"
     nginx.ingress.kubernetes.io/ssl-redirect: "false"
   host: "trace.n2d.id.vn"
+  # Support direct plain HTTP connections to the Ingress controller via IP / NodePort
+  allowAnyHost: true
   tls: []
 
 podDisruptionBudget:
