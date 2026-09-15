@@ -13,6 +13,7 @@
   - Detectors 1–8: Traffic spike, traffic drop, latency shift, error rate increase, new service relationship, new principal relationship, new operation, unusual execution time.
   - Incident blast-radius analysis (upstream callers, affected principals/operations) and deterministic root-cause heuristic origin.
   - Serves fast analytics dashboards via FastAPI and an interactive React/TypeScript frontend.
+- **Storage Invariant**: OTel trace data from application services is retained in Elasticsearch. ClickHouse persistence is reserved strictly for **host/probe agent trace data** (`OTEL_CLICKHOUSE_ONLY_AGENT_TRACES=true`), preventing duplicate storage expansion. Ingest endpoints acknowledge OTel payloads without writing them to ClickHouse.
 - **Root Directory**: `/home/ubuntu/Viettel/OtelTrace`
 - **Current Database**: ClickHouse (active database `tracescope` on `127.0.0.1:8123`, managed via `backend/clickhouse_migrations/001_initial.sql`). All SQLite artifacts (legacy `data/tracescope.db`, `data/benchmark-2m.db`, `backend/migrations/*.sql`, the migration script) were purged on 2026-09-11; ClickHouse is the sole persistence layer with no local fallback archive.
 - **Active Dashboard Port**: `0.0.0.0:30102` (lifecycle-script default and current listener).
@@ -65,6 +66,7 @@
   - `principal_repository.py`: Principal rankings and comprehensive behavioral profiling.
   - `user_repository.py`: User inventory, fingerprint profiles, timelines, explainable changes, graph, analytics, operator review actions, and incidents query.
   - `agent_stats_repository.py`: Agent health sample storage — upserts `agent_stats_latest` (one live row per node+instance), appends to `agent_stats_history` (idempotent via UNIQUE on `(node, instance_id, sequence)`), prunes history to 2880 rows/node, and provides atomic `delete_node` purging.
+  - `clickhouse_migrator.py`: Versioned migration orchestrator (`001` through `005_system_telemetry_retention.sql`) and system retention manager (`configure_system_telemetry_retention`, `truncate_system_logs`). Enforces bounded 3-day TTL on system logs (`text_log`, `query_log`, `processors_profile_log`, etc.) and 7-day TTL on `error_log` to prevent disk exhaustion.
 - **Analytics & Detection Services** (`backend/app/services/`):
   - `behavioral_engine.py`: Canonical identity normalization, detector readiness, multi-layer baselines, bounded incident lifecycle, capped family scoring (Origin cap 35, Access cap 40, Activity cap 35, Identity mapping cap 30, Authentication cap 45), 7-question explainability cards, and new behavioral/auth detectors (`OPERATION_MIX_SHIFT`, `CALLER_PRINCIPAL_SWITCH`, `TARGET_FANOUT_SURGE`, `SOURCE_FANOUT_SURGE`, `PRINCIPAL_RATE_SURGE`, `AUTH_FAILURE_BURST`, `FAILURE_THEN_SUCCESS`, `SOURCE_IDENTITY_FANOUT`, telemetry quality gates).
   - `normalization.py`: Normalizes OTel / ELK payloads, derives trusted IP / proxies, extracts WSSE usernames with case preservation, sets canonical `operation_key` (`Service/operation`), and maps decoupled `auth_result` / `auth_evidence`.
@@ -117,7 +119,7 @@
 ---
 
 ## 4. Current State & Verification
-- **Test Suite**: 111/111 tests passed in an isolated temporary-database harness (`.venv/bin/python -m pytest tests/ -q`); production data is never mutated by tests:
+- **Test Suite**: 139/139 tests passed in an isolated temporary-database harness (`.venv/bin/python -m pytest tests/ -q`); production data is never mutated by tests:
   - Unit & domain tests in `tests/test_analytics.py`, `tests/test_api.py`, `tests/test_ingestion.py`.
   - Ingestion batch deduplication and gzip decompression tests in `tests/test_batch_dedup_and_gzip.py`.
   - High-concurrency request coalescing, atomic concurrent deduplication, bounded-queue backpressure, and retryable HTTP 429 tests in `tests/test_ingest_writer.py`.
@@ -126,6 +128,9 @@
   - Dedicated IP anomaly and novel user on host tests in `tests/test_user_ip_anomalies.py`.
   - Reference compatibility and WSSE ingestion tests in `tests/test_reference_compat.py` and `tests/test_wsse_ingestion.py`.
   - Service boundary, workload splitting, and topology tests in `tests/test_service_boundaries.py`, `tests/test_split_workloads_integration.py`, and `tests/test_deployment_topology.py`.
+  - Host/probe agent trace isolation in ClickHouse (`tests/test_agent_traces_only.py`).
+  - System telemetry log retention and truncation (`tests/test_system_retention.py`).
+  - Compact AggregatingMergeTree principal readiness summary (`tests/test_principal_readiness_summary.py`).
   - All 22 code review findings verified and documented in `FIX_REPORT.md`.
 - **End-to-End Curl & JS Safety Test Suite**: 42/42 tests passed (`sh backend/scripts/curl_test_all_pages.sh`).
   - Tested all 17 SPA routes (including `/agent-stats` and `/agent-stats/:node`) with HTTP 200 and valid HTML shell bundle delivery.

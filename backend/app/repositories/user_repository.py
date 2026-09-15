@@ -294,10 +294,17 @@ class UserRepository:
 
             incident_id = row_dict.get("incident_id")
             if incident_id:
-                if action == "investigate":
-                    db.execute("UPDATE incidents SET status = 'investigating', updated_at = ? WHERE incident_id = ?", (now, incident_id))
-                elif action == "expected":
-                    db.execute("UPDATE incidents SET status = 'accepted', updated_at = ? WHERE incident_id = ?", (now, incident_id))
+                if action in {"investigate", "expected"}:
+                    from backend.app.services.behavioral_engine import insert_incident_version
+                    current_incident = db.execute(
+                        "SELECT * FROM incidents FINAL WHERE incident_id = ?", (incident_id,)
+                    ).fetchone()
+                    if current_incident:
+                        insert_incident_version(
+                            db, dict(current_incident),
+                            status="investigating" if action == "investigate" else "accepted",
+                            updated_at=now,
+                        )
                 try:
                     from backend.app.services.behavioral_engine import recalculate_incident_score
                     recalculate_incident_score(db, incident_id)
@@ -332,8 +339,8 @@ class UserRepository:
 
         where = " AND ".join(clauses)
         with get_connection(self.db_path) as db:
-            rows = [dict(r) for r in db.execute(f"SELECT * FROM incidents WHERE {where} ORDER BY started_at DESC LIMIT ? OFFSET ?", [*args, limit, offset])]
-            count = db.execute(f"SELECT COUNT(*) FROM incidents WHERE {where}", args).fetchone()[0]
+            rows = [dict(r) for r in db.execute(f"SELECT * FROM incidents FINAL WHERE {where} ORDER BY started_at DESC LIMIT ? OFFSET ?", [*args, limit, offset])]
+            count = db.execute(f"SELECT COUNT(*) FROM incidents FINAL WHERE {where}", args).fetchone()[0]
             for row in rows:
                 for col in ("family_scores", "contributing_event_ids", "suppressed_contributions"):
                     col_json = f"{col}_json"
@@ -346,7 +353,7 @@ class UserRepository:
 
     def get_incident(self, incident_id: str) -> dict[str, Any] | None:
         with get_connection(self.db_path) as db:
-            row = db.execute("SELECT * FROM incidents WHERE incident_id = ?", (incident_id,)).fetchone()
+            row = db.execute("SELECT * FROM incidents FINAL WHERE incident_id = ?", (incident_id,)).fetchone()
             if not row:
                 return None
             inc = dict(row)

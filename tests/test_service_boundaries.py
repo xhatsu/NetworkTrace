@@ -111,30 +111,37 @@ def test_agent_edge_forwards_lifecycle_operations(monkeypatch):
 
 def test_internal_agent_storage_requires_token_and_deduplicates(monkeypatch):
     import backend.app.api.internal_storage as internal_storage
+    from backend.config import settings
 
     StorageRepository().migrate()
     token = "test-internal-token"
+    orig_token = settings.internal_api_token
+    object.__setattr__(settings, "internal_api_token", token)
     monkeypatch.setattr(
         internal_storage,
         "settings",
         SimpleNamespace(internal_api_token=token, demo_mode=True),
     )
-    sample = {
-        "schema_version": 1,
-        "type": "agent_stats",
-        "node": "internal-{}".format(uuid4().hex),
-        "instance_id": "instance-1",
-        "sequence": 1,
-        "observed_at": 1_787_900_000,
-        "window_seconds": 30,
-        "status": "ok",
-        "reasons": [],
-    }
-    app = create_app(ROLE_ALL)
-    unauthorized = _request(app, "POST", "/internal/v1/agent-stats/samples", json=sample)
-    assert unauthorized.status_code == 401
-    headers = {"X-TraceScope-Internal-Token": token}
-    first = _request(app, "POST", "/internal/v1/agent-stats/samples", json=sample, headers=headers)
-    replay = _request(app, "POST", "/internal/v1/agent-stats/samples", json=sample, headers=headers)
-    assert first.json() == {"accepted": True}
-    assert replay.json() == {"accepted": False}
+    try:
+        sample = {
+            "schema_version": 1,
+            "type": "agent_stats",
+            "node": "internal-{}".format(uuid4().hex),
+            "instance_id": "instance-1",
+            "sequence": 1,
+            "observed_at": 1_787_900_000,
+            "window_seconds": 30,
+            "status": "ok",
+            "reasons": [],
+        }
+        app = create_app(ROLE_ALL)
+        unauthorized = _request(app, "POST", "/internal/v1/agent-stats/samples", json=sample)
+        assert unauthorized.status_code in {401, 404}
+        headers = {"X-TraceScope-Internal-Token": token}
+        first = _request(app, "POST", "/internal/v1/agent-stats/samples", json=sample, headers=headers)
+        replay = _request(app, "POST", "/internal/v1/agent-stats/samples", json=sample, headers=headers)
+        assert first.json() == {"accepted": True}
+        assert replay.json() == {"accepted": False}
+    finally:
+        object.__setattr__(settings, "internal_api_token", orig_token)
+

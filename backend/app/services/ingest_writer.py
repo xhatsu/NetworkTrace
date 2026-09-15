@@ -292,6 +292,10 @@ class IngestWriter:
         all_trace_rows: List[list[Any]] = []
         for job in valid_jobs:
             for trace in job.traces:
+                if settings.clickhouse_only_agent_traces:
+                    is_agent = getattr(trace, "is_agent_trace", False) or (job.node not in {"unknown", "otlp", "elastic", "apm", ""})
+                    if not is_agent:
+                        continue
                 all_trace_rows.append(_trace_to_row(trace, columns, job.batch_id))
 
         try:

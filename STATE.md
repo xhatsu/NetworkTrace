@@ -84,14 +84,17 @@ This file tracks the current state, accessibility, conveniences, and guides for 
   - Resolved `Uncaught TypeError: Cannot read properties of undefined (reading 'length')` on `/anomalies/:id` by adding defensive optional chaining on `contributors`, `limitations`, `trace_ids`, and timestamp windows.
   - Resolved `TypeError: Cannot read properties of undefined (reading 'map')` on `/services/:name` and `/principals/:name` by adding safe fallback arrays and enriching backend responses with complete operational percentiles and dependency relationships.
 - **Automated Test Suite**:
-  - 98/98 tests passed via `.venv/bin/python -m pytest tests/` using isolated temporary ClickHouse databases.
+  - 139/139 tests passed via `.venv/bin/python -m pytest tests/` using isolated temporary ClickHouse databases with dynamic host discovery across local and Kubernetes pod networks.
   - High-TPS ingestion coverage in `tests/test_ingest_writer.py` verifies concurrent HTTP request coalescing, a bounded coalescing ClickHouse writer, transaction-atomic concurrent batch deduplication, bounded queue rejection, and HTTP 429/`Retry-After` behavior.
+  - Storage Isolation (`tests/test_agent_traces_only.py`): Verifies the storage invariant where ClickHouse stores host/probe agent trace data while application OTel traces are acknowledged and bypassed to protect against duplicate storage expansion.
+  - System Telemetry Retention (`tests/test_system_retention.py`): Enforces bounded TTL (3-day on system logs, 7-day on error logs) via migration `005_system_telemetry_retention.sql` and CLI maintenance commands.
+  - Principal Readiness Summary (`tests/test_principal_readiness_summary.py`): Validates compact AggregatingMergeTree summary tables via migration `006_principal_readiness_summary.sql` to avoid full trace scans during detector readiness evaluations.
+  - Application Edge Security: Middle-tier `/internal/*` routes enforce token-based access control and respond with HTTP 404 to unauthenticated callers, providing edge isolation without requiring ingress snippet annotations.
   - Comprehensive coverage across canonical identity normalization, batch deduplication (`tests/test_batch_dedup_and_gzip.py`), detector readiness, multi-layer candidate promotion, bounded incidents, capped family scoring, 7-question explainability cards, dedicated IP anomalies, and WSSE secret hygiene.
   - User behavior scores count each distinct evidence category once; repeated relationship events within a window deduplicate and contribute once. Bounded incidents enforce strict family caps (origin 35, access 40, activity 35, identity mapping 30, auth 45).
   - Frontend lint/type check and production build passed (`tsc -b && vite build` passed 100%).
   - 42/42 end-to-end curl contract tests passed via `sh backend/scripts/curl_test_all_pages.sh` across all 17 SPA routes (including `/agent-stats` and `/agent-stats/:node`) and 25 backing APIs.
   - 15/15 real browser Playwright tests passed via `python3 backend/scripts/test_pages_playwright.py`.
-- **High-TPS Hub Live Verification (2026-09-11)**:
   - Lifecycle stack started successfully: `tracescope-30102` and `tracescope-worker` tmux sessions active; `0.0.0.0:30102` and bootstrap `0.0.0.0:30105` listening.
   - `GET /api/v1/ingestion/status` reports the high-TPS writer alive with queue depth/capacity, transaction, commit, duplicate, rejection, and failure counters.
   - A labeled `/api/ingest` self-test committed once; replay with the identical `X-Batch-Id` returned HTTP 200 with `duplicate=true`, `received=0`, and `inserted=0`.

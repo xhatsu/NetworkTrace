@@ -24,11 +24,35 @@ from backend.app.services.wsse import (
 
 def _is_networktracing_event(document: dict[str, Any]) -> bool:
     """Return True for the compact event contract emitted by NetworkTracing agents."""
+    src = str(document.get("src", "")).lower()
+    probe = str(document.get("source_probe", "")).lower()
     return (
-        document.get("src") == "pcap"
-        or str(document.get("source_probe", "")).startswith("pcap-")
+        src in {"pcap", "uprobe", "tc", "kprobe", "agent", "socket", "ebpf"}
+        or probe.startswith(("pcap-", "agent", "ebpf"))
         or ("caller" in document and "dst_ip" in document and "path" in document)
+        or bool(document.get("agent_stats"))
+        or document.get("source") == "agent"
     )
+
+
+def is_agent_trace(raw: dict[str, Any], envelope_node: Any = None) -> bool:
+    """Determine whether a raw telemetry record originates from a NetworkTracing / host agent."""
+    if envelope_node and str(envelope_node).strip() not in {"", "unknown", "otlp", "elastic", "apm"}:
+        return True
+    source = raw.get("_source") if isinstance(raw.get("_source"), dict) else raw.get("fields") if isinstance(raw.get("fields"), dict) else raw
+    if not isinstance(source, dict):
+        return False
+    if _is_networktracing_event(source):
+        return True
+    src_val = str(source.get("src", "")).lower()
+    if src_val in {"pcap", "uprobe", "tc", "kprobe", "agent", "socket", "ebpf"}:
+        return True
+    probe = str(source.get("source_probe", "")).lower()
+    if probe.startswith(("pcap-", "agent", "ebpf")):
+        return True
+    if source.get("source") == "agent" or "agent.name" in source:
+        return True
+    return False
 
 
 def _is_trusted_proxy(ip: Optional[str]) -> bool:
@@ -496,4 +520,5 @@ def normalize_otel_record(raw: dict[str, Any], source_label: str = "import") -> 
         outcome_class=outcome_class,
         sampling_context=sampling_context,
         dedup_key=dedup_key,
+        is_agent_trace=bool(is_network_event or source_label == "agent" or is_agent_trace(raw)),
     )

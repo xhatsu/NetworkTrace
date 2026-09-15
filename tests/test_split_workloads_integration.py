@@ -19,6 +19,9 @@ def test_split_apps_use_authenticated_storage_boundary_end_to_end(monkeypatch):
 
     StorageRepository().migrate()
     token = "integration-internal-token"
+    from backend.config import settings
+    orig_token = settings.internal_api_token
+    object.__setattr__(settings, "internal_api_token", token)
     monkeypatch.setattr(
         internal_storage,
         "settings",
@@ -98,6 +101,7 @@ def test_split_apps_use_authenticated_storage_boundary_end_to_end(monkeypatch):
                 assert deleted.status_code == 200
                 assert deleted.json()["deleted"] is True
         finally:
+            object.__setattr__(settings, "internal_api_token", orig_token)
             ingest_writer.shutdown()
             await storage_owner_client.shutdown()
 

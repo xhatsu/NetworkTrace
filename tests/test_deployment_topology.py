@@ -324,7 +324,7 @@ def test_helm_requires_private_token_and_propagates_storage_credentials():
         "--set", "clickhouse.password=secret-password",
     ], text=True, capture_output=True, check=True).stdout
     assert "OTEL_STORAGE_OWNER_URL" in rendered
-    assert "location ^~ /internal/ { return 404; }" in rendered
+    assert "server-snippet" not in rendered
     assert "OTEL_CLICKHOUSE_PASSWORD" in rendered
     assert "CLICKHOUSE_PASSWORD" in rendered
     assert "app-0.1.0" not in rendered and "ingest-0.1.0" not in rendered

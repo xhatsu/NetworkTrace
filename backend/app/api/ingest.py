@@ -14,7 +14,7 @@ from fastapi.responses import JSONResponse
 from backend.config import settings
 from backend.app.security import require_api_key
 from backend.app.models.trace import NormalizedTrace
-from backend.app.services.normalization import normalize_otel_record
+from backend.app.services.normalization import normalize_otel_record, is_agent_trace
 from backend.app.services.otlp_parser import (
     decompress_payload,
     parse_otlp_json,
@@ -45,7 +45,8 @@ def _normalize_records(records: List[Dict[str, Any]], envelope_node: Any) -> tup
         normalized_record = record
         if envelope_node and "host" not in record:
             normalized_record = {**record, "host": envelope_node}
-        trace = normalize_otel_record(normalized_record)
+        source_label = "agent" if (envelope_node or is_agent_trace(normalized_record)) else "import"
+        trace = normalize_otel_record(normalized_record, source_label=source_label)
         if trace:
             traces.append(trace)
         else:
@@ -134,6 +135,15 @@ async def ingest_traces(request: Request) -> Dict[str, Any]:
         spans = parse_otlp_json(body)
         if len(spans) > settings.max_ingest_records:
             raise HTTPException(status_code=413, detail="Too many ingestion records")
+        if settings.clickhouse_only_agent_traces:
+            return {
+                "status": "success",
+                "received": len(spans),
+                "inserted": 0,
+                "rejected": 0,
+                "filtered": len(spans),
+                "message": "OTel traces acknowledged (retained in Elasticsearch; ClickHouse stores agent traces only)",
+            }
         traces: List[NormalizedTrace] = []
         for s in spans:
             t = otlp_span_to_normalized_trace(s)
@@ -161,6 +171,20 @@ async def ingest_traces(request: Request) -> Dict[str, Any]:
         raise HTTPException(status_code=422, detail="Each ingestion record must be an object")
     if len(records) > settings.max_ingest_records:
         raise HTTPException(status_code=413, detail="Too many ingestion records")
+
+    if not envelope_node and settings.clickhouse_only_agent_traces:
+        agent_records = [r for r in records if isinstance(r, dict) and is_agent_trace(r)]
+        filtered_count = len(records) - len(agent_records)
+        records = agent_records
+        if not records:
+            return {
+                "status": "success",
+                "received": filtered_count,
+                "inserted": 0,
+                "rejected": 0,
+                "filtered": filtered_count,
+                "message": "OTel traces filtered (retained in Elasticsearch; ClickHouse stores agent traces only)",
+            }
 
     traces, rejected = _normalize_records(records, envelope_node)
     write_result = await _commit_traces(traces, batch_id, envelope_node or "unknown")
@@ -220,6 +244,9 @@ async def otlp_v1_traces(request: Request) -> Dict[str, Any]:
     if len(spans) > settings.max_ingest_records:
         return JSONResponse({"error": "Too many ingestion records"}, status_code=413)
 
+    if settings.clickhouse_only_agent_traces:
+        return {"partialSuccess": {}}
+
     traces: List[NormalizedTrace] = []
     for s in spans:
         t = otlp_span_to_normalized_trace(s)
@@ -258,6 +285,16 @@ async def elastic_apm_ingest(request: Request) -> Dict[str, Any]:
         return JSONResponse({"error": "No Elastic APM transaction documents found"}, status_code=400)
     if len(documents) > settings.max_ingest_records:
         return JSONResponse({"error": "Too many ingestion records"}, status_code=413)
+
+    if settings.clickhouse_only_agent_traces:
+        return {
+            "ok": True,
+            "accepted": 0,
+            "ignored": len(documents),
+            "rejected": 0,
+            "source_format": "elastic-apm-7.x-transaction",
+            "message": "APM traces retained in Elasticsearch; ClickHouse stores agent traces only",
+        }
 
     traces: List[NormalizedTrace] = []
     ignored = 0

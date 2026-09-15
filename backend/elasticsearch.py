@@ -5,6 +5,7 @@ from typing import Any, Iterator
 
 import httpx
 
+from backend.config import settings
 from .app.repositories.db_context import db_transaction, get_connection
 from .app.repositories.trace_repository import TraceRepository
 from .app.services.normalization import normalize_otel_record
@@ -30,7 +31,14 @@ class ElasticsearchReader:
                 if not hits: break
                 search_after=hits[-1].get("sort"); yield hits,search_after
 
-    def sync(self) -> dict[str,int]:
+    def sync(self) -> dict[str, Any]:
+        if settings.clickhouse_only_agent_traces:
+            return {
+                "status": "skipped",
+                "message": "Elasticsearch sync skipped: OTel trace data already resides in Elasticsearch; ClickHouse only stores agent trace data.",
+                "read": 0,
+                "inserted": 0,
+            }
         import json,time
         with get_connection() as db:
             row=db.execute("SELECT cursor_json FROM checkpoints WHERE source='elasticsearch'").fetchone()

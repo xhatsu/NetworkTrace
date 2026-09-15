@@ -22,6 +22,16 @@ class Settings:
     clickhouse_secure: bool = os.getenv("OTEL_CLICKHOUSE_SECURE", "false").lower() == "true"
     clickhouse_connect_timeout: float = float(os.getenv("OTEL_CLICKHOUSE_CONNECT_TIMEOUT", "10.0"))
     clickhouse_send_receive_timeout: float = float(os.getenv("OTEL_CLICKHOUSE_TIMEOUT", "30.0"))
+    clickhouse_system_log_retention_days: int = max(
+        1, int(os.getenv("OTEL_CLICKHOUSE_SYSTEM_LOG_RETENTION_DAYS", "3"))
+    )
+    clickhouse_system_error_log_retention_days: int = max(
+        1, int(os.getenv("OTEL_CLICKHOUSE_SYSTEM_ERROR_LOG_RETENTION_DAYS", "7"))
+    )
+    # Storage isolation: OTel trace data is retained in Elasticsearch; ClickHouse only stores agent trace data.
+    clickhouse_only_agent_traces: bool = (
+        os.getenv("OTEL_CLICKHOUSE_ONLY_AGENT_TRACES", "true").lower() == "true"
+    )
     demo_mode: bool = os.getenv("OTEL_DEMO_MODE", "true").lower() == "true"
     cors_origins: tuple[str, ...] = tuple(
         item.strip() for item in os.getenv(

@@ -10,16 +10,41 @@ _test_clickhouse_db = f"test_pytest_{tempfile.gettempprefix()}_{os.getpid()}"
 
 os.environ["OTEL_DEMO_MODE"] = "true"
 os.environ["OTEL_CLICKHOUSE_DATABASE"] = _test_clickhouse_db
+os.environ["OTEL_CLICKHOUSE_ONLY_AGENT_TRACES"] = "false"
 
 if "OTEL_CLICKHOUSE_HOST" not in os.environ:
+    import glob
     import socket
-    _sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    _sock.settimeout(0.2)
+    port = int(os.getenv("OTEL_CLICKHOUSE_PORT", "8123"))
+    candidates = ["127.0.0.1", "10.244.0.118", "10.244.0.110"]
     try:
-        _sock.connect(("127.0.0.1", int(os.getenv("OTEL_CLICKHOUSE_PORT", "8123"))))
-        _sock.close()
+        for p in glob.glob("/proc/[0-9]*/cmdline"):
+            try:
+                with open(p, "rb") as f:
+                    if b"clickhouse-server" in f.read():
+                        pid = p.split("/")[2]
+                        tcp6 = f"/proc/{pid}/net/tcp6"
+                        if os.path.exists(tcp6):
+                            with open(tcp6) as tf:
+                                for line in tf:
+                                    parts = line.strip().split()
+                                    if len(parts) >= 4 and parts[3] in ("0A", "01"):
+                                        hex_addr, hp = parts[1].split(":")
+                                        if int(hp, 16) == port and hex_addr.startswith("0000000000000000FFFF0000"):
+                                            h = hex_addr[24:]
+                                            ip = ".".join(str(int(h[i:i+2], 16)) for i in (6, 4, 2, 0))
+                                            candidates.insert(0, ip)
+            except Exception:
+                pass
     except Exception:
-        os.environ["OTEL_CLICKHOUSE_HOST"] = "10.244.0.110"
+        pass
+    for host in candidates:
+        try:
+            with socket.create_connection((host, port), timeout=0.2):
+                os.environ["OTEL_CLICKHOUSE_HOST"] = host
+                break
+        except Exception:
+            continue
 
 from backend.app.repositories import clickhouse_migrator
 

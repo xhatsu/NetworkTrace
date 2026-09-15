@@ -51,7 +51,7 @@ app:
   replicaCount: 1
   image:
     repository: xhatsu101/tracescope
-    tag: app-0.2.3
+    tag: app-0.2.5
     pullPolicy: IfNotPresent
   resources:
     requests:
@@ -79,7 +79,7 @@ ingest:
   replicaCount: 2
   image:
     repository: xhatsu101/tracescope
-    tag: ingest-0.2.3
+    tag: ingest-0.2.5
     pullPolicy: IfNotPresent
   autoscaling:
     enabled: true
@@ -104,7 +104,7 @@ agentStats:
   replicaCount: 2
   image:
     repository: xhatsu101/tracescope
-    tag: app-0.2.3
+    tag: app-0.2.5
     pullPolicy: IfNotPresent
   autoscaling:
     enabled: true
@@ -131,7 +131,7 @@ ui:
   replicaCount: 2
   image:
     repository: xhatsu101/tracescope
-    tag: app-0.2.3
+    tag: app-0.2.5
     pullPolicy: IfNotPresent
   resources:
     requests:
@@ -177,8 +177,11 @@ config:
 ingress:
   enabled: true
   className: nginx
+  # server-snippet annotations are rejected by the cluster ingress admission
+  # webhook (AllowSnippetAnnotations=false). /internal/* isolation is enforced
+  # at the application middleware instead (404 to unauthenticated callers).
   serverSnippet:
-    enabled: true
+    enabled: false
   annotations:
     nginx.ingress.kubernetes.io/proxy-body-size: "16m"
     nginx.ingress.kubernetes.io/proxy-read-timeout: "70"

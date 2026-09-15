@@ -34,6 +34,26 @@ from backend.app.services.normalization import _is_trusted_proxy, derive_source_
 PRINCIPAL_BATCH_SIZE = 5000
 
 
+def _load_readiness_stats(db, principal_ids: list[str], cache: dict[str, Any]) -> None:
+    """Load compact ingest-maintained readiness summaries once per principal/cycle."""
+    missing = sorted(set(principal_ids).difference(cache))
+    if not missing:
+        return
+    marks = ",".join("?" for _ in missing)
+    rows = db.execute(
+        "SELECT principal_id,minMerge(first_seen_state),maxMerge(last_seen_state),"
+        "uniqExactMerge(active_days_state),countMerge(observation_count_state) "
+        "FROM principal_readiness_summary "
+        f"WHERE principal_id IN ({marks}) GROUP BY principal_id",
+        missing,
+    ).fetchall()
+    cache.update({str(row[0]): tuple(row[1:5]) for row in rows})
+    # Cache misses too. A principal absent from the summary cannot become present
+    # during this already-fetched page, and the next worker cycle starts fresh.
+    for principal_id in missing:
+        cache.setdefault(principal_id, None)
+
+
 def _severity(score: int) -> str:
     return "high" if score >= 30 else "medium" if score >= 20 else "low"
 
@@ -263,7 +283,7 @@ def _bootstrap(db, ratio: float) -> dict[str, int]:
 class _BatchState:
     """Batch-local latest-row view plus block-write accumulator."""
 
-    def __init__(self, db, rows):
+    def __init__(self, db, rows, readiness_cache: dict[str, Any] | None = None):
         self.db = db
         self.writes: dict[tuple[str, str], list[tuple]] = {}
         self.cache: dict[tuple, Any] = {}
@@ -273,16 +293,8 @@ class _BatchState:
             (row["principal_id"] or f"{row['service_environment'] or 'production'}:{row['principal_name']}")
             for row in rows if row["principal_name"] and row["principal_name"] != "unknown"
         })
-        self.readiness = {}
-        if principal_ids:
-            marks = ",".join("?" for _ in principal_ids)
-            stats = db.execute(
-                "SELECT ifNull(principal_id,concat(if(service_environment='', 'production', service_environment),':',principal_name)) AS pid,"
-                "MIN(timestamp_ms),MAX(timestamp_ms),COUNT(DISTINCT timestamp_ms / 86400000),COUNT(*) "
-                f"FROM traces WHERE pid IN ({marks}) GROUP BY pid",
-                principal_ids,
-            ).fetchall()
-            self.readiness = {str(row[0]): tuple(row[1:5]) for row in stats}
+        self.readiness = readiness_cache if readiness_cache is not None else {}
+        _load_readiness_stats(db, principal_ids, self.readiness)
         self._preload(rows, principal_ids)
 
     def _preload(self, rows, principal_ids: list[str]) -> None:
@@ -835,6 +847,7 @@ def process_principal_intelligence(db_path: Optional[str] = None) -> dict[str, i
         cursor_order = int(checkpoint.get("ingest_order", 0))
         cursor_uid = str(checkpoint.get("row_uid", "00000000-0000-0000-0000-000000000000"))
         processed = 0
+        readiness_cache: dict[str, Any] = {}
         while True:
             rows = db.execute(
                 "SELECT ingest_order,row_uid,timestamp_ms,principal_name,"
@@ -846,7 +859,7 @@ def process_principal_intelligence(db_path: Optional[str] = None) -> dict[str, i
             ).fetchall()
             if not rows:
                 break
-            batch = _BatchState(db, rows)
+            batch = _BatchState(db, rows, readiness_cache)
             for row in rows:
                 processed += _process_incremental_row(db, row, batch)
             # No derived statement is issued until the whole page has been computed.

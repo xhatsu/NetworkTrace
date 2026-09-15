@@ -61,6 +61,7 @@ class NormalizedTrace(BaseModel):
     outcome_class: str = "unknown"
     sampling_context: Optional[str] = None
     dedup_key: Optional[str] = None
+    is_agent_trace: bool = False
 
     from pydantic import model_validator
 

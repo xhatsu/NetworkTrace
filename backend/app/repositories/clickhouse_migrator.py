@@ -101,7 +101,13 @@ def run_clickhouse_migrations(database: Optional[str] = None) -> list[str]:
                 statements.append(clean_stmt)
 
         for stmt in statements:
-            client.command(stmt)
+            try:
+                client.command(stmt)
+            except Exception as exc:
+                if "system." in stmt.lower():
+                    log.warning("System table migration statement skipped or failed: %s; error: %s", stmt, exc)
+                else:
+                    raise
 
         now_ms = int(time.time() * 1000)
         client.command(
@@ -111,3 +117,85 @@ def run_clickhouse_migrations(database: Optional[str] = None) -> list[str]:
         newly_applied.append(version)
 
     return newly_applied
+
+
+SYSTEM_LOG_TABLES = (
+    "text_log",
+    "query_log",
+    "processors_profile_log",
+    "part_log",
+    "trace_log",
+    "metric_log",
+    "asynchronous_metric_log",
+)
+
+SYSTEM_ERROR_TABLES = (
+    "error_log",
+)
+
+
+def _get_server_client() -> clickhouse_connect.driver.Client:
+    """Return a server-level ClickHouse client for system database operations."""
+    return clickhouse_connect.get_client(
+        host=settings.clickhouse_host,
+        port=settings.clickhouse_port,
+        username=settings.clickhouse_user,
+        password=settings.clickhouse_password,
+        secure=settings.clickhouse_secure,
+        connect_timeout=settings.clickhouse_connect_timeout,
+        send_receive_timeout=settings.clickhouse_send_receive_timeout,
+    )
+
+
+def configure_system_telemetry_retention(
+    client: Optional[clickhouse_connect.driver.Client] = None,
+    log_retention_days: Optional[int] = None,
+    error_retention_days: Optional[int] = None,
+) -> dict[str, bool]:
+    """Configure retention TTL on ClickHouse internal system tables to prevent disk expansion."""
+    if client is None:
+        client = _get_server_client()
+    l_days = log_retention_days if log_retention_days is not None else settings.clickhouse_system_log_retention_days
+    e_days = error_retention_days if error_retention_days is not None else settings.clickhouse_system_error_log_retention_days
+
+    targets = [(tbl, l_days) for tbl in SYSTEM_LOG_TABLES] + [(tbl, e_days) for tbl in SYSTEM_ERROR_TABLES]
+    results = {}
+    for tbl, days in targets:
+        try:
+            exists = client.query(
+                "SELECT count() FROM system.tables WHERE database = 'system' AND name = {name:String}",
+                parameters={"name": tbl},
+            ).result_rows[0][0]
+            if exists:
+                client.command(f"ALTER TABLE system.{tbl} MODIFY TTL event_date + toIntervalDay({days})")
+                results[tbl] = True
+            else:
+                results[tbl] = False
+        except Exception as exc:
+            log.warning("Could not set TTL on system.%s: %s", tbl, exc)
+            results[tbl] = False
+    return results
+
+
+def truncate_system_logs(client: Optional[clickhouse_connect.driver.Client] = None) -> dict[str, bool]:
+    """Truncate internal system telemetry tables to immediately reclaim disk space."""
+    if client is None:
+        client = _get_server_client()
+    all_tables = SYSTEM_LOG_TABLES + SYSTEM_ERROR_TABLES
+    results = {}
+    for tbl in all_tables:
+        try:
+            exists = client.query(
+                "SELECT count() FROM system.tables WHERE database = 'system' AND name = {name:String}",
+                parameters={"name": tbl},
+            ).result_rows[0][0]
+            if exists:
+                client.command(f"TRUNCATE TABLE system.{tbl}")
+                results[tbl] = True
+            else:
+                results[tbl] = False
+        except Exception as exc:
+            log.warning("Could not truncate system.%s: %s", tbl, exc)
+            results[tbl] = False
+    return results
+

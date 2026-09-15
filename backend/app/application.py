@@ -126,7 +126,7 @@ def create_app(role: str = ROLE_ALL) -> FastAPI:
 
     app = FastAPI(
         title="TraceScope API",
-        version="0.2.3",
+        version="0.2.5",
         docs_url="/api/docs",
         redoc_url=None,
         lifespan=lifespan,
@@ -141,8 +141,23 @@ def create_app(role: str = ROLE_ALL) -> FastAPI:
 
     @app.middleware("http")
     async def authenticate_public_mutations(request: Request, call_next):
-        """Apply one mutation policy to every public write route."""
-        if request.method not in {"GET", "HEAD", "OPTIONS"} and not request.url.path.startswith("/internal/"):
+        """Apply one mutation policy to every public write route.
+
+        Internal storage routes answer 404 to any request that fails the
+        internal-token check: the cluster ingress disables server-snippet
+        annotations, so edge-level /internal/ isolation must be reproduced at
+        the application boundary (publicly indistinguishable from a missing
+        route).
+        """
+        path = request.url.path
+        if path.startswith("/internal/"):
+            expected_token = settings.internal_api_token
+            if not expected_token:
+                return JSONResponse(status_code=503, content={"detail": "Internal storage API is disabled"})
+            supplied_token = request.headers.get("x-tracescope-internal-token")
+            if supplied_token is None or not hmac.compare_digest(supplied_token, expected_token):
+                return JSONResponse(status_code=404, content={"detail": "Not Found"})
+        if request.method not in {"GET", "HEAD", "OPTIONS"} and not path.startswith("/internal/"):
             expected = settings.api_key
             supplied = request.headers.get("x-api-key")
             if expected and (supplied is None or not hmac.compare_digest(supplied, expected)):
