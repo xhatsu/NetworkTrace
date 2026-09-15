@@ -102,9 +102,9 @@ export type Anomaly = {
   };
   blast_radius?: {
     root_service: string;
-    direct_callers: string[];
-    indirect_callers: string[];
-    affected_principals: string[];
-    affected_operations: string[];
+    direct_callers: Array<string | { name: string; [key: string]: any }>;
+    indirect_callers: Array<string | { name: string; [key: string]: any }>;
+    affected_principals: Array<string | { name: string; [key: string]: any }>;
+    affected_operations: Array<string | { name: string; [key: string]: any }>;
   };
 };

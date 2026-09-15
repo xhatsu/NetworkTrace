@@ -168,3 +168,9 @@ Ingress path routing rules
       {{- end }}
 {{- end }}
 
+{{- define "tracescope.elasticsearchUrl" -}}
+{{- $es := default (dict) .Values.elasticsearch -}}
+{{- if $es.url -}}
+{{- $es.url -}}
+{{- end -}}
+{{- end -}}

@@ -37,7 +37,7 @@ spec:
       # Schema ownership is serialized before application traffic starts.
       initContainers:
         - name: migrate
-          image: xhatsu101/tracescope:app-0.2.0
+          image: xhatsu101/tracescope:app-0.2.6
           imagePullPolicy: IfNotPresent
           command: ["python", "-m", "backend.cli", "migrate"]
           envFrom:
@@ -65,7 +65,7 @@ spec:
               mountPath: /tmp
       containers:
         - name: api
-          image: xhatsu101/tracescope:app-0.2.0
+          image: xhatsu101/tracescope:app-0.2.6
           imagePullPolicy: IfNotPresent
           ports:
             - name: http
@@ -117,7 +117,7 @@ spec:
               mountPath: /tmp
         # Derivations stay beside the API deployment for an intentionally simple single-worker cadence.
         - name: analytics-worker
-          image: xhatsu101/tracescope:app-0.2.0
+          image: xhatsu101/tracescope:app-0.2.6
           imagePullPolicy: IfNotPresent
           command: ["python", "-m", "backend.worker"]
           args: ["--interval", "60"]

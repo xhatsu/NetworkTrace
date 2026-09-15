@@ -1,0 +1,40 @@
+version: "3.8"
+
+services:
+  elasticsearch:
+    image: docker.elastic.co/elasticsearch/elasticsearch:7.17.24
+    container_name: tracescope-elasticsearch
+    environment:
+      - discovery.type=single-node
+      - "ES_JAVA_OPTS=-Xms256m -Xmx512m"
+      - xpack.security.enabled=false
+      - xpack.monitoring.enabled=false
+    ports:
+      - "9200:9200"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -s http://localhost:9200/_cluster/health | grep -q 'status'"]
+      interval: 4s
+      timeout: 4s
+      retries: 15
+
+  apm-server:
+    image: docker.elastic.co/apm/apm-server:7.17.24
+    container_name: tracescope-apm-server
+    depends_on:
+      elasticsearch:
+        condition: service_healthy
+    command: >
+      apm-server -e
+      --strict.perms=false
+      -E apm-server.host=0.0.0.0:8200
+      -E apm-server.rum.enabled=true
+      -E output.elasticsearch.hosts=['http://elasticsearch:9200']
+      -E setup.template.enabled=true
+      -E logging.level=info
+    ports:
+      - "8200:8200"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -s http://localhost:8200/ | grep -q 'status'"]
+      interval: 4s
+      timeout: 4s
+      retries: 15

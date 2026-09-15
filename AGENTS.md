@@ -15,7 +15,7 @@
   - Serves fast analytics dashboards via FastAPI and an interactive React/TypeScript frontend.
 - **Storage Invariant**: OTel trace data from application services is retained in Elasticsearch. ClickHouse persistence is reserved strictly for **host/probe agent trace data** (`OTEL_CLICKHOUSE_ONLY_AGENT_TRACES=true`), preventing duplicate storage expansion. Ingest endpoints acknowledge OTel payloads without writing them to ClickHouse.
 - **Root Directory**: `/home/ubuntu/Viettel/OtelTrace`
-- **Current Database**: ClickHouse (active database `tracescope` on `127.0.0.1:8123`, managed via `backend/clickhouse_migrations/001_initial.sql`). All SQLite artifacts (legacy `data/tracescope.db`, `data/benchmark-2m.db`, `backend/migrations/*.sql`, the migration script) were purged on 2026-09-11; ClickHouse is the sole persistence layer with no local fallback archive.
+- **Current Database**: ClickHouse (`127.0.0.1:8123`) for self-hosted local testbed with transparent **Elasticsearch / ELK database query migration** (`OTEL_STORAGE_BACKEND=elasticsearch` or `OTEL_ES_URL`). In target environments where trace data is stored in Elasticsearch, TraceScope queries ELK directly via `ElasticsearchTraceRepository`, while gracefully falling back to ClickHouse for local offline testing.
 - **Active Dashboard Port**: `0.0.0.0:30102` (lifecycle-script default and current listener).
 - **NetworkTracing Hub Port**: `0.0.0.0:30102` (OTLP / Ingest Hub in `~/Viettel/NetworkTracing`).
 - **Ingest NodePort**: `http://<node-ip>:30103/api/ingest` (Plain HTTP / non-SSL NodePort entrypoint for legacy C++ shippers such as `nt-ship-cpp` / `nt-sniff-cpp`; verified on public node `129.150.59.233:30103`).
@@ -104,7 +104,11 @@
   - `Services` (`/services`, `/services/:name`): Service catalog, operation percentiles, caller graphs, instances.
   - `Principals` (`/principals`, `/principals/:name`): Identity behavior explorer, target services, operations, callers, and hourly activity profiles.
   - `Traces` (`/traces`, `/traces/:id`): Trace explorer with filters and multi-tier interactive waterfall visualization.
-  - `User Intelligence`: `Users` (`/users`, `/users/:principal`), `User Changes` (`/user-changes`), `User Graph` (`/user-graph`), and `User Analytics` (`/user-analytics`). Existing pages retain their service-centric workflows and expose contextual user cross-links.
+  - `User Intelligence`:
+    - `Users` (`/users`, `/users/:principal`): Searchable principal inventory and evidence-rich credential profile.
+    - `User Changes` (`/user-changes`): Redesigned with Agent Fleet style Global Graph Dashboard (event velocity & risk score dual-axis AreaChart, severity breakdown, behavioral drift categories timeline, top flagged principals ranking, and 7-questions explainability drawer).
+    - `User Graph` (`/user-graph`): Redesigned with Agent Fleet style Detailed Graph Dashboard (request invocations & call share AreaChart, identity ingress vs target fan-out dynamics, edge drift distribution, relationship matrix table, and classic topology canvas toggle).
+    - `User Analytics` (`/user-analytics`): Multi-dimensional identity analytics (active, changed, shared credentials, source diversity, broadest access).
   - `Infrastructure`: `Agent Fleet` (`/agent-stats`) and `Agent Drilldown` (`/agent-stats/:node`) with interactive time-series dashboards (throughput kbps & ev/s, drop rates, pinned CPU core & RSS memory, queue backpressure, flow volume, and process limits).
   - Global Search in header: Search services, principals, or jump directly to trace waterfall by ID.
 
@@ -265,13 +269,18 @@
 ## 6. Helm Chart Design & Topology Modes (`deploy/helm/tracescope/`)
 
 - **Production Helm Chart**:
-  - Located at `deploy/helm/tracescope/` with `Chart.yaml` (v0.2.0), comprehensive `values.yaml`, and modular templates.
-  - App pod named `tracescope-app-0` (StatefulSet `tracescope-app`), rendered with simplified `values.yaml` `app.image:` configuring `migrate`, `api`, and `analytics-worker` in one place.
-  - Supports full **Distributed Mode** and **Consolidated / Merged Modes**:
+  - Located at `deploy/helm/tracescope/` with `Chart.yaml` (v0.2.6), comprehensive `values.yaml`, and modular templates.
+  - App pod named `tracescope-app-0` (StatefulSet `tracescope-app`), rendered with simplified `values.yaml` `app.image:` configuring `migrate`, `api`, and `analytics-worker` in one place with image tag `app-0.2.6`.
+  - Ingestion workload runs `ingest-0.2.6` with HPA (3–12 replicas).
+  - Supports full **Distributed Mode**, **Consolidated / Merged Modes**, and **Elasticsearch / ELK Mode**:
     - **Default Managed Topology (3-Tier)**: `ui.enabled: false` (UI merged into API) and `agentStats.enabled: false` (agent telemetry merged into API). Reduces deployment overhead from 5 workloads (9–21 pods) down to 3 workloads (5 pods: ClickHouse, Storage API+UI+Worker, and Ingest HPA pool).
     - **Full Distributed Mode**: Enable `ui.enabled: true` and `agentStats.enabled: true` for independent scaling pools.
     - **External ClickHouse Mode**: `clickhouse.enabled: false` connects to external ClickHouse clusters via `clickhouse.host` and `clickhouse.password`.
-  - **Verification**: Verified via `helm lint` (0 errors) and `helm template` across all topology permutation cases. Tested `backend.main:app` with `TestClient` confirming HTTP 200 for `/`, `/api/v1/overview`, and `/api/agent/stats`.
+    - **Elasticsearch / ELK Mode**: `storage.backend: elasticsearch` routes application trace queries directly to Elasticsearch/ELK clusters (`elasticsearch.url`, `elasticsearch.index`, `elasticsearch.apiKey`), while retaining host/agent telemetry in ClickHouse.
+  - **Docker Images Published**:
+    - `xhatsu101/tracescope:app-0.2.6` (digest: `sha256:63ae3efc8c2ae7fddba3082fff2d29f0e6c0e9ae1d1c1726a2f9529c85a4a8cf`)
+    - `xhatsu101/tracescope:ingest-0.2.6` (digest: `sha256:11e96722ca50c919ccebebeadece3c458c7dbc58670facb6b314ea8166e9b861`)
+  - **Verification**: Verified via `helm lint` (0 errors) and `helm template` across all topology permutation cases. Docker containers verified with smoke tests (`APP_SMOKE_OK`, `INGEST_SMOKE_OK`).
 
 ---
 
@@ -358,4 +367,33 @@
 - **Verification**:
   - 123/123 tests passed cleanly (`123 passed in 260.88s`).
   - Verified 0 hits on secret leak scan across all Git history.
+
+---
+
+## 11. Overview Fix & User-Centric Anomalies Overhaul (2026-09-15)
+
+- **Overview Page & API Health**:
+  - Root cause of broken Overview page resolved: `filters_model` in `backend/app/application.py` had rigid `start: datetime, end: datetime` requirements with no defaults and no parameter alias matching frontend's `from`/`to`, throwing HTTP 422 `Field required`.
+  - Added `_parse_time_param` to parse ISO strings, epoch milliseconds, epoch seconds, and datetimes, with rolling 3h defaults.
+  - Storage repository dashboard queries (`dashboard_summary`, `dashboard_series`, `rankings`, `heatmap`) redirected to live `metric_buckets` and `traces` in ClickHouse instead of legacy empty tables.
+  - Added `_detect_clickhouse_host()` probe in `backend/config.py` to auto-discover ClickHouse on local or cluster IPs.
+  - Enhanced `queryString` in `frontend/src/api.ts` to output `start`, `from`, `end`, and `to`.
+  - Added defensive fallback default in `frontend/src/pages/Overview.tsx` for `summary.data`.
+- **User-Centric Anomalies Overhaul**:
+  - `frontend/src/pages/Anomalies.tsx`:
+    - Summary KPI cards: Total Findings, Identity-Centric Findings, Impacted Users count, Top Offending Identity with direct link to user profile.
+    - Perspective switcher: `All Findings` | `User & Identity Centric` (cyan-accented) | `Service & Fleet` (violet-accented).
+    - Real-time search filter across user, IP, service, operation, or detector type.
+    - Table column: Prominently attributes identities with clickable user badge linking to `/users/:user` (with User icon and external link) and Source IP badge.
+    - Anomaly Detail Page: Hero "User Intelligence & Identity Context" card with user investigation action buttons, and enhanced "Related Users" panel with traffic share bars and behavioral changes flags.
+    - Fixed Minified React error #31 by creating `getEntityName` to safely parse both string and object `{name, requests, error_rate}` shapes in `blast_radius.affected_principals` and `direct_callers`.
+- **Validation**:
+  - Playwright Chromium Real Browser Test Suite (`python3 backend/scripts/test_pages_playwright.py`): All 15/15 real browser pages passed in headless Chromium with 0 unhandled JS errors, 0 failed API requests, and 0 ErrorState renders.
+  - Pytest Suite (`.venv/bin/python -m pytest tests/ -q`): All 139/139 unit and integration tests passed cleanly in 130s.
+- **Kubernetes Deployment Invariants & Parity**:
+  - `deploy/docker/Dockerfile`: Multi-stage build (`ui-builder` -> `api`, `ingest`, `agent-stats`, `worker`) tested with 100% clean TypeScript/Vite compilation.
+  - In Kubernetes, `OTEL_CLICKHOUSE_HOST` is supplied via `tracescope-config` ConfigMap as `tracescope-clickhouse`. `backend/config.py` preserves explicit environment variables with zero probe delay.
+  - `deploy/k8s/validate_manifests.py`: 17 documents across 10 resource kinds verified (0 errors).
+  - Helm chart `deploy/helm/tracescope`: `helm lint` passes cleanly with `values-secrets.yaml`, and `helm template` renders valid Kubernetes manifests.
+  - Strictly adherence to the constraint: never execute `kubectl` command.
 

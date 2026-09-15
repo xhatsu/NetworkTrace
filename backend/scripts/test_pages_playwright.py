@@ -7,11 +7,12 @@ and captures any unhandled JavaScript exceptions (pageerror) or React render cra
 import sys
 import time
 import urllib.request
+import os
 import json
 import shutil
 from playwright.sync_api import sync_playwright
 
-BASE_URL = "http://127.0.0.1:30102"
+BASE_URL = os.environ.get("BASE_URL", "http://127.0.0.1:30102")
 
 def get_json(url):
     try:
@@ -91,6 +92,7 @@ def main():
             page = context.new_page()
             page_errors = []
             console_errors = []
+            api_errors = []
 
             # Attach listeners
             page.on("pageerror", lambda err, errs=page_errors: errs.append(str(err)))
@@ -98,6 +100,12 @@ def main():
                 "console",
                 lambda msg, errs=console_errors: errs.append(msg.text)
                 if msg.type == "error" and not any(ign in msg.text.lower() for ign in ["favicon", "404"])
+                else None
+            )
+            page.on(
+                "response",
+                lambda r, errs=api_errors: errs.append(f"{r.url} -> {r.status}")
+                if r.status >= 400 and not any(ign in r.url for ign in ["favicon", "404"])
                 else None
             )
 
@@ -122,6 +130,16 @@ def main():
                 if page_errors:
                     status_str = "FAIL"
                     fail_reason = "; ".join(page_errors)
+
+                # Check for failed API calls
+                if api_errors:
+                    status_str = "FAIL"
+                    fail_reason = "Failed API requests: " + "; ".join(api_errors)
+
+                # Check for ErrorState rendered inside page
+                if "Unable to load estate metrics" in root_html or "Field required" in root_html:
+                    status_str = "FAIL"
+                    fail_reason = "Rendered ErrorState with failed data query"
 
                 # Check HTTP response
                 if resp and resp.status != 200:

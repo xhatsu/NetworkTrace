@@ -16,6 +16,14 @@ data:
   OTEL_CLICKHOUSE_DATABASE: "tracescope"
   OTEL_CLICKHOUSE_USER: "default"
   OTEL_CLICKHOUSE_SECURE: "false"
+  # --- storage backend & elasticsearch integration -------------------------
+  # Set to "elasticsearch" to query ELK directly for application trace data.
+  OTEL_STORAGE_BACKEND: "clickhouse"
+  OTEL_CLICKHOUSE_ONLY_AGENT_TRACES: "true"
+  OTEL_ES_URL: ""
+  OTEL_ES_INDEX: "traces-apm*,apm-*,traces-*"
+  OTEL_ES_VERIFY_TLS: "true"
+  OTEL_ES_TIMEOUT: "10"
   # --- schema ownership ----------------------------------------------------
   # The app init container overrides this to true. Runtime containers leave it
   # false so independently rolled pods cannot race ClickHouse schema changes.

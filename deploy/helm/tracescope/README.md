@@ -46,6 +46,17 @@ helm install tracescope deploy/helm/tracescope \
   --set clickhouse.password="secret"
 ```
 
+### 4. Elasticsearch / ELK Storage Backend Mode
+In environments where trace data is stored in Elasticsearch / ELK, query ELK directly while retaining host/agent traces in ClickHouse:
+```sh
+helm install tracescope deploy/helm/tracescope \
+  --set storage.backend=elasticsearch \
+  --set elasticsearch.enabled=true \
+  --set elasticsearch.url="http://elasticsearch.logging.svc:9200" \
+  --set elasticsearch.index="traces-apm*,apm-*,traces-*" \
+  --set elasticsearch.apiKey="<api-key>"
+```
+
 ---
 
 ## Configuration Reference
@@ -54,14 +65,23 @@ helm install tracescope deploy/helm/tracescope \
 | :--- | :--- | :--- |
 | `clickhouse.enabled` | Deploy bundled ClickHouse StatefulSet | `true` |
 | `clickhouse.persistence.size` | Storage volume size for ClickHouse | `5Gi` |
+| `storage.backend` | Query storage backend (`clickhouse` or `elasticsearch`) | `clickhouse` |
+| `storage.clickhouseOnlyAgentTraces` | Retain ClickHouse strictly for agent trace data | `true` |
+| `elasticsearch.enabled` | Enable Elasticsearch integration | `false` |
+| `elasticsearch.url` | Elasticsearch HTTP/HTTPS cluster URL | `""` |
+| `elasticsearch.index` | Elasticsearch index pattern for trace queries | `traces-apm*,apm-*,traces-*` |
+| `elasticsearch.apiKey` | Elasticsearch API key for authentication | `""` |
+| `elasticsearch.verifyTls` | Verify Elasticsearch TLS certificates | `true` |
+| `elasticsearch.timeout` | Elasticsearch HTTP request timeout (seconds) | `10` |
 | `app.replicaCount` | Storage & Worker replicas (must remain 1) | `1` |
-| `ingest.replicaCount` | Initial replicas for trace ingestion | `3` |
+| `app.image.tag` | Unified application image tag | `app-0.2.6` |
+| `ingest.replicaCount` | Initial replicas for trace ingestion | `2` |
+| `ingest.image.tag` | Trace ingestion image tag | `ingest-0.2.6` |
 | `ingest.autoscaling.enabled`| Enable HPA for ingestion | `true` (3–12 pods) |
 | `agentStats.enabled` | Deploy dedicated agent-stats workload | `false` |
 | `ui.enabled` | Deploy dedicated Nginx UI workload | `false` |
 | `ingress.enabled` | Create unified Ingress | `true` |
-| `ingress.serverSnippet.enabled` | Enable nginx `server-snippet` annotation (disable on hardened clusters) | `true` |
+| `ingress.serverSnippet.enabled` | Enable nginx `server-snippet` annotation (disable on hardened clusters) | `false` |
 | `ingress.host` | Public Ingress hostname | `trace.n2d.id.vn` |
 | `secrets.existingSecret` | Name of pre-created secret | `""` |
 | `secrets.internalApiToken` | Token for edge-to-storage internal communication | Auto-configured |
-

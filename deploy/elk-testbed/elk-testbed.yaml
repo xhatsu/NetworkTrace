@@ -1,0 +1,191 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: tmp-apm-server-config
+  namespace: tmp-elk
+data:
+  apm-server.yml: |
+    apm-server:
+      host: "0.0.0.0:8200"
+      rum:
+        enabled: true
+      kibana:
+        enabled: false
+    setup.template.enabled: true
+    output.elasticsearch:
+      hosts: ["http://tmp-elk-svc:9200"]
+    queue:
+      mem:
+        events: 256
+        flush.min_events: 64
+        flush.timeout: 1s
+    logging.level: info
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: tmp-elk-svc
+  namespace: tmp-elk
+spec:
+  type: ClusterIP
+  selector:
+    app: tmp-elk
+  ports:
+    - name: http
+      port: 9200
+      targetPort: http
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: tmp-elk
+  namespace: tmp-elk
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: tmp-elk
+  template:
+    metadata:
+      labels:
+        app: tmp-elk
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+        fsGroup: 1000
+      containers:
+        - name: elasticsearch
+          image: docker.elastic.co/elasticsearch/elasticsearch:7.17.24
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 9200
+          env:
+            - name: discovery.type
+              value: single-node
+            - name: cluster.name
+              value: tracescope-elk-testbed
+            - name: xpack.security.enabled
+              value: "false"
+            - name: xpack.monitoring.enabled
+              value: "false"
+            - name: ES_JAVA_OPTS
+              value: "-Xms256m -Xmx512m"
+          startupProbe:
+            httpGet:
+              path: /_cluster/health
+              port: http
+            periodSeconds: 5
+            failureThreshold: 60
+          readinessProbe:
+            httpGet:
+              path: /_cluster/health
+              port: http
+            periodSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /_cluster/health
+              port: http
+            periodSeconds: 20
+          resources:
+            requests:
+              cpu: 200m
+              memory: 512Mi
+            limits:
+              cpu: "1"
+              memory: 1Gi
+          volumeMounts:
+            - name: data
+              mountPath: /usr/share/elasticsearch/data
+      volumes:
+        - name: data
+          emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: apm-server
+  namespace: tmp-elk
+spec:
+  type: ClusterIP
+  selector:
+    app: tmp-apm-server
+  ports:
+    - name: http
+      port: 8200
+      targetPort: http
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: tmp-apm-server
+  namespace: tmp-elk
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: tmp-apm-server
+  template:
+    metadata:
+      labels:
+        app: tmp-apm-server
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+        fsGroup: 1000
+      containers:
+        - name: apm-server
+          image: docker.elastic.co/apm/apm-server:7.17.24
+          imagePullPolicy: IfNotPresent
+          args:
+            - -e
+            - --strict.perms=false
+            - -c
+            - /usr/share/apm-server/apm-server.yml
+          ports:
+            - name: http
+              containerPort: 8200
+          startupProbe:
+            httpGet:
+              path: /
+              port: http
+            periodSeconds: 5
+            failureThreshold: 60
+          readinessProbe:
+            httpGet:
+              path: /
+              port: http
+            periodSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /
+              port: http
+            periodSeconds: 20
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+          volumeMounts:
+            - name: config
+              mountPath: /usr/share/apm-server/apm-server.yml
+              subPath: apm-server.yml
+              readOnly: true
+            - name: data
+              mountPath: /usr/share/apm-server/data
+      volumes:
+        - name: config
+          configMap:
+            name: tmp-apm-server-config
+        - name: data
+          emptyDir: {}

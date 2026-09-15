@@ -10,11 +10,25 @@ from dataclasses import dataclass
 from pathlib import Path
 
 
+def _detect_clickhouse_host() -> str:
+    env_host = os.getenv("OTEL_CLICKHOUSE_HOST")
+    if env_host:
+        return env_host
+    import socket
+    for candidate in ("127.0.0.1", "10.105.101.253", "10.244.0.118"):
+        try:
+            with socket.create_connection((candidate, 8123), timeout=0.2):
+                return candidate
+        except (OSError, socket.timeout):
+            pass
+    return "127.0.0.1"
+
+
 @dataclass(frozen=True)
 class Settings:
     # Namespace for side files (policy.json); durable telemetry lives in ClickHouse.
     data_dir: Path = Path(os.getenv("OTEL_DATA_DIR", str(Path(__file__).resolve().parent.parent / "data")))
-    clickhouse_host: str = os.getenv("OTEL_CLICKHOUSE_HOST", "127.0.0.1")
+    clickhouse_host: str = _detect_clickhouse_host()
     clickhouse_port: int = int(os.getenv("OTEL_CLICKHOUSE_PORT", "8123"))
     clickhouse_database: str = os.getenv("OTEL_CLICKHOUSE_DATABASE", "tracescope")
     clickhouse_user: str = os.getenv("OTEL_CLICKHOUSE_USER", "default")
@@ -32,6 +46,15 @@ class Settings:
     clickhouse_only_agent_traces: bool = (
         os.getenv("OTEL_CLICKHOUSE_ONLY_AGENT_TRACES", "true").lower() == "true"
     )
+    # Storage Backend: 'clickhouse' (default for local testbed) or 'elasticsearch' / 'elk'
+    storage_backend: str = os.getenv("OTEL_STORAGE_BACKEND", "clickhouse").lower()
+    elasticsearch_url: str = os.getenv("OTEL_ES_URL", os.getenv("ELASTICSEARCH_URL", "")).rstrip("/")
+    elasticsearch_index: str = os.getenv("OTEL_ES_INDEX", "traces-apm*")
+    elasticsearch_api_key: str = os.getenv("OTEL_ES_API_KEY", "")
+    elasticsearch_user: str = os.getenv("OTEL_ES_USER", "")
+    elasticsearch_password: str = os.getenv("OTEL_ES_PASSWORD", "")
+    elasticsearch_verify_tls: bool = os.getenv("OTEL_ES_VERIFY_TLS", "false").lower() == "true"
+    elasticsearch_timeout: float = float(os.getenv("OTEL_ES_TIMEOUT", "15.0"))
     demo_mode: bool = os.getenv("OTEL_DEMO_MODE", "true").lower() == "true"
     cors_origins: tuple[str, ...] = tuple(
         item.strip() for item in os.getenv(

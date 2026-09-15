@@ -6,10 +6,18 @@ export function queryString(
 ) {
   const p = new URLSearchParams();
   Object.entries({ ...filters, ...extra }).forEach(([k, v]) => {
-    const key = k === "start" ? "from" : k === "end" ? "to" : k;
-    if (v) {
-      const value = (k === "start" || k === "end") ? String(Date.parse(v)) : v;
-      p.set(key, value);
+    if (v !== undefined && v !== null && v !== "") {
+      if (k === "start" || k === "from") {
+        const val = typeof v === "string" && isNaN(Number(v)) ? String(Date.parse(v)) : String(v);
+        p.set("start", val);
+        p.set("from", val);
+      } else if (k === "end" || k === "to") {
+        const val = typeof v === "string" && isNaN(Number(v)) ? String(Date.parse(v)) : String(v);
+        p.set("end", val);
+        p.set("to", val);
+      } else {
+        p.set(k, String(v));
+      }
     }
   });
   return p.toString();

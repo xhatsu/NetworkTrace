@@ -2,12 +2,18 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate, useParams } from "react-router-dom";
 import {
-  Activity, ArrowLeft, ArrowRight, BarChart3, Check, Clock3, ExternalLink,
-  GitCompareArrows, KeyRound, Network, Search, Server, ShieldQuestion,
-  Workflow, X,
+  Activity, AlertOctagon, AlertTriangle, ArrowLeft, ArrowRight, BarChart3,
+  Check, CheckCircle2, ChevronRight, Clock3, Cpu, Database, ExternalLink,
+  Filter, Flame, GitCompareArrows, KeyRound, Layers, Network, Radio,
+  RefreshCw, Search, Server, Shield, ShieldAlert, ShieldQuestion,
+  SlidersHorizontal, Sparkles, TrendingDown, TrendingUp, Users, Workflow, X, Zap,
 } from "lucide-react";
+import {
+  AreaChart, Area, LineChart, Line, BarChart, Bar,
+  XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid, Legend,
+} from "recharts";
 import { api, queryString } from "../api";
-import { ErrorState, Loading, MetricCard, Page, Panel, n } from "../components";
+import { ErrorState, Loading, MetricCard, Page, Panel, chartTooltip, n } from "../components";
 import { useFilters } from "../App";
 
 export type UserChange = {
@@ -127,15 +133,16 @@ export function UserDetailPage() {
 function SimpleTable({title,rows,headers}:{title:string;rows:Distribution[];headers:string[]}){return <Panel title={title}><div className="overflow-auto scrollbar"><table className="w-full text-xs"><thead><tr>{headers.map(h=><th className="table-head px-3 py-2" key={h}>{h}</th>)}</tr></thead><tbody>{rows.map(r=><tr className="border-t border-[rgba(255,255,255,0.08)] hover:bg-white/[0.04]" key={r.value}><td className="px-3 py-2 font-mono text-violet-300">{r.value}</td><td className="px-3 text-[#c4bdd9]">{formatDate(r.first_seen)}</td><td className="px-3 text-[#c4bdd9]">{formatDate(r.last_seen)}</td><td className="px-3 font-mono text-[#f5f3fa]">{n(r.requests,0)}</td></tr>)}</tbody></table></div></Panel>}
 function ChangeCard({change,onOpen}:{change:UserChange;onOpen?:()=>void}){return <button onClick={onOpen} className="rounded-lg border border-[rgba(255,255,255,0.12)] bg-white/[0.04] p-3 text-left hover:border-violet-500/50 hover:bg-white/[0.07] transition"><div className="flex items-center justify-between"><span className={`rounded border px-2 py-0.5 text-[10px] font-semibold uppercase ${tone(change.severity)}`}>{label(change.change_type)}</span><span className="font-mono text-[10px] text-[#c4bdd9]">+{change.score}</span></div><div className="mt-2 font-mono text-xs text-violet-300 font-medium">{change.principal_name}</div><p className="mt-1 text-xs text-[#f5f3fa]">{change.reason?.summary||`${change.old_value||"historical behavior"} → ${change.new_value||"new observation"}`}</p><div className="mt-2 text-[10px] text-[#9e96b8]">{formatDate(change.detected_at)} · {change.status}</div></button>}
 
-export function UserChangesPage(){
-  const {filters}=useFilters();
-  const nav=useNavigate();
-  const qc=useQueryClient();
-  const params=new URLSearchParams(location.search);
-  const [principal,setPrincipal]=useState(params.get("principal")||"");
-  const [type,setType]=useState("");
-  const [severity,setSeverity]=useState("");
-  const [scope,setScope]=useState<"all"|"window">("all");
+export function UserChangesPage() {
+  const { filters } = useFilters();
+  const nav = useNavigate();
+  const qc = useQueryClient();
+  const params = new URLSearchParams(location.search);
+  const [principal, setPrincipal] = useState(params.get("principal") || "");
+  const [type, setType] = useState("");
+  const [severity, setSeverity] = useState("");
+  const [scope, setScope] = useState<"all" | "window">("all");
+  const [viewMode, setViewMode] = useState<"graphs" | "list">("graphs");
   const [expandedId, setExpandedId] = useState<number | null>(null);
   const [activeTab, setActiveTab] = useState<"changes" | "incidents">("changes");
   const [reviewTarget, setReviewTarget] = useState<UserChange | null>(null);
@@ -143,18 +150,21 @@ export function UserChangesPage(){
   const [reviewReason, setReviewReason] = useState("");
   const [reviewExpiry, setReviewExpiry] = useState("never");
 
-  const qs=scope==="window"
-    ? queryString(filters,{principal:principal||undefined,change_type:type||undefined,severity:severity||undefined})
-    : queryString({timezone:filters.timezone,comparison:filters.comparison} as any,{principal:principal||undefined,change_type:type||undefined,severity:severity||undefined});
-  const q=useQuery({
-    queryKey:["user-changes",qs,scope],
-    queryFn:()=>api<{items:UserChange[];count:number;total_unfiltered?:number;fallback_applied?:boolean}>(`/api/v1/user-changes?${qs}&limit=500`)
+  const qs = scope === "window"
+    ? queryString(filters, { principal: principal || undefined, change_type: type || undefined, severity: severity || undefined })
+    : queryString({ timezone: filters.timezone, comparison: filters.comparison } as any, { principal: principal || undefined, change_type: type || undefined, severity: severity || undefined });
+
+  const q = useQuery({
+    queryKey: ["user-changes", qs, scope],
+    queryFn: () => api<{ items: UserChange[]; count: number; total_unfiltered?: number; fallback_applied?: boolean }>(`/api/v1/user-changes?${qs}&limit=500`),
+    refetchInterval: 30_000,
   });
 
   const incidentsQuery = useQuery({
     queryKey: ["incidents", qs],
     queryFn: () => api<{ items: IncidentItem[]; count: number }>(`/api/v1/incidents?${qs}&limit=100`),
     enabled: activeTab === "incidents",
+    refetchInterval: 30_000,
   });
 
   async function submitReview(changeId: number, action: "expected" | "investigate" | "data_quality", reasonText?: string) {
@@ -176,240 +186,1231 @@ export function UserChangesPage(){
     qc.invalidateQueries({ queryKey: ["incidents"] });
   }
 
-  return <Page eyebrow="User Intelligence" title="User Activity Changes & Incidents" description="Observed application principal deviations, bounded incidents, and explainable change events.">
-    {q.data?.fallback_applied && (
-      <div className="card mb-4 flex items-center justify-between border-amber-500/40 bg-amber-500/15 p-3 text-xs text-amber-200">
-        <span>Notice: No changes detected in the selected time window. Showing all {q.data.total_unfiltered || q.data.count} historical changes across the estate.</span>
-        <button onClick={()=>setScope("all")} className="btn border-amber-500/50 text-amber-200">View All Time</button>
-      </div>
-    )}
+  const items = q.data?.items ?? [];
+  const highCritCount = items.filter((c) => c.severity === "high" || c.severity === "critical").length;
+  const uniqueUsers = new Set(items.map((c) => c.principal_name)).size;
+  const avgScore = items.length ? Math.round(items.reduce((s, c) => s + (c.score || 0), 0) / items.length) : 0;
+  const maxScore = items.length ? Math.max(...items.map((c) => c.score || 0)) : 0;
 
-    {/* Review Modal for Expected Change */}
-    {reviewTarget && (
-      <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-xs p-4">
-        <div className="card w-full max-w-md border-cyan-500/30 bg-[#161424] p-5 text-xs shadow-2xl">
-          <div className="flex items-center justify-between pb-3 border-b border-white/10">
-            <b className="text-sm text-cyan-300">Mark Behavior as Expected</b>
-            <button onClick={() => setReviewTarget(null)} className="text-[#9e96b8] hover:text-white"><X size={16} /></button>
+  // Compute time-series buckets for the Global Anomaly Graph (Fleet Style)
+  const chartPoints = useMemo(() => {
+    if (!items.length) return [];
+    const sorted = [...items].sort((a, b) => a.detected_at - b.detected_at);
+    const minTs = sorted[0].detected_at;
+    const maxTs = sorted[sorted.length - 1].detected_at;
+    const span = Math.max(60_000, maxTs - minTs);
+    const bucketCount = Math.min(24, Math.max(8, Math.ceil(span / (3600 * 1000))));
+    const bucketWidth = span / bucketCount;
+
+    const buckets = Array.from({ length: bucketCount }, (_, i) => {
+      const bTs = minTs + i * bucketWidth;
+      const d = new Date(bTs);
+      const timeLabel = `${d.toLocaleDateString("en-US", { month: "short", day: "numeric" })} ${d.toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit", hour12: false })}`;
+      return {
+        time: timeLabel,
+        timestamp: bTs,
+        eventCount: 0,
+        totalScore: 0,
+        criticalHigh: 0,
+        medium: 0,
+        low: 0,
+        newCaller: 0,
+        newTarget: 0,
+        newSource: 0,
+        dormant: 0,
+        newOp: 0,
+        firstSeen: 0,
+      };
+    });
+
+    for (const item of sorted) {
+      const idx = Math.min(bucketCount - 1, Math.max(0, Math.floor((item.detected_at - minTs) / bucketWidth)));
+      const b = buckets[idx];
+      b.eventCount += 1;
+      b.totalScore += (item.score || 0);
+      const sev = (item.severity || "").toLowerCase();
+      if (sev === "critical" || sev === "high") b.criticalHigh += 1;
+      else if (sev === "medium") b.medium += 1;
+      else b.low += 1;
+
+      const ct = item.change_type;
+      if (ct === "NEW_CALLER") b.newCaller += 1;
+      else if (ct === "NEW_TARGET") b.newTarget += 1;
+      else if (ct === "NEW_SOURCE_IP") b.newSource += 1;
+      else if (ct === "DORMANT_REACTIVATED") b.dormant += 1;
+      else if (ct === "NEW_OPERATION") b.newOp += 1;
+      else if (ct === "USERNAME_FIRST_SEEN") b.firstSeen += 1;
+    }
+    return buckets;
+  }, [items]);
+
+  // Ranked identities by behavioral anomaly volume & score
+  const topFlaggedPrincipals = useMemo(() => {
+    const counts: Record<string, { count: number; score: number; types: Set<string>; severity: string }> = {};
+    for (const item of items) {
+      const p = item.principal_name;
+      if (!counts[p]) counts[p] = { count: 0, score: 0, types: new Set(), severity: "low" };
+      counts[p].count += 1;
+      counts[p].score += (item.score || 0);
+      counts[p].types.add(item.change_type);
+      if (item.severity === "critical" || item.severity === "high") {
+        counts[p].severity = item.severity;
+      } else if (item.severity === "medium" && counts[p].severity !== "critical" && counts[p].severity !== "high") {
+        counts[p].severity = "medium";
+      }
+    }
+    return Object.entries(counts)
+      .map(([name, data]) => ({
+        name,
+        count: data.count,
+        score: data.score,
+        types: Array.from(data.types),
+        severity: data.severity,
+      }))
+      .sort((a, b) => b.score - a.score || b.count - a.count)
+      .slice(0, 6);
+  }, [items]);
+
+  return (
+    <Page
+      eyebrow="User Intelligence"
+      title="User Behavioral Anomalies"
+      description="Live identity-centric deviation metrics, multi-tiered drift timelines, explainability cards, and bounded credential risk."
+      actions={
+        <div className="flex flex-wrap items-center gap-2">
+          {/* View mode switcher */}
+          <div className="flex items-center rounded-lg border border-[rgba(255,255,255,0.12)] bg-white/[0.03] p-0.5">
+            <button
+              onClick={() => setViewMode("graphs")}
+              className={`flex items-center gap-1.5 rounded px-2.5 py-1 text-xs font-medium transition ${
+                viewMode === "graphs"
+                  ? "bg-cyan-500/20 text-cyan-300 border border-cyan-500/40 shadow-sm font-semibold"
+                  : "text-[#c4bdd9] hover:text-white"
+              }`}
+            >
+              <BarChart3 size={13} />
+              <span>Global Graphs</span>
+            </button>
+            <button
+              onClick={() => setViewMode("list")}
+              className={`flex items-center gap-1.5 rounded px-2.5 py-1 text-xs font-medium transition ${
+                viewMode === "list"
+                  ? "bg-violet-600 text-white shadow-sm font-semibold"
+                  : "text-[#c4bdd9] hover:text-white"
+              }`}
+            >
+              <Layers size={13} />
+              <span>Findings List</span>
+            </button>
           </div>
-          <div className="mt-3 space-y-3">
-            <div>
-              <label className="text-[11px] text-[#9e96b8]">Principal & Change</label>
-              <div className="font-mono text-white font-medium">{reviewTarget.principal_name} · {label(reviewTarget.change_type)}</div>
-            </div>
-            <div>
-              <label className="text-[11px] text-[#9e96b8]">Scope</label>
-              <select className="btn w-full mt-1 bg-white/[0.04] border-white/15 text-white" value={reviewScope} onChange={e => setReviewScope(e.target.value)}>
-                <option value="change_rule" className="bg-[#161424]">This specific entity & principal ({reviewTarget.new_value || reviewTarget.target_service || "rule"})</option>
-                <option value="target_service" className="bg-[#161424]">All operations on {reviewTarget.target_service || "target service"}</option>
-                <option value="principal" className="bg-[#161424]">Entire principal identity ({reviewTarget.principal_name})</option>
-              </select>
-            </div>
-            <div>
-              <label className="text-[11px] text-[#9e96b8]">Reason / Authorization context</label>
-              <textarea
-                className="w-full mt-1 rounded-lg border border-white/15 bg-white/[0.04] p-2 text-white placeholder:text-[#9e96b8] outline-none focus:border-cyan-400"
-                rows={3}
-                placeholder="e.g. Approved maintenance deployment, verified with service owner"
-                value={reviewReason}
-                onChange={e => setReviewReason(e.target.value)}
-              />
-            </div>
-            <div>
-              <label className="text-[11px] text-[#9e96b8]">Expiry</label>
-              <select className="btn w-full mt-1 bg-white/[0.04] border-white/15 text-white" value={reviewExpiry} onChange={e => setReviewExpiry(e.target.value)}>
-                <option value="never" className="bg-[#161424]">Permanent (no expiry)</option>
-                <option value="7d" className="bg-[#161424]">Expires in 7 days</option>
-                <option value="30d" className="bg-[#161424]">Expires in 30 days</option>
-              </select>
-            </div>
-          </div>
-          <div className="mt-5 flex justify-end gap-2 border-t border-white/10 pt-3">
-            <button onClick={() => setReviewTarget(null)} className="btn text-[#c4bdd9]">Cancel</button>
-            <button onClick={() => submitReview(reviewTarget.id, "expected")} className="btn bg-cyan-600 hover:bg-cyan-500 text-white font-medium border-cyan-400">Accept Expected Change</button>
-          </div>
-        </div>
-      </div>
-    )}
 
-    {/* Header Controls and Tabs */}
-    <div className="card mb-4 flex flex-wrap items-center justify-between gap-3 p-3">
-      <div className="flex items-center gap-2">
-        <div className="flex rounded-lg border border-[rgba(255,255,255,0.14)] bg-white/[0.04] p-0.5">
-          <button onClick={() => setActiveTab("changes")} className={`rounded-md px-3 py-1.5 text-xs font-semibold transition ${activeTab === "changes" ? "bg-cyan-500/20 text-cyan-300 border border-cyan-500/40 shadow-sm" : "text-[#c4bdd9] hover:text-white"}`}>Behavioral Changes ({q.data?.count || 0})</button>
-          <button onClick={() => setActiveTab("incidents")} className={`rounded-md px-3 py-1.5 text-xs font-semibold transition ${activeTab === "incidents" ? "bg-cyan-500/20 text-cyan-300 border border-cyan-500/40 shadow-sm" : "text-[#c4bdd9] hover:text-white"}`}>Bounded Incidents</button>
+          <button
+            onClick={() => {
+              q.refetch();
+              if (activeTab === "incidents") incidentsQuery.refetch();
+            }}
+            disabled={q.isFetching}
+            className="btn"
+            title="Refresh Behavioral Anomalies"
+          >
+            <RefreshCw size={13} className={q.isFetching ? "animate-spin" : ""} />
+            Refresh
+          </button>
         </div>
-        <div className="flex items-center rounded-lg border border-[rgba(255,255,255,0.14)] bg-white/[0.04] p-0.5">
-          <button onClick={()=>setScope("all")} className={`rounded-md px-2.5 py-1 text-xs font-medium transition ${scope==="all"?"bg-violet-600 text-white shadow-sm":"text-[#c4bdd9] hover:text-white"}`}>All Time ({q.data?.total_unfiltered ?? q.data?.count ?? 0})</button>
-          <button onClick={()=>setScope("window")} className={`rounded-md px-2.5 py-1 text-xs font-medium transition ${scope==="window"?"bg-violet-600 text-white shadow-sm":"text-[#c4bdd9] hover:text-white"}`}>Selected Window</button>
+      }
+    >
+      {/* Graceful empty window fallback banner */}
+      {q.data?.fallback_applied && (
+        <div className="card mb-4 flex items-center justify-between border-amber-500/40 bg-amber-500/15 p-3 text-xs text-amber-200">
+          <span>Notice: No changes detected in the selected time window. Showing all {q.data.total_unfiltered || q.data.count} historical changes across the estate.</span>
+          <button onClick={() => setScope("all")} className="btn border-amber-500/50 text-amber-200">View All Time</button>
         </div>
-      </div>
-      <div className="flex flex-wrap items-center gap-2">
-        <input className="min-w-44 rounded-lg border border-[rgba(255,255,255,0.14)] bg-white/[0.04] px-3 py-1.5 text-xs text-[#f5f3fa] placeholder:text-[#9e96b8] outline-none focus:border-cyan-400" placeholder="Filter by principal..." value={principal} onChange={e=>setPrincipal(e.target.value)}/>
-        <select className="btn bg-[rgba(255,255,255,0.04)] border-[rgba(255,255,255,0.14)] text-[#f5f3fa]" value={type} onChange={e=>setType(e.target.value)}>
-          <option value="" className="bg-[#1a172a]">All change types</option>
-          {["USERNAME_FIRST_SEEN","NEW_CALLER","NEW_SOURCE_IP","NEW_PRINCIPAL_ON_SOURCE","NEW_TARGET","NEW_OPERATION","NEW_RELATIONSHIP","DORMANT_REACTIVATED","UNUSUAL_TIME","CALLER_PRINCIPAL_SWITCH","OPERATION_MIX_SHIFT","TARGET_FANOUT_SURGE","SOURCE_FANOUT_SURGE","PRINCIPAL_RATE_SURGE","AUTH_FAILURE_BURST","FAILURE_THEN_SUCCESS","RELATIONSHIP_REAPPEARED","RELATIONSHIP_DISAPPEARED"].map(x=><option className="bg-[#1a172a]" key={x}>{x}</option>)}
-        </select>
-        <select className="btn bg-[rgba(255,255,255,0.04)] border-[rgba(255,255,255,0.14)] text-[#f5f3fa]" value={severity} onChange={e=>setSeverity(e.target.value)}>
-          <option value="" className="bg-[#1a172a]">Any importance</option>
-          {["high","medium","low"].map(x=><option className="bg-[#1a172a]" key={x}>{x}</option>)}
-        </select>
-      </div>
-    </div>
+      )}
 
-    {/* Tab 1: Behavioral Changes */}
-    {activeTab === "changes" && (
-      q.isLoading?<Loading/>:q.error?<ErrorState message={q.error.message}/>:<Panel title={`${q.data?.count||0} behavior changes`} subtitle="Click any event to inspect full 7-question explainability answers">
-        <div className="divide-y divide-[rgba(255,255,255,0.08)]">
-          {q.data?.items.map(c => {
-            const isExpanded = expandedId === c.id;
-            const r = c.reason || {};
-            return (
-              <div className={`p-4 transition hover:bg-white/[0.02] ${isExpanded ? "bg-white/[0.03]" : ""}`} key={c.id}>
-                <div className="grid gap-3 md:grid-cols-[110px_180px_1fr_auto] items-start cursor-pointer" onClick={() => setExpandedId(isExpanded ? null : c.id)}>
-                  <div className="font-mono text-[10px] text-[#9e96b8]">{new Date(c.detected_at).toLocaleString()}</div>
-                  <div>
-                    <span className={`rounded border px-2 py-0.5 text-[10px] font-semibold ${tone(c.severity)}`}>{label(c.change_type)}</span>
-                    <div className="mt-2 font-mono text-cyan-300 font-medium hover:underline" onClick={(e) => { e.stopPropagation(); nav(`/users/${encodeURIComponent(c.principal_name)}`); }}>{c.principal_name}</div>
-                  </div>
-                  <div className="text-xs">
-                    <b className="text-[#f5f3fa] text-sm">{r.what_changed || r.summary || c.new_value}</b>
-                    <div className="mt-1.5 flex flex-wrap gap-2 text-[#c4bdd9] text-[11px]">
-                      {c.caller_service && <span className="rounded bg-white/[0.05] px-1.5 py-0.5">Caller: <b className="text-emerald-300 font-normal">{c.caller_service}</b></span>}
-                      {c.source_ip && <span className="rounded bg-white/[0.05] px-1.5 py-0.5">Source: <b className="text-sky-300 font-normal">{c.source_ip}</b></span>}
-                      {c.target_service && <span className="rounded bg-white/[0.05] px-1.5 py-0.5">Target: <b className="text-violet-300 font-normal">{c.target_service}</b></span>}
-                      {c.operation && <span className="rounded bg-white/[0.05] px-1.5 py-0.5">Op: <b className="text-amber-300 font-normal">{c.operation}</b></span>}
-                    </div>
-                  </div>
-                  <div className="flex items-center gap-1.5" onClick={e => e.stopPropagation()}>
-                    <button title="Accept as expected change" className="btn text-xs border-cyan-500/40 text-cyan-300 hover:bg-cyan-500/20" onClick={() => setReviewTarget(c)}>Expected</button>
-                    <button title="Mark for deep investigation" className="btn text-xs border-amber-500/40 text-amber-300 hover:bg-amber-500/20" onClick={() => submitReview(c.id, "investigate")}>Investigate</button>
-                    <button title="Flag as data-quality issue" className="btn text-xs border-white/20 text-[#c4bdd9] hover:bg-white/10" onClick={() => submitReview(c.id, "data_quality")}>Data-Quality</button>
-                  </div>
-                </div>
-
-                {/* 7 Questions Explainability Drawer */}
-                {isExpanded && (
-                  <div className="mt-4 rounded-xl border border-cyan-500/25 bg-[#12101b] p-4 text-xs">
-                    <div className="mb-3 flex items-center justify-between border-b border-white/10 pb-2">
-                      <span className="font-semibold text-cyan-400">WHAT CHANGED COMPARED WITH NORMAL? (7-Question Explainability)</span>
-                      <span className="font-mono text-[10px] text-[#9e96b8]">Fingerprint: #{c.id} · Priority: {c.severity.toUpperCase()}</span>
-                    </div>
-                    <div className="grid gap-3 md:grid-cols-2">
-                      <div className="rounded-lg border border-white/10 bg-white/[0.02] p-3">
-                        <span className="text-[10px] uppercase font-bold text-cyan-300">1. What changed?</span>
-                        <div className="mt-1 text-white font-medium">{r.what_changed || r.summary || c.new_value}</div>
-                      </div>
-                      <div className="rounded-lg border border-white/10 bg-white/[0.02] p-3">
-                        <span className="text-[10px] uppercase font-bold text-cyan-300">2. Compared with what?</span>
-                        <div className="mt-1 text-[#c4bdd9]">{r.compared_with || `This entity was not observed for the principal during the available baseline.`}</div>
-                      </div>
-                      <div className="rounded-lg border border-white/10 bg-white/[0.02] p-3">
-                        <span className="text-[10px] uppercase font-bold text-cyan-300">3. Where?</span>
-                        <div className="mt-1 space-y-1 font-mono text-[11px] text-[#c4bdd9]">
-                          <div>Principal: <b className="text-white">{c.principal_name}</b> {c.principal_id && `(${c.principal_id})`}</div>
-                          <div>Path: {c.caller_service || "direct"} → {c.target_service || "unknown"} ({c.operation || "any"})</div>
-                          {c.source_ip && <div>Source Address: {c.source_ip}</div>}
-                        </div>
-                      </div>
-                      <div className="rounded-lg border border-white/10 bg-white/[0.02] p-3">
-                        <span className="text-[10px] uppercase font-bold text-cyan-300">4. How reliable is it?</span>
-                        <div className="mt-1 text-[#c4bdd9]">
-                          Attribution: <b className="text-emerald-300">{r.how_reliable?.attribution_method || c.reliability || "trace_linked"}</b> · Quality: <b className="text-white">{r.how_reliable?.collection_quality || "healthy"}</b> · Baseline: <b className="text-white">{r.how_reliable?.baseline_readiness || "ready"}</b>
-                        </div>
-                      </div>
-                      <div className="rounded-lg border border-white/10 bg-white/[0.02] p-3">
-                        <span className="text-[10px] uppercase font-bold text-cyan-300">5. Why this priority?</span>
-                        <div className="mt-1 text-[#c4bdd9]">
-                          Contributed <b className="text-white">+{c.score} pts</b> in <b className="text-cyan-300">{c.family || "access"}</b> family (capped at {r.why_priority?.family_cap || 35} pts). Deduplicated against repetitive records in window.
-                        </div>
-                      </div>
-                      <div className="rounded-lg border border-white/10 bg-white/[0.02] p-3">
-                        <span className="text-[10px] uppercase font-bold text-cyan-300">6. What proves it?</span>
-                        <div className="mt-1 text-[#c4bdd9]">
-                          Observed at {new Date(c.detected_at).toLocaleTimeString()}.
-                          {r.what_proves_it?.representative_traces && r.what_proves_it.representative_traces.length > 0 ? (
-                            <div className="mt-1 flex flex-wrap gap-1.5 items-center">
-                              <span>Traces:</span>
-                              {r.what_proves_it.representative_traces.map((tid: string) => (
-                                <a key={tid} href={`/traces/${encodeURIComponent(tid)}`} className="font-mono text-cyan-400 hover:underline bg-cyan-950/40 px-1 rounded">{tid.slice(0, 12)}…</a>
-                              ))}
-                            </div>
-                          ) : (
-                            <span className="ml-1 text-[11px] text-[#9e96b8]">Evidence captured from transaction records.</span>
-                          )}
-                        </div>
-                      </div>
-                    </div>
-                    <div className="mt-3 rounded-lg border border-white/10 bg-white/[0.02] p-3 flex items-center justify-between">
-                      <div>
-                        <span className="text-[10px] uppercase font-bold text-cyan-300">7. What happened afterward?</span>
-                        <div className="mt-1 text-white">{r.what_happened_afterward || (c.status === "expected" ? "Accepted by operator" : c.status === "reviewed" ? "Under active investigation" : "Awaiting operational review")}</div>
-                      </div>
-                      <div className="flex gap-2">
-                        <button className="btn text-xs border-cyan-500/40 text-cyan-300" onClick={() => setReviewTarget(c)}>Review Scope</button>
-                      </div>
-                    </div>
-                  </div>
-                )}
+      {/* Review Modal for Expected Change */}
+      {reviewTarget && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-xs p-4">
+          <div className="card w-full max-w-md border-cyan-500/30 bg-[#161424] p-5 text-xs shadow-2xl">
+            <div className="flex items-center justify-between pb-3 border-b border-white/10">
+              <b className="text-sm text-cyan-300">Mark Behavior as Expected</b>
+              <button onClick={() => setReviewTarget(null)} className="text-[#9e96b8] hover:text-white"><X size={16} /></button>
+            </div>
+            <div className="mt-3 space-y-3">
+              <div>
+                <label className="text-[11px] text-[#9e96b8]">Principal & Change</label>
+                <div className="font-mono text-white font-medium">{reviewTarget.principal_name} · {label(reviewTarget.change_type)}</div>
               </div>
-            );
-          })}
-          {(!q.data?.items || q.data.items.length === 0) && (
-            <div className="p-6 text-center text-xs text-[#c4bdd9]">
-              No behavioral changes found matching criteria.
-            </div>
-          )}
-        </div>
-      </Panel>
-    )}
-
-    {/* Tab 2: Bounded Incidents */}
-    {activeTab === "incidents" && (
-      incidentsQuery.isLoading ? <Loading/> : incidentsQuery.error ? <ErrorState message={incidentsQuery.error.message}/> : (
-        <Panel title={`${incidentsQuery.data?.count || 0} bounded incidents`} subtitle="Incidents merge related changes within 15m windows, close after 30m idle, and cap scores across distinct families">
-          <div className="divide-y divide-[rgba(255,255,255,0.08)]">
-            {incidentsQuery.data?.items.map(inc => (
-              <div className="p-4 transition hover:bg-white/[0.02]" key={inc.incident_id}>
-                <div className="flex flex-wrap items-center justify-between gap-2">
-                  <div className="flex items-center gap-2">
-                    <span className={`rounded border px-2 py-0.5 text-xs font-bold ${inc.priority === "high" ? "text-rose-300 border-rose-500/40 bg-rose-500/15" : inc.priority === "medium" ? "text-amber-300 border-amber-500/40 bg-amber-500/15" : "text-emerald-300 border-emerald-500/40 bg-emerald-500/15"}`}>
-                      {inc.priority.toUpperCase()} PRIORITY ({inc.score} / 100)
-                    </span>
-                    <span className="font-mono text-cyan-300 font-semibold">{inc.principal_id.split(":").slice(-1)[0]}</span>
-                    <span className="chip text-[10px]">{inc.category}</span>
-                    <span className="chip text-[10px]">{inc.status}</span>
-                  </div>
-                  <div className="font-mono text-[10px] text-[#9e96b8]">
-                    Started: {new Date(inc.started_at).toLocaleTimeString()} · Last seen: {new Date(inc.last_seen_at).toLocaleTimeString()}
-                  </div>
-                </div>
-                <div className="mt-2 text-xs text-[#c4bdd9]">
-                  Scope: <b className="text-white">{inc.scope}</b> · Events: <b className="text-white">{inc.contributing_event_ids?.length || 0}</b>
-                </div>
-                <div className="mt-2 flex flex-wrap gap-2 text-[11px]">
-                  {Object.entries(inc.family_scores || {}).map(([fam, pts]) => (
-                    <span className="rounded bg-white/[0.05] px-2 py-0.5 font-mono text-[#c4bdd9]" key={fam}>
-                      {fam}: <b className="text-cyan-300">{pts} pts</b>
-                    </span>
-                  ))}
-                </div>
+              <div>
+                <label className="text-[11px] text-[#9e96b8]">Scope</label>
+                <select className="btn w-full mt-1 bg-white/[0.04] border-white/15 text-white" value={reviewScope} onChange={e => setReviewScope(e.target.value)}>
+                  <option value="change_rule" className="bg-[#161424]">This specific entity & principal ({reviewTarget.new_value || reviewTarget.target_service || "rule"})</option>
+                  <option value="target_service" className="bg-[#161424]">All operations on {reviewTarget.target_service || "target service"}</option>
+                  <option value="principal" className="bg-[#161424]">Entire principal identity ({reviewTarget.principal_name})</option>
+                </select>
               </div>
+              <div>
+                <label className="text-[11px] text-[#9e96b8]">Reason / Authorization context</label>
+                <textarea
+                  className="w-full mt-1 rounded-lg border border-white/15 bg-white/[0.04] p-2 text-white placeholder:text-[#9e96b8] outline-none focus:border-cyan-400"
+                  rows={3}
+                  placeholder="e.g. Approved maintenance deployment, verified with service owner"
+                  value={reviewReason}
+                  onChange={e => setReviewReason(e.target.value)}
+                />
+              </div>
+              <div>
+                <label className="text-[11px] text-[#9e96b8]">Expiry</label>
+                <select className="btn w-full mt-1 bg-white/[0.04] border-white/15 text-white" value={reviewExpiry} onChange={e => setReviewExpiry(e.target.value)}>
+                  <option value="never" className="bg-[#161424]">Permanent (no expiry)</option>
+                  <option value="7d" className="bg-[#161424]">Expires in 7 days</option>
+                  <option value="30d" className="bg-[#161424]">Expires in 30 days</option>
+                </select>
+              </div>
+            </div>
+            <div className="mt-5 flex justify-end gap-2 border-t border-white/10 pt-3">
+              <button onClick={() => setReviewTarget(null)} className="btn text-[#c4bdd9]">Cancel</button>
+              <button onClick={() => submitReview(reviewTarget.id, "expected")} className="btn bg-cyan-600 hover:bg-cyan-500 text-white font-medium border-cyan-400">Accept Expected Change</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* KPI Summary Cards (Fleet Style) */}
+      <div className="mb-6 grid grid-cols-2 gap-3 sm:grid-cols-5">
+        <MetricCard
+          label="Total Anomalies"
+          value={String(items.length)}
+          detail={`${q.data?.total_unfiltered ?? items.length} recorded across estate`}
+          accent="cyan"
+        />
+        <MetricCard
+          label="High / Critical Threats"
+          value={String(highCritCount)}
+          detail="Urgent operational alerts"
+          tone={highCritCount > 0 ? "bad" : "normal"}
+          accent="purple"
+        />
+        <MetricCard
+          label="Impacted Identities"
+          value={String(uniqueUsers)}
+          detail="Unique accounts exhibiting drift"
+          accent="indigo"
+        />
+        <MetricCard
+          label="Mean Anomaly Score"
+          value={`${avgScore} pts`}
+          detail={`Peak observed score: ${maxScore} pts`}
+          accent="amber"
+        />
+        <MetricCard
+          label="Active Incidents"
+          value={String(incidentsQuery.data?.count ?? 0)}
+          detail="Bounded 15m correlation clusters"
+          accent="cyan"
+        />
+      </div>
+
+      {/* Header Filters and Tab Bar */}
+      <div className="card mb-4 flex flex-wrap items-center justify-between gap-3 p-3">
+        <div className="flex items-center gap-2">
+          <div className="flex rounded-lg border border-[rgba(255,255,255,0.14)] bg-white/[0.04] p-0.5">
+            <button
+              onClick={() => setActiveTab("changes")}
+              className={`rounded-md px-3 py-1.5 text-xs font-semibold transition ${
+                activeTab === "changes"
+                  ? "bg-cyan-500/20 text-cyan-300 border border-cyan-500/40 shadow-sm"
+                  : "text-[#c4bdd9] hover:text-white"
+              }`}
+            >
+              Behavioral Changes ({q.data?.count || 0})
+            </button>
+            <button
+              onClick={() => setActiveTab("incidents")}
+              className={`rounded-md px-3 py-1.5 text-xs font-semibold transition ${
+                activeTab === "incidents"
+                  ? "bg-cyan-500/20 text-cyan-300 border border-cyan-500/40 shadow-sm"
+                  : "text-[#c4bdd9] hover:text-white"
+              }`}
+            >
+              Bounded Incidents ({incidentsQuery.data?.count ?? 0})
+            </button>
+          </div>
+          <div className="flex items-center rounded-lg border border-[rgba(255,255,255,0.14)] bg-white/[0.04] p-0.5">
+            <button
+              onClick={() => setScope("all")}
+              className={`rounded-md px-2.5 py-1 text-xs font-medium transition ${
+                scope === "all" ? "bg-violet-600 text-white shadow-sm" : "text-[#c4bdd9] hover:text-white"
+              }`}
+            >
+              All Time ({q.data?.total_unfiltered ?? q.data?.count ?? 0})
+            </button>
+            <button
+              onClick={() => setScope("window")}
+              className={`rounded-md px-2.5 py-1 text-xs font-medium transition ${
+                scope === "window" ? "bg-violet-600 text-white shadow-sm" : "text-[#c4bdd9] hover:text-white"
+              }`}
+            >
+              Selected Window
+            </button>
+          </div>
+        </div>
+
+        <div className="flex flex-wrap items-center gap-2">
+          <div className="relative">
+            <Search size={13} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-[#8b949e]" />
+            <input
+              className="min-w-44 rounded-lg border border-[rgba(255,255,255,0.14)] bg-white/[0.04] pl-7 pr-3 py-1.5 text-xs text-[#f5f3fa] placeholder:text-[#9e96b8] outline-none focus:border-cyan-400"
+              placeholder="Filter by principal..."
+              value={principal}
+              onChange={(e) => setPrincipal(e.target.value)}
+            />
+          </div>
+          <select
+            className="btn bg-[rgba(255,255,255,0.04)] border-[rgba(255,255,255,0.14)] text-[#f5f3fa]"
+            value={type}
+            onChange={(e) => setType(e.target.value)}
+          >
+            <option value="" className="bg-[#1a172a]">All change types</option>
+            {["NEW_CALLER", "NEW_TARGET", "NEW_SOURCE_IP", "NEW_OPERATION", "DORMANT_REACTIVATED", "USERNAME_FIRST_SEEN", "CREDENTIAL_ABUSE"].map((t) => (
+              <option className="bg-[#1a172a]" key={t} value={t}>{label(t)}</option>
             ))}
-            {(!incidentsQuery.data?.items || incidentsQuery.data.items.length === 0) && (
-              <div className="p-6 text-center text-xs text-[#c4bdd9]">
-                No open incidents found for selected criteria.
+          </select>
+          <select
+            className="btn bg-[rgba(255,255,255,0.04)] border-[rgba(255,255,255,0.14)] text-[#f5f3fa]"
+            value={severity}
+            onChange={(e) => setSeverity(e.target.value)}
+          >
+            <option value="" className="bg-[#1a172a]">All severities</option>
+            {["critical", "high", "medium", "low"].map((s) => (
+              <option className="bg-[#1a172a]" key={s} value={s}>{s}</option>
+            ))}
+          </select>
+        </div>
+      </div>
+
+      {/* Main Content Area */}
+      {q.isLoading ? (
+        <Loading />
+      ) : q.error ? (
+        <ErrorState message={q.error.message} />
+      ) : activeTab === "incidents" ? (
+        /* Tab 2: Bounded Incidents */
+        incidentsQuery.isLoading ? <Loading /> : incidentsQuery.error ? <ErrorState message={incidentsQuery.error.message} /> : (
+          <Panel
+            title={`${incidentsQuery.data?.count || 0} bounded security incidents`}
+            subtitle="Incidents merge related changes within 15m windows, close after 30m idle, and cap scores across distinct families"
+          >
+            <div className="divide-y divide-[rgba(255,255,255,0.08)]">
+              {incidentsQuery.data?.items.map((inc) => (
+                <div className="p-4 transition hover:bg-white/[0.02]" key={inc.incident_id}>
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <div className="flex items-center gap-2">
+                      <span className={`rounded border px-2 py-0.5 text-xs font-bold ${
+                        inc.priority === "high"
+                          ? "text-rose-300 border-rose-500/40 bg-rose-500/15"
+                          : inc.priority === "medium"
+                            ? "text-amber-300 border-amber-500/40 bg-amber-500/15"
+                            : "text-emerald-300 border-emerald-500/40 bg-emerald-500/15"
+                      }`}>
+                        {inc.priority.toUpperCase()} PRIORITY ({inc.score} / 100)
+                      </span>
+                      <span className="font-mono text-cyan-300 font-semibold">{inc.principal_id.split(":").slice(-1)[0]}</span>
+                      <span className="chip text-[10px]">{inc.category}</span>
+                      <span className="chip text-[10px]">{inc.status}</span>
+                    </div>
+                    <div className="font-mono text-[10px] text-[#9e96b8]">
+                      Started: {new Date(inc.started_at).toLocaleTimeString()} · Last seen: {new Date(inc.last_seen_at).toLocaleTimeString()}
+                    </div>
+                  </div>
+                  <div className="mt-2 text-xs text-[#c4bdd9]">
+                    Scope: <b className="text-white">{inc.scope}</b> · Events: <b className="text-white">{inc.contributing_event_ids?.length || 0}</b>
+                  </div>
+                  <div className="mt-2 flex flex-wrap gap-2 text-[11px]">
+                    {Object.entries(inc.family_scores || {}).map(([fam, pts]) => (
+                      <span className="rounded bg-white/[0.05] px-2 py-0.5 font-mono text-[#c4bdd9]" key={fam}>
+                        {fam}: <b className="text-cyan-300">{pts} pts</b>
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              ))}
+              {(!incidentsQuery.data?.items || incidentsQuery.data.items.length === 0) && (
+                <div className="p-6 text-center text-xs text-[#c4bdd9]">
+                  No open incidents found for selected criteria.
+                </div>
+              )}
+            </div>
+          </Panel>
+        )
+      ) : viewMode === "graphs" ? (
+        /* Global Graphs Dashboard (Fleet Style) */
+        <div className="space-y-6">
+          {/* 1. Global Anomaly Velocity & Cumulative Risk Score Over Time */}
+          <Panel
+            title="Global Anomaly Velocity & Cumulative Risk Score Over Time"
+            subtitle="Real-time detection frequency (events/window) and aggregate threat impact (pts) across observed timeline"
+          >
+            {chartPoints.length === 0 ? (
+              <div className="h-64 flex items-center justify-center text-xs text-[#6e7681]">
+                No anomaly events observed in the active window.
+              </div>
+            ) : (
+              <div className="h-72 p-4">
+                <ResponsiveContainer width="100%" height="100%">
+                  <AreaChart data={chartPoints}>
+                    <defs>
+                      <linearGradient id="colorUserAnomVelocity" x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="5%" stopColor="#10b981" stopOpacity={0.35} />
+                        <stop offset="95%" stopColor="#10b981" stopOpacity={0} />
+                      </linearGradient>
+                      <linearGradient id="colorUserAnomScore" x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="5%" stopColor="#818cf8" stopOpacity={0.35} />
+                        <stop offset="95%" stopColor="#818cf8" stopOpacity={0} />
+                      </linearGradient>
+                    </defs>
+                    <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.05)" />
+                    <XAxis dataKey="time" stroke="#59616b" tick={{ fontSize: 10 }} />
+                    <YAxis yAxisId="left" stroke="#10b981" tick={{ fontSize: 10 }} unit=" ev" />
+                    <YAxis yAxisId="right" orientation="right" stroke="#818cf8" tick={{ fontSize: 10 }} unit=" pts" />
+                    <Tooltip
+                      {...chartTooltip}
+                      formatter={(v: any, name: any) => [
+                        name === "Anomaly Velocity" ? `${n(v, 0)} events` : `${n(v, 0)} pts`,
+                        name,
+                      ]}
+                    />
+                    <Legend wrapperStyle={{ fontSize: "11px", paddingTop: "8px" }} />
+                    <Area
+                      yAxisId="left"
+                      type="monotone"
+                      dataKey="eventCount"
+                      name="Anomaly Velocity"
+                      stroke="#10b981"
+                      strokeWidth={2}
+                      fillOpacity={1}
+                      fill="url(#colorUserAnomVelocity)"
+                    />
+                    <Area
+                      yAxisId="right"
+                      type="monotone"
+                      dataKey="totalScore"
+                      name="Cumulative Risk Score"
+                      stroke="#818cf8"
+                      strokeWidth={2}
+                      fillOpacity={1}
+                      fill="url(#colorUserAnomScore)"
+                    />
+                  </AreaChart>
+                </ResponsiveContainer>
               </div>
             )}
+          </Panel>
+
+          {/* 2 & 3: Severity Distribution & Behavioral Drift Categories Timeline */}
+          <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
+            {/* Severity Distribution Timeline */}
+            <Panel
+              title="Anomaly Severity & Threat Distribution Over Time"
+              subtitle="Critical/High urgent threats vs Medium and Low behavioral changes"
+            >
+              {chartPoints.length === 0 ? (
+                <div className="h-60 flex items-center justify-center text-xs text-[#6e7681]">No data</div>
+              ) : (
+                <div className="h-64 p-4">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <AreaChart data={chartPoints}>
+                      <defs>
+                        <linearGradient id="colorUserCrit" x1="0" y1="0" x2="0" y2="1">
+                          <stop offset="5%" stopColor="#f43f5e" stopOpacity={0.4} />
+                          <stop offset="95%" stopColor="#f43f5e" stopOpacity={0} />
+                        </linearGradient>
+                        <linearGradient id="colorUserMed" x1="0" y1="0" x2="0" y2="1">
+                          <stop offset="5%" stopColor="#f59e0b" stopOpacity={0.35} />
+                          <stop offset="95%" stopColor="#f59e0b" stopOpacity={0} />
+                        </linearGradient>
+                      </defs>
+                      <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.05)" />
+                      <XAxis dataKey="time" stroke="#59616b" tick={{ fontSize: 10 }} />
+                      <YAxis stroke="#8b949e" tick={{ fontSize: 10 }} />
+                      <Tooltip {...chartTooltip} />
+                      <Legend wrapperStyle={{ fontSize: "11px", paddingTop: "6px" }} />
+                      <Area
+                        type="monotone"
+                        dataKey="criticalHigh"
+                        name="Critical / High"
+                        stroke="#f43f5e"
+                        strokeWidth={1.5}
+                        fill="url(#colorUserCrit)"
+                      />
+                      <Area
+                        type="monotone"
+                        dataKey="medium"
+                        name="Medium Severity"
+                        stroke="#f59e0b"
+                        strokeWidth={1.5}
+                        fill="url(#colorUserMed)"
+                      />
+                      <Area
+                        type="monotone"
+                        dataKey="low"
+                        name="Low Severity"
+                        stroke="#10b981"
+                        strokeWidth={1.5}
+                        fillOpacity={0.1}
+                      />
+                    </AreaChart>
+                  </ResponsiveContainer>
+                </div>
+              )}
+            </Panel>
+
+            {/* Behavioral Change Categories Timeline */}
+            <Panel
+              title="Behavioral Drift Categories Timeline"
+              subtitle="Caller expansion, Target expansion, Foreign IP, and Dormancy reactivation"
+            >
+              {chartPoints.length === 0 ? (
+                <div className="h-60 flex items-center justify-center text-xs text-[#6e7681]">No data</div>
+              ) : (
+                <div className="h-64 p-4">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <LineChart data={chartPoints}>
+                      <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.05)" />
+                      <XAxis dataKey="time" stroke="#59616b" tick={{ fontSize: 10 }} />
+                      <YAxis stroke="#8b949e" tick={{ fontSize: 10 }} />
+                      <Tooltip {...chartTooltip} />
+                      <Legend wrapperStyle={{ fontSize: "11px", paddingTop: "6px" }} />
+                      <Line type="monotone" dataKey="newCaller" name="New Caller" stroke="#8b5cf6" strokeWidth={2} dot={false} />
+                      <Line type="monotone" dataKey="newTarget" name="New Target" stroke="#06b6d4" strokeWidth={2} dot={false} />
+                      <Line type="monotone" dataKey="newSource" name="New Source IP" stroke="#ec4899" strokeWidth={2} dot={false} />
+                      <Line type="monotone" dataKey="dormant" name="Dormant Reactivated" stroke="#ef4444" strokeWidth={2} dot={false} />
+                      <Line type="monotone" dataKey="newOp" name="New Operation" stroke="#f59e0b" strokeWidth={1.5} dot={false} />
+                    </LineChart>
+                  </ResponsiveContainer>
+                </div>
+              )}
+            </Panel>
+          </div>
+
+          {/* 4. Top Impacted Principals Ranking */}
+          <Panel
+            title="Top Flagged Identities by Anomaly Severity"
+            subtitle="Identities accumulating the highest risk scores and most frequent behavioral deviations"
+          >
+            {topFlaggedPrincipals.length === 0 ? (
+              <div className="p-6 text-center text-xs text-[#6e7681]">No flagged identities</div>
+            ) : (
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3 p-4">
+                {topFlaggedPrincipals.map((p, idx) => (
+                  <div
+                    key={p.name}
+                    onClick={() => nav(`/users/${encodeURIComponent(p.name)}`)}
+                    className="cursor-pointer rounded-xl border border-[rgba(255,255,255,0.08)] bg-white/[0.02] p-3.5 transition hover:border-cyan-500/40 hover:bg-white/[0.04] group"
+                  >
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-2 font-mono text-xs font-semibold text-cyan-300 group-hover:text-cyan-200">
+                        <KeyRound size={13} className="text-cyan-400" />
+                        <span>{p.name}</span>
+                      </div>
+                      <span className={`rounded border px-2 py-0.5 text-[10px] font-bold uppercase ${tone(p.severity)}`}>
+                        +{p.score} pts
+                      </span>
+                    </div>
+                    <div className="mt-2 flex items-center justify-between text-[11px] text-[#9e96b8]">
+                      <span>{p.count} anomalies detected</span>
+                      <span className="font-mono text-white/80">Rank #{idx + 1}</span>
+                    </div>
+                    <div className="mt-2 flex flex-wrap gap-1">
+                      {p.types.slice(0, 3).map((t) => (
+                        <span key={t} className="rounded bg-white/[0.05] px-1.5 py-0.5 text-[9px] font-mono text-[#c4bdd9]">
+                          {label(t)}
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </Panel>
+
+          {/* 5. Interactive Detailed Inspector Table with 7-Questions Explainability */}
+          <Panel
+            title={`${items.length} Behavioral Findings & Anomaly Inspector`}
+            subtitle="Click any row to inspect the full 7-Question Explainability card, trace evidence, and operator review actions"
+          >
+            <div className="overflow-x-auto">
+              <table className="w-full text-left text-xs">
+                <thead>
+                  <tr className="border-b border-[rgba(255,255,255,0.07)] text-[10px] uppercase tracking-wider text-[#59616b]">
+                    {["Severity", "Principal", "Deviation Type", "Execution Path", "Score", "Detected At", "Status", "Actions"].map((h) => (
+                      <th key={h} className="whitespace-nowrap px-4 py-2.5 font-semibold">{h}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-[rgba(255,255,255,0.05)]">
+                  {items.slice(0, 50).map((c) => {
+                    const isExpanded = expandedId === c.id;
+                    const r = c.reason || {};
+                    return (
+                      <tr
+                        key={c.id}
+                        onClick={() => setExpandedId(isExpanded ? null : c.id)}
+                        className="cursor-pointer transition hover:bg-white/[0.03] group"
+                      >
+                        <td className="px-4 py-3">
+                          <span className={`inline-flex rounded border px-2 py-0.5 text-[10px] font-semibold uppercase ${tone(c.severity)}`}>
+                            {c.severity}
+                          </span>
+                        </td>
+                        <td className="px-4 py-3 font-mono text-cyan-300 font-medium">
+                          {c.principal_name}
+                        </td>
+                        <td className="px-4 py-3 text-[#f5f3fa]">
+                          <span className="rounded bg-white/[0.04] px-1.5 py-0.5 border border-white/[0.06] text-[11px]">
+                            {label(c.change_type)}
+                          </span>
+                        </td>
+                        <td className="px-4 py-3 font-mono text-[11px] text-[#c4bdd9]">
+                          {c.caller_service || "direct"} → <b className="text-violet-300 font-normal">{c.target_service || "any"}</b> {c.operation ? `(${c.operation})` : ""}
+                        </td>
+                        <td className="px-4 py-3 font-mono font-bold text-amber-300">
+                          +{c.score}
+                        </td>
+                        <td className="px-4 py-3 text-[11px] text-[#8b949e]">
+                          {new Date(c.detected_at).toLocaleTimeString()}
+                        </td>
+                        <td className="px-4 py-3">
+                          <span className="chip text-[10px]">{c.status}</span>
+                        </td>
+                        <td className="px-4 py-3 text-right" onClick={(e) => e.stopPropagation()}>
+                          <div className="flex items-center justify-end gap-1.5">
+                            <button
+                              title="Accept as expected change"
+                              className="btn text-[11px] py-1 border-cyan-500/40 text-cyan-300 hover:bg-cyan-500/20"
+                              onClick={() => setReviewTarget(c)}
+                            >
+                              Expected
+                            </button>
+                            <button
+                              title="Mark for deep investigation"
+                              className="btn text-[11px] py-1 border-amber-500/40 text-amber-300 hover:bg-amber-500/20"
+                              onClick={() => submitReview(c.id, "investigate")}
+                            >
+                              Investigate
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+
+            {/* Expandable 7-Questions Drawer Modal if an item is selected */}
+            {expandedId !== null && (() => {
+              const selectedChange = items.find((x) => x.id === expandedId);
+              if (!selectedChange) return null;
+              const r = selectedChange.reason || {};
+              return (
+                <div className="p-4 border-t border-[rgba(255,255,255,0.08)] bg-[#12101b]">
+                  <div className="mb-3 flex items-center justify-between border-b border-white/10 pb-2">
+                    <span className="font-semibold text-cyan-400">WHAT CHANGED COMPARED WITH NORMAL? (7-Question Explainability for #{selectedChange.id})</span>
+                    <button className="btn text-xs text-[#9e96b8]" onClick={() => setExpandedId(null)}>Close</button>
+                  </div>
+                  <div className="grid gap-3 md:grid-cols-2 text-xs">
+                    <div className="rounded-lg border border-white/10 bg-white/[0.02] p-3">
+                      <span className="text-[10px] uppercase font-bold text-cyan-300">1. What changed?</span>
+                      <div className="mt-1 text-white font-medium">{r.what_changed || r.summary || selectedChange.new_value}</div>
+                    </div>
+                    <div className="rounded-lg border border-white/10 bg-white/[0.02] p-3">
+                      <span className="text-[10px] uppercase font-bold text-cyan-300">2. Compared with what?</span>
+                      <div className="mt-1 text-[#c4bdd9]">{r.compared_with || `Entity not observed for the principal during historical baseline.`}</div>
+                    </div>
+                    <div className="rounded-lg border border-white/10 bg-white/[0.02] p-3">
+                      <span className="text-[10px] uppercase font-bold text-cyan-300">3. Where?</span>
+                      <div className="mt-1 space-y-1 font-mono text-[11px] text-[#c4bdd9]">
+                        <div>Principal: <b className="text-white">{selectedChange.principal_name}</b></div>
+                        <div>Path: {selectedChange.caller_service || "direct"} → {selectedChange.target_service || "unknown"} ({selectedChange.operation || "any"})</div>
+                        {selectedChange.source_ip && <div>Source Address: {selectedChange.source_ip}</div>}
+                      </div>
+                    </div>
+                    <div className="rounded-lg border border-white/10 bg-white/[0.02] p-3">
+                      <span className="text-[10px] uppercase font-bold text-cyan-300">4. How reliable is it?</span>
+                      <div className="mt-1 text-[#c4bdd9]">
+                        Attribution: <b className="text-emerald-300">{r.how_reliable?.attribution_method || selectedChange.reliability || "trace_linked"}</b> · Quality: <b className="text-white">healthy</b>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              );
+            })()}
+          </Panel>
+        </div>
+      ) : (
+        /* Findings List View (Classic Mode) */
+        <Panel title={`${items.length} behavioral changes`} subtitle="Chronological anomaly event stream with explainability drawer">
+          <div className="divide-y divide-[rgba(255,255,255,0.08)]">
+            {items.map((c) => {
+              const isExpanded = expandedId === c.id;
+              const r = c.reason || {};
+              return (
+                <div
+                  key={c.id}
+                  className="p-4 transition hover:bg-white/[0.02] cursor-pointer"
+                  onClick={() => setExpandedId(isExpanded ? null : c.id)}
+                >
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <div className="flex items-center gap-2">
+                      <span className={`rounded border px-2 py-0.5 text-xs font-bold uppercase ${tone(c.severity)}`}>
+                        {c.severity} · {label(c.change_type)}
+                      </span>
+                      <span className="font-mono text-cyan-300 font-semibold">{c.principal_name}</span>
+                      <span className="rounded bg-white/[0.06] px-1.5 py-0.5 font-mono text-[11px] text-amber-300 font-bold">
+                        +{c.score} pts
+                      </span>
+                      <span className="chip text-[10px]">{c.status}</span>
+                    </div>
+                    <div className="font-mono text-[10px] text-[#9e96b8]">
+                      Detected: {new Date(c.detected_at).toLocaleString()}
+                    </div>
+                  </div>
+
+                  <div className="mt-2 flex flex-wrap items-center justify-between gap-2 text-xs">
+                    <div className="text-[#c4bdd9]">
+                      {r.summary || `${c.old_value || "historical behavior"} → ${c.new_value || "new observation"}`}
+                    </div>
+                    <div className="flex items-center gap-1.5" onClick={(e) => e.stopPropagation()}>
+                      <button className="btn text-xs border-cyan-500/40 text-cyan-300 hover:bg-cyan-500/20" onClick={() => setReviewTarget(c)}>Expected</button>
+                      <button className="btn text-xs border-amber-500/40 text-amber-300 hover:bg-amber-500/20" onClick={() => submitReview(c.id, "investigate")}>Investigate</button>
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
           </div>
         </Panel>
-      )
-    )}
-  </Page>;
+      )}
+    </Page>
+  );
 }
 
-type GraphData={nodes:Array<{id:string;label:string;type:string}>;edges:Array<{source:string;target:string;requests:number;state:string;label:string}>;mode:string};
-function UserGraphCanvas({graph,onPrincipal}:{graph:GraphData;onPrincipal:(p:string)=>void}){const ref=useRef<HTMLCanvasElement>(null);const positions=useMemo(()=>{const groups={caller:graph.nodes.filter(n=>n.type==="caller"),principal:graph.nodes.filter(n=>n.type==="principal"),target:graph.nodes.filter(n=>n.type==="target")};const map=new Map<string,{x:number;y:number}>();(["caller","principal","target"] as const).forEach((type,col)=>groups[type].forEach((node,i)=>map.set(node.id,{x:130+col*350,y:55+i*Math.max(42,520/Math.max(1,groups[type].length))})));return map},[graph]);useEffect(()=>{const c=ref.current;if(!c)return;const dpr=devicePixelRatio||1,r=c.getBoundingClientRect();c.width=r.width*dpr;c.height=r.height*dpr;const x=c.getContext("2d")!;x.scale(dpr,dpr);x.clearRect(0,0,r.width,r.height);for(const e of graph.edges){const a=positions.get(e.source),b=positions.get(e.target);if(!a||!b)continue;x.beginPath();x.moveTo(a.x,a.y);x.lineTo(b.x,b.y);x.strokeStyle=e.state==="changed"?"#f59e0b":"#6366f1";x.lineWidth=Math.min(5,1+Math.sqrt(e.requests)/10);if(e.state==="changed")x.setLineDash([7,4]);x.stroke();x.setLineDash([])}for(const node of graph.nodes){const p=positions.get(node.id)!;x.beginPath();x.arc(p.x,p.y,18,0,Math.PI*2);x.fillStyle=node.type==="principal"?"#8b5cf6":node.type==="caller"?"#10b981":"#0ea5e9";x.fill();x.strokeStyle=node.type==="principal"?"#c4b5fd":node.type==="caller"?"#6ee7b7":"#7dd3fc";x.lineWidth=2;x.stroke();x.fillStyle="#f5f3fa";x.font="13px Inter";x.textAlign="center";x.fillText(node.label.slice(0,24),p.x,p.y+34)}} ,[graph,positions]);return <canvas ref={ref} onClick={e=>{const r=e.currentTarget.getBoundingClientRect();const px=e.clientX-r.left,py=e.clientY-r.top;for(const node of graph.nodes.filter(n=>n.type==="principal")){const p=positions.get(node.id)!;if(Math.hypot(px-p.x,py-p.y)<24)onPrincipal(node.label)}}} className="h-[620px] w-full cursor-pointer"/>}
-export function UserGraphPage(){const nav=useNavigate();const {filters}=useFilters();const params=new URLSearchParams(location.search);const [mode,setMode]=useState(params.get("principal")?"principal":"estate");const [principal,setPrincipal]=useState(params.get("principal")||"");const [service,setService]=useState("");const qs=queryString(filters,{principal:mode==="principal"&&principal?principal:undefined,service:mode==="service"&&service?service:undefined});const q=useQuery({queryKey:["user-graph",qs],queryFn:()=>api<GraphData>(`/api/v1/user-graph?${qs}`)});return <Page eyebrow="User Intelligence" title="Caller → Principal → Target" description="Credential-centered dependency evidence. Dashed amber edges are changed; labels and badges provide non-color evidence."><div className="card mb-4 flex flex-wrap gap-2 p-3"><select className="btn bg-[rgba(255,255,255,0.04)] border-[rgba(255,255,255,0.14)] text-[#f5f3fa]" value={mode} onChange={e=>setMode(e.target.value)}><option value="estate" className="bg-[#1a172a]">Estate view</option><option value="principal" className="bg-[#1a172a]">Principal centered</option><option value="service" className="bg-[#1a172a]">Target service usage</option></select>{mode==="principal"&&<input className="rounded-lg border border-[rgba(255,255,255,0.14)] bg-white/[0.04] px-3 py-1.5 text-xs text-[#f5f3fa] placeholder:text-[#9e96b8] outline-none focus:border-cyan-400" value={principal} onChange={e=>setPrincipal(e.target.value)} placeholder="Principal name"/>}{mode==="service"&&<input className="rounded-lg border border-[rgba(255,255,255,0.14)] bg-white/[0.04] px-3 py-1.5 text-xs text-[#f5f3fa] placeholder:text-[#9e96b8] outline-none focus:border-indigo-400" value={service} onChange={e=>setService(e.target.value)} placeholder="Target service"/>}<span className="chip">Normal: solid · Changed: dashed + badge</span></div>{q.isLoading?<Loading/>:q.error?<ErrorState message={q.error.message}/>:<div className="grid gap-4 xl:grid-cols-[1fr_320px]"><Panel title="User dependency graph"><UserGraphCanvas graph={q.data!} onPrincipal={p=>nav(`/users/${encodeURIComponent(p)}`)}/></Panel><Panel title="Changed Edges" subtitle="Explicit labels accompany visual styling"><div className="max-h-[620px] overflow-auto scrollbar p-3">{q.data?.edges.filter(e=>e.state!=="normal").map((e,i)=><div className="mb-2 rounded-lg border border-amber-500/30 bg-amber-500/10 p-2 text-xs" key={i}><span className="rounded bg-amber-500/20 px-1.5 py-0.5 text-amber-300 font-semibold text-[10px]">CHANGED</span><div className="mt-2 font-mono text-[#f5f3fa]">{e.source.split(":")[1]} → {e.target.split(":")[1]}</div><div className="text-[#c4bdd9] mt-1">{e.label} · {n(e.requests,0)} requests</div></div>)}</div></Panel></div>}</Page>}
+export type GraphData = {
+  nodes: Array<{ id: string; label: string; type: string }>;
+  edges: Array<{ source: string; target: string; requests: number; state: string; label: string }>;
+  items?: Array<{ caller_service: string; principal_name: string; target_service: string; requests: number; changed: number; last_seen: number }>;
+  summary?: { total_principals: number; total_callers: number; total_targets: number; total_requests: number; changed_edges: number };
+  mode: string;
+};
+
+function UserGraphCanvas({ graph, onPrincipal }: { graph: GraphData; onPrincipal: (p: string) => void }) {
+  const ref = useRef<HTMLCanvasElement>(null);
+  const positions = useMemo(() => {
+    const groups = {
+      caller: graph.nodes.filter((n) => n.type === "caller"),
+      principal: graph.nodes.filter((n) => n.type === "principal"),
+      target: graph.nodes.filter((n) => n.type === "target"),
+    };
+    const map = new Map<string, { x: number; y: number }>();
+    (["caller", "principal", "target"] as const).forEach((type, col) =>
+      groups[type].forEach((node, i) =>
+        map.set(node.id, { x: 130 + col * 350, y: 55 + i * Math.max(42, 520 / Math.max(1, groups[type].length)) })
+      )
+    );
+    return map;
+  }, [graph]);
+
+  useEffect(() => {
+    const c = ref.current;
+    if (!c) return;
+    const dpr = devicePixelRatio || 1;
+    const r = c.getBoundingClientRect();
+    c.width = r.width * dpr;
+    c.height = r.height * dpr;
+    const x = c.getContext("2d")!;
+    x.scale(dpr, dpr);
+    x.clearRect(0, 0, r.width, r.height);
+    for (const e of graph.edges) {
+      const a = positions.get(e.source);
+      const b = positions.get(e.target);
+      if (!a || !b) continue;
+      x.beginPath();
+      x.moveTo(a.x, a.y);
+      x.lineTo(b.x, b.y);
+      x.strokeStyle = e.state === "changed" ? "#f59e0b" : "#6366f1";
+      x.lineWidth = Math.min(5, 1 + Math.sqrt(e.requests) / 10);
+      if (e.state === "changed") x.setLineDash([7, 4]);
+      x.stroke();
+      x.setLineDash([]);
+    }
+    for (const node of graph.nodes) {
+      const p = positions.get(node.id)!;
+      x.beginPath();
+      x.arc(p.x, p.y, 18, 0, Math.PI * 2);
+      x.fillStyle = node.type === "principal" ? "#8b5cf6" : node.type === "caller" ? "#10b981" : "#0ea5e9";
+      x.fill();
+      x.strokeStyle = node.type === "principal" ? "#c4b5fd" : node.type === "caller" ? "#6ee7b7" : "#7dd3fc";
+      x.lineWidth = 2;
+      x.stroke();
+      x.fillStyle = "#f5f3fa";
+      x.font = "13px Inter";
+      x.textAlign = "center";
+      x.fillText(node.label.slice(0, 24), p.x, p.y + 34);
+    }
+  }, [graph, positions]);
+
+  return (
+    <canvas
+      ref={ref}
+      onClick={(e) => {
+        const r = e.currentTarget.getBoundingClientRect();
+        const px = e.clientX - r.left;
+        const py = e.clientY - r.top;
+        for (const node of graph.nodes.filter((n) => n.type === "principal")) {
+          const p = positions.get(node.id)!;
+          if (Math.hypot(px - p.x, py - p.y) < 24) onPrincipal(node.label);
+        }
+      }}
+      className="h-[620px] w-full cursor-pointer"
+    />
+  );
+}
+
+export function UserGraphPage() {
+  const nav = useNavigate();
+  const { filters } = useFilters();
+  const params = new URLSearchParams(location.search);
+  const [mode, setMode] = useState(params.get("principal") ? "principal" : "estate");
+  const [principal, setPrincipal] = useState(params.get("principal") || "");
+  const [service, setService] = useState("");
+  const [viewMode, setViewMode] = useState<"graphs" | "topology">("graphs");
+
+  const qs = queryString(filters, {
+    principal: mode === "principal" && principal ? principal : undefined,
+    service: mode === "service" && service ? service : undefined,
+  });
+
+  const q = useQuery({
+    queryKey: ["user-graph", qs],
+    queryFn: () => api<GraphData>(`/api/v1/user-graph?${qs}`),
+    refetchInterval: 30_000,
+  });
+
+  const nodes = q.data?.nodes || [];
+  const edges = q.data?.edges || [];
+  const totalPrincipals = nodes.filter((n) => n.type === "principal").length;
+  const totalCallers = nodes.filter((n) => n.type === "caller").length;
+  const totalTargets = nodes.filter((n) => n.type === "target").length;
+  const totalRequests = edges.reduce((s, e) => s + (e.requests || 0), 0);
+  const changedEdgesCount = edges.filter((e) => e.state === "changed").length;
+
+  // Top Edge Flow Chart Points (Agent Fleet Style)
+  const edgeChartPoints = useMemo(() => {
+    const list = edges.slice().sort((a, b) => (b.requests || 0) - (a.requests || 0)).slice(0, 16);
+    const total = totalRequests || 1;
+    return list.map((e) => {
+      const srcName = e.source.split(":")[1] || e.source;
+      const tgtName = e.target.split(":")[1] || e.target;
+      return {
+        edge: `${srcName} → ${tgtName}`,
+        shortEdge: `${srcName.slice(0, 12)}… → ${tgtName.slice(0, 12)}…`,
+        source: srcName,
+        target: tgtName,
+        requests: e.requests || 0,
+        sharePct: Number(((e.requests || 0) / total * 100).toFixed(1)),
+        isChanged: e.state === "changed" ? 1 : 0,
+        state: e.state,
+      };
+    });
+  }, [edges, totalRequests]);
+
+  // Identity Ingress vs Target Service Fan-Out Dynamics
+  const principalFanout = useMemo(() => {
+    const princs = nodes.filter((n) => n.type === "principal");
+    const stats: Array<{ name: string; callersCount: number; targetsCount: number; reqVolume: number }> = [];
+    for (const p of princs) {
+      const pLabel = p.label;
+      const callers = new Set(edges.filter((e) => e.target === `principal:${pLabel}`).map((e) => e.source));
+      const targets = new Set(edges.filter((e) => e.source === `principal:${pLabel}`).map((e) => e.target));
+      const reqs = edges.filter((e) => e.source === `principal:${pLabel}` || e.target === `principal:${pLabel}`).reduce((s, e) => s + e.requests, 0);
+      stats.push({
+        name: pLabel,
+        callersCount: callers.size,
+        targetsCount: targets.size,
+        reqVolume: reqs,
+      });
+    }
+    return stats.sort((a, b) => b.reqVolume - a.reqVolume).slice(0, 8);
+  }, [nodes, edges]);
+
+  // Normal vs Changed Volume Breakdown
+  const edgeStateVolume = useMemo(() => {
+    const normal = edges.filter((e) => e.state === "normal").reduce((s, e) => s + (e.requests || 0), 0);
+    const changed = edges.filter((e) => e.state === "changed").reduce((s, e) => s + (e.requests || 0), 0);
+    return [
+      { name: "Normal Edges", value: normal, count: edges.filter((e) => e.state === "normal").length },
+      { name: "Changed / Drifted Edges", value: changed, count: edges.filter((e) => e.state === "changed").length },
+    ];
+  }, [edges]);
+
+  return (
+    <Page
+      eyebrow="User Intelligence"
+      title="Caller → Principal → Target Dependency Graph"
+      description="Detailed identity relationship telemetry, microservice call velocity, credential fan-in/fan-out, and architectural drift."
+      actions={
+        <div className="flex flex-wrap items-center gap-2">
+          {/* View mode toggle */}
+          <div className="flex items-center rounded-lg border border-[rgba(255,255,255,0.12)] bg-white/[0.03] p-0.5">
+            <button
+              onClick={() => setViewMode("graphs")}
+              className={`flex items-center gap-1.5 rounded px-2.5 py-1 text-xs font-medium transition ${
+                viewMode === "graphs"
+                  ? "bg-cyan-500/20 text-cyan-300 border border-cyan-500/40 shadow-sm font-semibold"
+                  : "text-[#c4bdd9] hover:text-white"
+              }`}
+            >
+              <BarChart3 size={13} />
+              <span>Detailed Graphs</span>
+            </button>
+            <button
+              onClick={() => setViewMode("topology")}
+              className={`flex items-center gap-1.5 rounded px-2.5 py-1 text-xs font-medium transition ${
+                viewMode === "topology"
+                  ? "bg-violet-600 text-white shadow-sm font-semibold"
+                  : "text-[#c4bdd9] hover:text-white"
+              }`}
+            >
+              <Network size={13} />
+              <span>Classic Topology</span>
+            </button>
+          </div>
+
+          <button
+            onClick={() => q.refetch()}
+            disabled={q.isFetching}
+            className="btn"
+            title="Refresh Graph Telemetry"
+          >
+            <RefreshCw size={13} className={q.isFetching ? "animate-spin" : ""} />
+            Refresh
+          </button>
+        </div>
+      }
+    >
+      {/* KPI Summary Cards (Fleet Style) */}
+      <div className="mb-6 grid grid-cols-2 gap-3 sm:grid-cols-5">
+        <MetricCard
+          label="Tracked Principals"
+          value={String(totalPrincipals)}
+          detail="Observed identities in graph"
+          accent="cyan"
+        />
+        <MetricCard
+          label="Caller Services"
+          value={String(totalCallers)}
+          detail="Ingress microservice sources"
+          accent="emerald"
+        />
+        <MetricCard
+          label="Target Services"
+          value={String(totalTargets)}
+          detail="Destination backend APIs"
+          accent="violet"
+        />
+        <MetricCard
+          label="Total Invocations"
+          value={n(totalRequests, 0)}
+          detail="Graph request throughput"
+          accent="indigo"
+        />
+        <MetricCard
+          label="Drifted / Changed Edges"
+          value={String(changedEdgesCount)}
+          detail={`${((changedEdgesCount / Math.max(1, edges.length)) * 100).toFixed(0)}% of edges exhibit drift`}
+          tone={changedEdgesCount > 0 ? "bad" : "normal"}
+          accent="amber"
+        />
+      </div>
+
+      {/* Mode Controls Bar */}
+      <div className="card mb-4 flex flex-wrap items-center justify-between gap-2 p-3">
+        <div className="flex flex-wrap items-center gap-2">
+          <select
+            className="btn bg-[rgba(255,255,255,0.04)] border-[rgba(255,255,255,0.14)] text-[#f5f3fa]"
+            value={mode}
+            onChange={(e) => setMode(e.target.value)}
+          >
+            <option value="estate" className="bg-[#1a172a]">Estate view</option>
+            <option value="principal" className="bg-[#1a172a]">Principal centered</option>
+            <option value="service" className="bg-[#1a172a]">Target service usage</option>
+          </select>
+
+          {mode === "principal" && (
+            <input
+              className="rounded-lg border border-[rgba(255,255,255,0.14)] bg-white/[0.04] px-3 py-1.5 text-xs text-[#f5f3fa] placeholder:text-[#9e96b8] outline-none focus:border-cyan-400"
+              value={principal}
+              onChange={(e) => setPrincipal(e.target.value)}
+              placeholder="Filter principal name..."
+            />
+          )}
+
+          {mode === "service" && (
+            <input
+              className="rounded-lg border border-[rgba(255,255,255,0.14)] bg-white/[0.04] px-3 py-1.5 text-xs text-[#f5f3fa] placeholder:text-[#9e96b8] outline-none focus:border-indigo-400"
+              value={service}
+              onChange={(e) => setService(e.target.value)}
+              placeholder="Filter target service..."
+            />
+          )}
+        </div>
+
+        <div className="flex items-center gap-2">
+          <span className="rounded bg-emerald-500/10 border border-emerald-500/25 px-2 py-0.5 text-[10px] font-mono text-emerald-400">
+            Solid = Normal Edge
+          </span>
+          <span className="rounded bg-amber-500/10 border border-amber-500/30 px-2 py-0.5 text-[10px] font-mono text-amber-400">
+            Dashed = Changed / Drifted
+          </span>
+        </div>
+      </div>
+
+      {q.isLoading ? (
+        <Loading />
+      ) : q.error ? (
+        <ErrorState message={q.error.message} />
+      ) : viewMode === "graphs" ? (
+        /* Detailed Graph Dashboard (Agent Fleet Style) */
+        <div className="space-y-6">
+          {/* 1. Identity Dependency Invocations & Request Velocity Across Edges */}
+          <Panel
+            title="Identity Dependency Invocations & Relative Call Share Across Edges"
+            subtitle="Request volume distribution and relative share (%) across caller → principal → target microservice paths"
+          >
+            {edgeChartPoints.length === 0 ? (
+              <div className="h-64 flex items-center justify-center text-xs text-[#6e7681]">
+                No graph relationship edges available.
+              </div>
+            ) : (
+              <div className="h-72 p-4">
+                <ResponsiveContainer width="100%" height="100%">
+                  <AreaChart data={edgeChartPoints}>
+                    <defs>
+                      <linearGradient id="colorGraphReqs" x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="5%" stopColor="#10b981" stopOpacity={0.35} />
+                        <stop offset="95%" stopColor="#10b981" stopOpacity={0} />
+                      </linearGradient>
+                      <linearGradient id="colorGraphShare" x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="5%" stopColor="#818cf8" stopOpacity={0.35} />
+                        <stop offset="95%" stopColor="#818cf8" stopOpacity={0} />
+                      </linearGradient>
+                    </defs>
+                    <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.05)" />
+                    <XAxis dataKey="shortEdge" stroke="#59616b" tick={{ fontSize: 10 }} />
+                    <YAxis yAxisId="left" stroke="#10b981" tick={{ fontSize: 10 }} unit=" reqs" />
+                    <YAxis yAxisId="right" orientation="right" stroke="#818cf8" tick={{ fontSize: 10 }} unit="%" />
+                    <Tooltip
+                      {...chartTooltip}
+                      formatter={(v: any, name: any) => [
+                        name === "Request Invocations" ? `${n(v, 0)} requests` : `${Number(v).toFixed(1)}%`,
+                        name,
+                      ]}
+                    />
+                    <Legend wrapperStyle={{ fontSize: "11px", paddingTop: "8px" }} />
+                    <Area
+                      yAxisId="left"
+                      type="monotone"
+                      dataKey="requests"
+                      name="Request Invocations"
+                      stroke="#10b981"
+                      strokeWidth={2}
+                      fillOpacity={1}
+                      fill="url(#colorGraphReqs)"
+                    />
+                    <Area
+                      yAxisId="right"
+                      type="monotone"
+                      dataKey="sharePct"
+                      name="Relative Call Share (%)"
+                      stroke="#818cf8"
+                      strokeWidth={2}
+                      fillOpacity={1}
+                      fill="url(#colorGraphShare)"
+                    />
+                  </AreaChart>
+                </ResponsiveContainer>
+              </div>
+            )}
+          </Panel>
+
+          {/* 2 & 3: Fan-In vs Fan-Out and Edge State Drift */}
+          <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
+            {/* Identity Ingress vs Target Service Fan-Out Dynamics */}
+            <Panel
+              title="Identity Ingress vs Target Service Fan-Out Dynamics"
+              subtitle="Caller services using each principal credential vs target microservices accessed"
+            >
+              {principalFanout.length === 0 ? (
+                <div className="h-60 flex items-center justify-center text-xs text-[#6e7681]">No data</div>
+              ) : (
+                <div className="h-64 p-4">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <BarChart data={principalFanout}>
+                      <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.05)" />
+                      <XAxis dataKey="name" stroke="#59616b" tick={{ fontSize: 10 }} />
+                      <YAxis stroke="#8b949e" tick={{ fontSize: 10 }} />
+                      <Tooltip {...chartTooltip} />
+                      <Legend wrapperStyle={{ fontSize: "11px", paddingTop: "6px" }} />
+                      <Bar dataKey="callersCount" name="Caller Services (Fan-in)" fill="#8b5cf6" radius={[4, 4, 0, 0]} />
+                      <Bar dataKey="targetsCount" name="Target Services (Fan-out)" fill="#06b6d4" radius={[4, 4, 0, 0]} />
+                    </BarChart>
+                  </ResponsiveContainer>
+                </div>
+              )}
+            </Panel>
+
+            {/* Edge State & Behavioral Drift Volume */}
+            <Panel
+              title="Edge State & Behavioral Drift Distribution"
+              subtitle="Request volume traversing established baseline edges vs changed/anomalous edges"
+            >
+              {edges.length === 0 ? (
+                <div className="h-60 flex items-center justify-center text-xs text-[#6e7681]">No data</div>
+              ) : (
+                <div className="h-64 p-4">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <BarChart data={edgeStateVolume}>
+                      <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.05)" />
+                      <XAxis dataKey="name" stroke="#59616b" tick={{ fontSize: 11 }} />
+                      <YAxis stroke="#8b949e" tick={{ fontSize: 10 }} />
+                      <Tooltip {...chartTooltip} formatter={(v: any) => [`${n(v, 0)} requests`, "Volume"]} />
+                      <Legend wrapperStyle={{ fontSize: "11px", paddingTop: "6px" }} />
+                      <Bar dataKey="value" name="Request Volume" fill="#f59e0b" radius={[4, 4, 0, 0]} />
+                    </BarChart>
+                  </ResponsiveContainer>
+                </div>
+              )}
+            </Panel>
+          </div>
+
+          {/* 4. Interactive Relationship Matrix & Call Flow Inspector (Agent Fleet Table Style) */}
+          <Panel
+            title="Interactive Relationship Matrix & Call Flow Inspector"
+            subtitle="Caller → Principal → Target microservice dependency records with drift status and trace inspection"
+          >
+            <div className="overflow-x-auto">
+              <table className="w-full text-left text-xs">
+                <thead>
+                  <tr className="border-b border-[rgba(255,255,255,0.07)] text-[10px] uppercase tracking-wider text-[#59616b]">
+                    {["Caller Service", "Principal Identity", "Target Service", "Edge State", "Invocations", "Relative Share", "Actions"].map((h) => (
+                      <th key={h} className="whitespace-nowrap px-4 py-2.5 font-semibold">{h}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-[rgba(255,255,255,0.05)]">
+                  {edges.slice(0, 40).map((e, idx) => {
+                    const isChanged = e.state === "changed";
+                    const srcName = e.source.split(":")[1] || e.source;
+                    const tgtName = e.target.split(":")[1] || e.target;
+                    const share = ((e.requests || 0) / Math.max(1, totalRequests) * 100);
+                    return (
+                      <tr key={idx} className="transition hover:bg-white/[0.03]">
+                        <td className="px-4 py-3">
+                          <div className="flex items-center gap-2 font-mono text-emerald-300">
+                            <Server size={13} className="text-emerald-400 opacity-70" />
+                            <span>{srcName}</span>
+                          </div>
+                        </td>
+                        <td className="px-4 py-3">
+                          <button
+                            onClick={() => nav(`/users/${encodeURIComponent(srcName)}`)}
+                            className="font-mono text-cyan-300 hover:underline"
+                          >
+                            {srcName.startsWith("user:") ? srcName : e.label || "principal"}
+                          </button>
+                        </td>
+                        <td className="px-4 py-3 font-mono text-violet-300">
+                          {tgtName}
+                        </td>
+                        <td className="px-4 py-3">
+                          <span
+                            className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-0.5 text-[10px] font-semibold uppercase tracking-wider ${
+                              isChanged
+                                ? "border-amber-500/30 bg-amber-500/10 text-amber-400"
+                                : "border-emerald-500/25 bg-emerald-500/10 text-emerald-400"
+                            }`}
+                          >
+                            <span className={`h-1.5 w-1.5 rounded-full ${isChanged ? "bg-amber-400 animate-pulse" : "bg-emerald-400"}`} />
+                            {isChanged ? "Changed" : "Normal"}
+                          </span>
+                        </td>
+                        <td className="px-4 py-3 font-mono font-semibold text-[#f5f3fa]">
+                          {n(e.requests, 0)}
+                        </td>
+                        <td className="px-4 py-3">
+                          <div className="flex items-center gap-2">
+                            <div className="h-1.5 w-16 rounded-full bg-[rgba(255,255,255,0.08)] overflow-hidden">
+                              <div
+                                className={`h-full rounded-full ${isChanged ? "bg-amber-400" : "bg-indigo-500"}`}
+                                style={{ width: `${Math.min(100, share)}%` }}
+                              />
+                            </div>
+                            <span className="font-mono text-[10px] text-[#8b949e]">{share.toFixed(1)}%</span>
+                          </div>
+                        </td>
+                        <td className="px-4 py-3 text-right">
+                          <div className="flex items-center justify-end gap-2">
+                            <button
+                              onClick={() => nav(`/traces?service=${encodeURIComponent(tgtName)}`)}
+                              className="btn text-[11px] py-1 border-white/10 text-[#c4bdd9] hover:text-white"
+                            >
+                              Traces
+                            </button>
+                            <button
+                              onClick={() => nav(`/user-changes`)}
+                              className="btn text-[11px] py-1 border-cyan-500/40 text-cyan-300 hover:bg-cyan-500/20"
+                            >
+                              Changes
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          </Panel>
+        </div>
+      ) : (
+        /* Classic Topology View */
+        <div className="grid gap-4 xl:grid-cols-[1fr_320px]">
+          <Panel title="User dependency graph">
+            <UserGraphCanvas graph={q.data!} onPrincipal={(p) => nav(`/users/${encodeURIComponent(p)}`)} />
+          </Panel>
+          <Panel title="Changed Edges" subtitle="Explicit labels accompany visual styling">
+            <div className="max-h-[620px] overflow-auto scrollbar p-3">
+              {q.data?.edges
+                .filter((e) => e.state !== "normal")
+                .map((e, i) => (
+                  <div className="mb-2 rounded-lg border border-amber-500/30 bg-amber-500/10 p-2 text-xs" key={i}>
+                    <span className="rounded bg-amber-500/20 px-1.5 py-0.5 text-amber-300 font-semibold text-[10px]">
+                      CHANGED
+                    </span>
+                    <div className="mt-2 font-mono text-[#f5f3fa]">
+                      {e.source.split(":")[1]} → {e.target.split(":")[1]}
+                    </div>
+                    <div className="text-[#c4bdd9] mt-1">
+                      {e.label} · {n(e.requests, 0)} requests
+                    </div>
+                  </div>
+                ))}
+            </div>
+          </Panel>
+        </div>
+      )}
+    </Page>
+  );
+}
 
 export function UserAnalyticsPage(){const nav=useNavigate();const q=useQuery({queryKey:["user-analytics"],queryFn:()=>api<Record<string,UserItem[]>>(`/api/v1/user-analytics`)});if(q.isLoading)return <Page eyebrow="User Intelligence" title="User Analytics" description=""><Loading/></Page>;if(q.error)return <Page eyebrow="User Intelligence" title="User Analytics" description=""><ErrorState message={q.error.message}/></Page>;const sections:[[string,string,string],any[]][]=[[ ["most_active","Most Active Principals","Total observed credential use"],q.data?.most_active||[]],[ ["most_changed","Most Changed Principals","Explainable behavior score"],q.data?.most_changed||[]],[ ["shared_credentials","Shared Credential Usage","Accounts used by multiple caller services"],q.data?.shared_credentials||[]],[ ["source_diversity","Source Diversity","Accounts used from many source IPs"],q.data?.source_diversity||[]],[ ["most_targets","Broadest Service Access","Most target services"],q.data?.most_targets||[]],[ ["most_operations","Broadest API Usage","Most operations"],q.data?.most_operations||[]],[ ["newest","Newest Principals","Most recently first observed"],q.data?.newest||[]],[ ["dormant_reactivated","Recently Reactivated","Returned after dormancy"],q.data?.dormant_reactivated||[]]];return <Page eyebrow="User Intelligence" title="Account Behavior Analytics" description="Estate-wide identity patterns; shared usage is investigation context, not an automatic malicious classification."><div className="grid gap-4 lg:grid-cols-2">{sections.map(([meta,rows])=><Panel title={meta[1]} subtitle={meta[2]} key={meta[0]}><div className="divide-y divide-[rgba(255,255,255,0.08)]">{rows.slice(0,10).map((u:any,i:number)=><button onClick={()=>nav(`/users/${encodeURIComponent(u.principal_name)}`)} key={u.principal_name} className="flex w-full items-center justify-between p-3 text-left text-xs hover:bg-white/[0.05] transition"><span><b className="font-mono text-cyan-300 font-medium">{i+1}. {u.principal_name}</b><small className="ml-2 text-[#9e96b8]">{u.principal_type||"shared usage"}</small></span><span className="font-mono text-[#f5f3fa] font-medium">{n(u.behavior_score??u.callers??u.unique_sources??u.unique_targets??u.unique_operations??u.total_requests,0)}</span></button>)}{!rows.length&&<div className="p-4 text-xs text-[#c4bdd9]">No qualifying principals.</div>}</div></Panel>)}</div></Page>}

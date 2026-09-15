@@ -141,7 +141,21 @@ export function OverviewPage() {
     );
   }
 
-  const s = summary.data!;
+  const s = summary.data || {
+    observed_rps: 0,
+    observed_tps: 0,
+    total_requests: 0,
+    active_services: 0,
+    active_accounts: 0,
+    p95_latency_ms: 0,
+    http_5xx_rate: 0,
+    slow_request_rate: 0,
+    active_anomalies: 0,
+    latest_ingested_ms: null,
+    sampling_coverage: "100%",
+    tps_equals_rps: true,
+    sample_count: 0,
+  };
   const points = series.data?.items || [];
 
   return (

@@ -25,7 +25,7 @@ from __future__ import annotations
 import json
 import hmac
 from contextlib import asynccontextmanager
-from datetime import datetime
+from datetime import datetime, timezone as dt_timezone, timedelta
 from pathlib import Path
 from typing import Annotated, Any
 
@@ -187,6 +187,8 @@ def create_app(role: str = ROLE_ALL) -> FastAPI:
             "status": "ok",
             "demo_mode": settings.demo_mode,
             "service_role": role,
+            "storage_backend": settings.storage_backend,
+            "elasticsearch_configured": bool(settings.elasticsearch_url),
         }
 
     @app.get("/livez", include_in_schema=False)
@@ -245,10 +247,37 @@ def create_app(role: str = ROLE_ALL) -> FastAPI:
 # Shared query-filter dependency (module level so FastAPI's get_type_hints can
 # resolve the ``Filters`` annotation from the module globals, exactly as the
 # original ``backend.main`` did).
-# --------------------------------------------------------------------------
+def _parse_time_param(val: Any) -> datetime | None:
+    if val is None:
+        return None
+    if isinstance(val, datetime):
+        return val if val.tzinfo else val.replace(tzinfo=dt_timezone.utc)
+    if isinstance(val, (int, float)):
+        ts = val / 1000.0 if val > 10_000_000_000 else float(val)
+        return datetime.fromtimestamp(ts, tz=dt_timezone.utc)
+    if isinstance(val, str):
+        val_str = val.strip()
+        if not val_str:
+            return None
+        try:
+            num = float(val_str)
+            ts = num / 1000.0 if num > 10_000_000_000 else num
+            return datetime.fromtimestamp(ts, tz=dt_timezone.utc)
+        except ValueError:
+            pass
+        try:
+            dt = datetime.fromisoformat(val_str.replace("Z", "+00:00"))
+            return dt if dt.tzinfo else dt.replace(tzinfo=dt_timezone.utc)
+        except Exception:
+            pass
+    return None
+
+
 async def filters_model(
-    start: datetime,
-    end: datetime,
+    start: Any = Query(None),
+    end: Any = Query(None),
+    from_time: Any = Query(None, alias="from"),
+    to_time: Any = Query(None, alias="to"),
     timezone: str = "UTC",
     environment: str | None = None,
     group: str | None = None,
@@ -258,21 +287,34 @@ async def filters_model(
     account: str | None = None,
     comparison: str = "previous",
 ) -> QueryFilters:
-    try:
-        return QueryFilters(
-            start=start,
-            end=end,
-            timezone=timezone,
-            environment=environment,
-            group=group,
-            module=module,
-            service=service,
-            operation=operation,
-            account=account,
-            comparison=comparison,
-        )
-    except Exception as exc:
-        raise HTTPException(422, "Invalid filter or time range") from None
+    now_dt = datetime.now(dt_timezone.utc)
+    s_dt = _parse_time_param(start) or _parse_time_param(from_time)
+    e_dt = _parse_time_param(end) or _parse_time_param(to_time)
+
+    if e_dt is None:
+        e_dt = now_dt + timedelta(minutes=1)
+    if s_dt is None:
+        s_dt = e_dt - timedelta(hours=3)
+    if e_dt <= s_dt:
+        e_dt = s_dt + timedelta(hours=1)
+    if (e_dt - s_dt).total_seconds() > 31 * 86400:
+        s_dt = e_dt - timedelta(days=31)
+
+    tz_str = timezone if isinstance(timezone, str) and timezone.strip() else "UTC"
+    comp_val = comparison if comparison in ("previous", "week", "none") else "previous"
+
+    return QueryFilters(
+        start=s_dt,
+        end=e_dt,
+        timezone=tz_str,
+        environment=environment,
+        group=group,
+        module=module,
+        service=service,
+        operation=operation,
+        account=account,
+        comparison=comp_val,
+    )
 
 
 Filters = Annotated[QueryFilters, Depends(filters_model)]
@@ -315,18 +357,37 @@ def _register_dashboard_routes(app: FastAPI, repo: StorageRepository) -> None:
 
     @app.get("/api/v1/dashboard/heatmap")
     async def heatmap(f: Filters):
-        where, args = repo._event_where(f.start_ms, f.end_ms, filter_dict(f))
         with repo.connect() as db:
-            rows = [
-                dict(r)
-                for r in db.execute(
-                    f"SELECT service_name,(timestamp_ms/300000)*300000 bucket_ms,COUNT(*) samples,"
-                    f"ROUND(AVG(duration_us)/1000.0,1) avg_ms,SUM(status_code>=500)*1.0/COUNT(*) failure_rate "
-                    f"FROM events WHERE {where} AND span_kind='server' "
-                    f"GROUP BY service_name,bucket_ms ORDER BY samples DESC LIMIT 1200",
-                    args,
-                )
-            ]
+            mb_count_row = db.execute("SELECT count() FROM metric_buckets").fetchone()
+            use_mb = bool(mb_count_row and mb_count_row[0] > 0)
+            if use_mb:
+                start_sec = int(f.start_ms / 1000)
+                end_sec = int(f.end_ms / 1000)
+                rows = [
+                    dict(r)
+                    for r in db.execute(
+                        "SELECT target_service AS service_name, (intDiv(bucket_start, 300) * 300 * 1000) AS bucket_ms, "
+                        "SUM(request_count) AS samples, "
+                        "ROUND(SUM(latency_sum) / NULLIF(SUM(request_count), 0), 1) AS avg_ms, "
+                        "ROUND(SUM(error_count) * 1.0 / NULLIF(SUM(request_count), 0), 4) AS failure_rate "
+                        "FROM metric_buckets "
+                        "WHERE bucket_size = 60 AND bucket_start >= ? AND bucket_start < ? "
+                        "GROUP BY target_service, bucket_ms ORDER BY samples DESC LIMIT 1200",
+                        (start_sec, end_sec),
+                    ).fetchall()
+                ]
+            else:
+                where, args = repo._event_where(f.start_ms, f.end_ms, filter_dict(f))
+                rows = [
+                    dict(r)
+                    for r in db.execute(
+                        f"SELECT service_name,(timestamp_ms/300000)*300000 bucket_ms,COUNT(*) samples,"
+                        f"ROUND(AVG(duration_us)/1000.0,1) avg_ms,SUM(status_code>=500)*1.0/COUNT(*) failure_rate "
+                        f"FROM events WHERE {where} AND span_kind='server' "
+                        f"GROUP BY service_name,bucket_ms ORDER BY samples DESC LIMIT 1200",
+                        args,
+                    ).fetchall()
+                ]
         return {
             "items": rows,
             "metric": "average latency (ms)",

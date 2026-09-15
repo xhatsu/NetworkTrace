@@ -113,10 +113,32 @@ def format_anomaly(r: Dict[str, Any]) -> Dict[str, Any]:
     return r
 
 
+def _parse_time_ms(val: Any) -> Optional[int]:
+    if val is None or val == "":
+        return None
+    if isinstance(val, (int, float)):
+        return int(val) if val > 10_000_000_000 else int(val * 1000)
+    if isinstance(val, str):
+        val_str = val.strip()
+        try:
+            num = float(val_str)
+            return int(num) if num > 10_000_000_000 else int(num * 1000)
+        except ValueError:
+            pass
+        try:
+            dt = datetime.fromisoformat(val_str.replace("Z", "+00:00"))
+            return int(dt.timestamp() * 1000)
+        except Exception:
+            pass
+    return None
+
+
 @router.get("/anomalies")
 async def list_anomalies(
-    from_time: Optional[int] = Query(None, alias="from"),
-    to_time: Optional[int] = Query(None, alias="to"),
+    from_time: Optional[Any] = Query(None, alias="from"),
+    to_time: Optional[Any] = Query(None, alias="to"),
+    start: Optional[Any] = None,
+    end: Optional[Any] = None,
     status: Optional[str] = None,
     severity: Optional[str] = None,
     service: Optional[str] = None,
@@ -124,8 +146,8 @@ async def list_anomalies(
     source_ip: Optional[str] = None,
     limit: int = 100
 ) -> Dict[str, Any]:
-    start_ms = from_time if (from_time and from_time > 10_000_000_000) else (from_time * 1000 if from_time else None)
-    end_ms = to_time if (to_time and to_time > 10_000_000_000) else (to_time * 1000 if to_time else None)
+    start_ms = _parse_time_ms(from_time) or _parse_time_ms(start)
+    end_ms = _parse_time_ms(to_time) or _parse_time_ms(end)
 
     repo = AnomalyRepository()
     rows = repo.list_anomalies(start_ms=start_ms, end_ms=end_ms, status=status, severity=severity, service=service, principal=principal, source_ip=source_ip, limit=limit)

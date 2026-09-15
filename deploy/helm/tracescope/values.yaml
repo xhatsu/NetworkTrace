@@ -43,6 +43,27 @@ clickhouse:
   secure: false
 
 # -----------------------------------------------------------------------------
+# Storage Backend & Elasticsearch Integration
+# Options for storage.backend: "clickhouse" (default) or "elasticsearch" / "elk"
+# When "elasticsearch" is configured, trace queries (search, waterfall) query ELK
+# directly via ElasticsearchTraceRepository while ClickHouse stores host/agent traces.
+# -----------------------------------------------------------------------------
+storage:
+  backend: "clickhouse"
+  clickhouseOnlyAgentTraces: true
+
+elasticsearch:
+  enabled: false
+  url: "http://elasticsearch:9200"
+  index: "traces-apm*,apm-*,traces-*"
+  apiKey: ""
+  user: ""
+  password: ""
+  verifyTls: true
+  timeout: 10
+
+
+# -----------------------------------------------------------------------------
 # Application & Analytics Workload (StatefulSet: exactly 1 replica)
 # Runs migrate (initContainer), api (main), and analytics-worker (sidecar).
 # All 3 containers share the unified app image below.
@@ -51,7 +72,7 @@ app:
   replicaCount: 1
   image:
     repository: xhatsu101/tracescope
-    tag: app-0.2.5
+    tag: app-0.2.6
     pullPolicy: IfNotPresent
   resources:
     requests:
@@ -79,7 +100,7 @@ ingest:
   replicaCount: 2
   image:
     repository: xhatsu101/tracescope
-    tag: ingest-0.2.5
+    tag: ingest-0.2.6
     pullPolicy: IfNotPresent
   autoscaling:
     enabled: true
@@ -108,7 +129,7 @@ agentStats:
   replicaCount: 2
   image:
     repository: xhatsu101/tracescope
-    tag: app-0.2.5
+    tag: app-0.2.6
     pullPolicy: IfNotPresent
   autoscaling:
     enabled: true
@@ -135,7 +156,7 @@ ui:
   replicaCount: 2
   image:
     repository: xhatsu101/tracescope
-    tag: app-0.2.5
+    tag: app-0.2.6
     pullPolicy: IfNotPresent
   resources:
     requests:

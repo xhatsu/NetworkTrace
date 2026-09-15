@@ -417,7 +417,20 @@ class UserRepository:
                 {"source":f"caller:{caller}","target":f"principal:{row['principal_name']}","requests":row["requests"],"state":state,"label":"credential source"},
                 {"source":f"principal:{row['principal_name']}","target":f"target:{row['target_service']}","requests":row["requests"],"state":state,"label":"service access"},
             ))
-        return {"nodes":list(nodes.values()),"edges":edges,"mode":"principal" if principal else "service" if service else "estate"}
+        summary = {
+            "total_principals": len([n for n in nodes.values() if n["type"] == "principal"]),
+            "total_callers": len([n for n in nodes.values() if n["type"] == "caller"]),
+            "total_targets": len([n for n in nodes.values() if n["type"] == "target"]),
+            "total_requests": sum(r["requests"] for r in rows),
+            "changed_edges": sum(1 for r in rows if r["changed"]),
+        }
+        return {
+            "nodes": list(nodes.values()),
+            "edges": edges,
+            "items": rows,
+            "summary": summary,
+            "mode": "principal" if principal else "service" if service else "estate",
+        }
 
     def analytics(self) -> dict[str, Any]:
         with get_connection(self.db_path) as db:

@@ -1,12 +1,16 @@
-"""Provide the canonical raw-trace persistence boundary used by ingestion and exploration."""
 from __future__ import annotations
+import logging
 from typing import Any, Dict, List, Optional
 from backend.app.models.trace import NormalizedTrace
 from backend.app.repositories.db_context import get_connection, db_transaction
+from backend.app.repositories.elasticsearch_trace_repository import ElasticsearchTraceRepository
+
+log = logging.getLogger("tracescope-trace-repo")
 
 class TraceRepository:
     def __init__(self, db_path: Optional[str] = None):
         self.db_path = db_path
+        self._es_repo = ElasticsearchTraceRepository()
 
     def insert_traces(self, traces: List[NormalizedTrace]) -> int:
         if not traces:
@@ -48,6 +52,14 @@ class TraceRepository:
         return inserted
 
     def get_trace(self, trace_id: str) -> Dict[str, Any] | None:
+        if self._es_repo.is_configured():
+            try:
+                es_res = self._es_repo.get_trace(trace_id)
+                if es_res and es_res.get("spans"):
+                    return es_res
+            except Exception as e:
+                log.warning("Elasticsearch get_trace failed for %s, falling back: %s", trace_id, e)
+
         with get_connection(self.db_path) as db:
             rows = [dict(r) for r in db.execute(
                 "SELECT * FROM traces WHERE trace_id=? ORDER BY timestamp_ms ASC LIMIT 1000", (trace_id,)
@@ -71,6 +83,18 @@ class TraceRepository:
         limit: int = 50,
         offset: int = 0
     ) -> List[Dict[str, Any]]:
+        if self._es_repo.is_configured():
+            try:
+                es_rows = self._es_repo.list_traces(
+                    start_ms=start_ms, end_ms=end_ms, service=service, caller=caller,
+                    target=target, principal=principal, operation=operation, source_ip=source_ip,
+                    status=status, trace_id=trace_id, limit=limit, offset=offset
+                )
+                if es_rows is not None and len(es_rows) > 0:
+                    return es_rows
+            except Exception as e:
+                log.warning("Elasticsearch list_traces failed, falling back: %s", e)
+
         clauses = []
         args: List[Any] = []
         if start_ms is not None:

@@ -347,6 +347,12 @@ def normalize_otel_record(raw: dict[str, Any], source_label: str = "import") -> 
             principal_name = str(legacy_user).strip()[:200]
             supplied_scheme = str(pick("scheme", default="")).strip().lower()
             auth_scheme = supplied_scheme if supplied_scheme in {"basic", "wsse"} else None
+    # Elasticsearch APM and canonical OTel user fields
+    if principal_name == "unknown":
+        user_val = pick("user.name", "user.id", "user")
+        if user_val is not None and str(user_val).strip() and str(user_val).strip() != "unknown":
+            principal_name = str(user_val).strip()[:200]
+            auth_scheme = "authenticated_user"
 
     # Stable Principal ID
     principal_id = f"{environment}:{principal_name}"
