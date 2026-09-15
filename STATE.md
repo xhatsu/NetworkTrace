@@ -11,6 +11,7 @@ This file tracks the current state, accessibility, conveniences, and guides for 
 - **Ingest NodePort**: `http://<node-ip>:30103/api/ingest` (Plain HTTP / non-SSL NodePort entrypoint for legacy C++ shippers such as `nt-ship-cpp` / `nt-sniff-cpp` without TLS compiled in; verified live on node `129.150.59.233:30103`)
 - **Ingress HTTP NodePort**: `http://<node-ip>:31561` (Cluster Ingress-Nginx NodePort for plain HTTP routing across `/api/ingest`, `/api/agent/stats`, `/api`, and `/`; verified live on node `129.150.59.233:31561`)
 - **Cluster Node IPs**: Internal `10.0.0.35`, Public `129.150.59.233` (both ports `31561` and `30103` accessible)
+- **Agent Ingestion Authentication**: `apiKey: ""` is active on the cluster; unauthenticated `POST /api/ingest` and `POST /api/agent/stats` verified returning HTTP 200 on both NodePorts (`:31561`, `:30103`) and FQDN (`https://trace.n2d.id.vn/api/ingest`).
 - **UI Design System**: Redesigned following the Behavioral Observability specification:
   - Typography: `Inter` (`cv01`, `ss03`) + `JetBrains Mono` for tabular metrics and percentiles, with application-wide 120% base font scaling (`html { font-size: 120%; }`, 13px chart ticks, scaled canvas labels, and proportional pixel utility adjustments).
   - Aesthetics: Linear & Sentry developer tooling palette (`#08090a` canvas, `#0e1116` panels, whisper-thin borders `rgba(255,255,255,0.07)`)
