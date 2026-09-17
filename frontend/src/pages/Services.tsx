@@ -34,6 +34,7 @@ import {
   pct,
 } from "../components";
 import { useFilters } from "../App";
+import { useI18n } from "../i18n";
 import type { SeriesPoint } from "../types";
 
 type Service = {
@@ -47,6 +48,7 @@ type Service = {
 
 export function ServicesPage() {
   const { filters } = useFilters();
+  const { t } = useI18n();
   const nav = useNavigate();
   const [filterQuery, setFilterQuery] = useState("");
   const qs = queryString(filters);
@@ -68,16 +70,16 @@ export function ServicesPage() {
 
   return (
     <Page
-      eyebrow="Inventory & Catalog"
-      title="Service Estate Directory"
-      description="Observed service nodes with environment segmentation, functional group ownership, and telemetry freshness."
+      eyebrow={t("Inventory & Catalog")}
+      title={t("Service Estate Directory")}
+      description={t("Observed service nodes with environment segmentation, functional group ownership, and telemetry freshness.")}
       actions={
         <div className="relative w-72">
           <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-cyan-400" />
           <input
             value={filterQuery}
             onChange={(e) => setFilterQuery(e.target.value)}
-            placeholder="Filter by name, group, module…"
+            placeholder={t("Filter by name, group, module…")}
             className="w-full rounded-lg border border-[rgba(255,255,255,0.14)] bg-white/[0.04] pl-9 pr-3 py-1.5 text-xs text-[#f5f3fa] placeholder:text-[#9e96b8] focus:border-cyan-400 focus:bg-white/[0.08] focus:outline-none"
           />
         </div>
@@ -87,8 +89,8 @@ export function ServicesPage() {
         <Loading />
       ) : (
         <Panel
-          title={`${filteredItems.length} of ${query.data?.items.length || 0} Registered Services`}
-          subtitle="Click any service to inspect latency tails, operation breakdown, and callers"
+          title={`${filteredItems.length} ${t("Across")} ${query.data?.items.length || 0} ${t("Registered Services")}`}
+          subtitle={t("Click any service to inspect latency tails, operation breakdown, and callers")}
         >
           <div className="grid gap-2.5 p-4 sm:grid-cols-2 lg:grid-cols-3">
             {filteredItems.map((s, idx) => {
@@ -137,10 +139,10 @@ export function ServicesPage() {
 
                   <div className="mt-4 flex items-center justify-between border-t border-[rgba(255,255,255,0.08)] pt-3 text-[10px]">
                     <span className={`rounded border px-1.5 py-0.5 font-mono ${envStyle}`}>
-                      {s.environment}
+                      {t(s.environment, s.environment)}
                     </span>
                     <span className="text-[#c4bdd9]">
-                      Active {new Date(s.last_seen_ms).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                      {t("Active")} {new Date(s.last_seen_ms).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                     </span>
                   </div>
                 </button>
@@ -148,7 +150,7 @@ export function ServicesPage() {
             })}
             {filteredItems.length === 0 && (
               <div className="col-span-full py-12 text-center text-xs text-[#c4bdd9]">
-                No services match "{filterQuery}".
+                {t("No services match")} "{filterQuery}".
               </div>
             )}
           </div>
@@ -182,6 +184,7 @@ type Detail = {
 export function ServiceDetailPage() {
   const { name = "" } = useParams();
   const { filters } = useFilters();
+  const { t } = useI18n();
   const nav = useNavigate();
   const qs = queryString({ ...filters, service: undefined });
 
@@ -197,7 +200,7 @@ export function ServiceDetailPage() {
 
   if (query.isLoading) {
     return (
-      <Page eyebrow="Service Drilldown" title={name} description="Loading service telemetry…">
+      <Page eyebrow={t("Service Drilldown")} title={name} description={t("Loading...")}>
         <Loading />
       </Page>
     );
@@ -205,7 +208,7 @@ export function ServiceDetailPage() {
 
   if (query.error) {
     return (
-      <Page eyebrow="Service Drilldown" title={name} description="">
+      <Page eyebrow={t("Service Drilldown")} title={name} description="">
         <ErrorState message={query.error.message} />
       </Page>
     );
@@ -241,48 +244,48 @@ export function ServiceDetailPage() {
 
   return (
     <Page
-      eyebrow="Service Drilldown"
+      eyebrow={t("Service Drilldown")}
       title={name}
-      description={`${serviceObj.service_group || "Core"} / ${serviceObj.service_module || "Default"} · Environment: ${serviceObj.environment || "production"}`}
+      description={`${serviceObj.service_group || "Core"} / ${serviceObj.service_module || "Default"} · ${t("Environment")}: ${serviceObj.environment || "production"}`}
       actions={
         <button
           className="btn"
           onClick={() => nav(`/services?${qs}`)}
         >
           <ArrowLeft size={13} />
-          All Services
+          {t("All Services")}
         </button>
       }
     >
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
         <MetricCard
-          label="Observed Volume"
+          label={t("Observed Volume")}
           value={n(total)}
-          detail="Server transactions"
+          detail={t("Server transactions")}
         />
         <MetricCard
-          label="Request Rate"
+          label={t("Request Rate")}
           value={`${n(total / durationSec, 2)}/s`}
-          detail="Observed rate in window"
+          detail={t("Observed rate in window")}
         />
         <MetricCard
-          label="Worst Operation p95"
+          label={t("Worst Operation p95")}
           value={`${n(p95)} ms`}
-          detail={`Across ${operations.length} operations`}
+          detail={`${t("Across")} ${operations.length} ${t("Operations").toLowerCase()}`}
           tone={p95 > 500 ? "bad" : "normal"}
         />
         <MetricCard
-          label="Failure Rate"
+          label={t("Failure Rate")}
           value={pct(fail)}
-          detail={`n=${n(total)} requests`}
+          detail={`n=${n(total)} ${t("requests")}`}
           tone={fail > 0.02 ? "bad" : "normal"}
         />
       </div>
 
       <div className="mt-4 grid gap-4 lg:grid-cols-12">
         <Panel
-          title="Throughput & p95 Latency Trend"
-          subtitle="Observed RPS and merged histogram p95 values"
+          title={t("Throughput & p95 Latency Trend")}
+          subtitle={t("Observed TPS and merged histogram p95 values")}
           className="lg:col-span-8"
         >
           <div className="h-72 p-3">
@@ -304,7 +307,7 @@ export function ServiceDetailPage() {
                 <Legend wrapperStyle={{ fontSize: 11, paddingTop: 4 }} />
                 <Area
                   dataKey="p95_ms"
-                  name="p95 Latency (ms)"
+                  name={`${t("P95 Latency")} (ms)`}
                   stroke="#f43f5e"
                   fill="#f43f5e"
                   fillOpacity={0.1}
@@ -312,7 +315,7 @@ export function ServiceDetailPage() {
                 />
                 <Area
                   dataKey="rps"
-                  name="Observed RPS"
+                  name={t("Observed Throughput (TPS)")}
                   stroke="#818cf8"
                   fill="#818cf8"
                   fillOpacity={0.15}
@@ -324,20 +327,20 @@ export function ServiceDetailPage() {
         </Panel>
 
         <Panel
-          title="Dependency Relationships"
-          subtitle="Confirmed & inferred directional trace links"
+          title={t("Dependency Relationships")}
+          subtitle={t("Confirmed & inferred directional trace links")}
           className="lg:col-span-4"
         >
           <div className="p-4 space-y-4">
-            <Relation title="Incoming Callers" items={incoming} />
-            <Relation title="Outgoing Dependencies" items={outgoing} />
+            <Relation title={t("Incoming Callers")} items={incoming} />
+            <Relation title={t("Outgoing Dependencies")} items={outgoing} />
           </div>
         </Panel>
       </div>
 
       <Panel
-        title="Operation Performance Inventory"
-        subtitle="Latency percentiles from merged logarithmic histograms · Status codes breakdown"
+        title={t("Operation Performance Inventory")}
+        subtitle={t("Latency percentiles from merged logarithmic histograms · Status codes breakdown")}
         className="mt-4"
       >
         <div className="overflow-auto scrollbar">
@@ -345,10 +348,10 @@ export function ServiceDetailPage() {
             <thead>
               <tr className="border-b border-[rgba(255,255,255,0.06)] bg-white/[0.01]">
                 {[
-                  "Operation",
-                  "Requests",
+                  t("Operation"),
+                  t("Volume"),
                   "p50 Median",
-                  "p95 Latency",
+                  t("P95 Latency"),
                   "p99 Tail",
                   "Slow >1s %",
                   "Status Codes (2xx / 4xx / 5xx)",
@@ -387,8 +390,8 @@ export function ServiceDetailPage() {
 
       <div className="mt-4 grid gap-4 lg:grid-cols-2">
         <Panel
-          title="Account Identity Distribution"
-          subtitle="Presented authentication principals on requests to this service"
+          title={t("Account Identity Distribution")}
+          subtitle={t("Presented authentication principals on requests to this service")}
         >
           <SimpleTable
             rows={accounts.map((a: any) => ({
@@ -399,14 +402,37 @@ export function ServiceDetailPage() {
         </Panel>
 
         <Panel
-          title="Instance Load & Distribution"
-          subtitle="Traffic balance across recorded nodes"
+          title={t("Instance Load & Distribution")}
+          subtitle={t("Traffic balance across recorded nodes")}
         >
           <SimpleTable rows={instances} />
         </Panel>
       </div>
-      <Panel title="Users" subtitle="Principals observed using this service · click to open User Intelligence" className="mt-4">
-        <div className="overflow-auto"><table className="w-full text-xs"><thead><tr>{["Principal","Requests","Callers","Operations","First seen","Last seen","Recent change"].map(h=><th className="table-head px-3 py-2" key={h}>{h}</th>)}</tr></thead><tbody>{(serviceUsers.data?.items||[]).map(u=><tr key={u.principal_name} onClick={()=>nav(`/users/${encodeURIComponent(u.principal_name)}?${qs}`)} className="cursor-pointer border-t border-white/[.05] hover:bg-white/[.03]"><td className="px-3 py-2 font-mono text-indigo-300">{u.principal_name}</td><td className="px-3 font-mono">{n(u.requests,0)}</td><td className="px-3 font-mono">{u.callers}</td><td className="px-3 font-mono">{u.operations}</td><td className="px-3 text-[#8b949e]">{new Date(u.first_seen).toLocaleString()}</td><td className="px-3 text-[#8b949e]">{new Date(u.last_seen).toLocaleString()}</td><td className="px-3">{u.recent_change?<span className="rounded bg-amber-500/10 px-2 py-1 text-amber-400">Changed</span>:"—"}</td></tr>)}</tbody></table></div>
+      <Panel title={t("Users")} subtitle={t("Principals observed using this service · click to open User Intelligence")} className="mt-4">
+        <div className="overflow-auto">
+          <table className="w-full text-xs">
+            <thead>
+              <tr>
+                {[t("Principal Identity"), t("Volume"), t("Callers"), t("Operations"), t("First seen"), t("Last seen"), t("Recent change")].map((h) => (
+                  <th className="table-head px-3 py-2" key={h}>{h}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {(serviceUsers.data?.items || []).map((u) => (
+                <tr key={u.principal_name} onClick={() => nav(`/users/${encodeURIComponent(u.principal_name)}?${qs}`)} className="cursor-pointer border-t border-white/[.05] hover:bg-white/[.03]">
+                  <td className="px-3 py-2 font-mono text-indigo-300">{u.principal_name}</td>
+                  <td className="px-3 font-mono">{n(u.requests, 0)}</td>
+                  <td className="px-3 font-mono">{u.callers}</td>
+                  <td className="px-3 font-mono">{u.operations}</td>
+                  <td className="px-3 text-[#8b949e]">{new Date(u.first_seen).toLocaleString()}</td>
+                  <td className="px-3 text-[#8b949e]">{new Date(u.last_seen).toLocaleString()}</td>
+                  <td className="px-3">{u.recent_change ? <span className="rounded bg-amber-500/10 px-2 py-1 text-amber-400">{t("Changed")}</span> : "—"}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
       </Panel>
     </Page>
   );
@@ -419,6 +445,7 @@ function Relation({
   title: string;
   items?: { name: string; requests: number; evidence: string }[];
 }) {
+  const { t } = useI18n();
   const safeItems = items || [];
   return (
     <div>
@@ -450,7 +477,7 @@ function Relation({
         </div>
       ) : (
         <div className="rounded-lg border border-dashed border-[rgba(255,255,255,0.08)] p-3 text-center text-[11px] text-[#8b949e]">
-          No explicit edge evidence recorded
+          {t("No explicit edge evidence recorded")}
         </div>
       )}
     </div>
@@ -462,6 +489,7 @@ function SimpleTable({
 }: {
   rows?: { name: string; operation?: string; requests: number; avg_ms?: number }[];
 }) {
+  const { t } = useI18n();
   const safeRows = rows || [];
   return (
     <div className="divide-y divide-[rgba(255,255,255,0.04)]">
@@ -483,7 +511,7 @@ function SimpleTable({
         </div>
       ))}
       {!safeRows.length && (
-        <div className="p-8 text-center text-xs text-[#8b949e]">No records found.</div>
+        <div className="p-8 text-center text-xs text-[#8b949e]">{t("No records found.")}</div>
       )}
     </div>
   );

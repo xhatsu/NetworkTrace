@@ -37,6 +37,7 @@ import {
   Legend,
 } from "recharts";
 import { Page, Panel, MetricCard, Loading, ErrorState, n, pct, chartTooltip } from "../components";
+import { useI18n } from "../i18n";
 
 // ─── types ────────────────────────────────────────────────────────────────────
 
@@ -222,6 +223,7 @@ function NodeRow({
   sample: AgentSample;
   onDelete: (node: string, instance_id: string) => void;
 }) {
+  const { t } = useI18n();
   const nav = useNavigate();
   const reasons = parseReasons(sample.reasons_json);
   const dropWarn = (sample.cap_kernel_drop_percent ?? 0) > 1;
@@ -335,12 +337,12 @@ function NodeRow({
       <td className="whitespace-nowrap px-4 py-3 text-right">
         <div className="flex items-center justify-end gap-2.5">
           <div className="inline-flex items-center gap-1 text-[11px] font-medium text-indigo-400 group-hover:text-indigo-300 transition">
-            <span>Drilldown</span>
+            <span>{t("Drilldown")}</span>
             <ArrowRight size={13} className="group-hover:translate-x-0.5 transition" />
           </div>
           <button
             type="button"
-            title={`Delete instance ${sample.instance_id} of node ${sample.node}`}
+            title={`${t("Delete")} ${sample.instance_id}`}
             onClick={(e) => {
               e.stopPropagation();
               onDelete(sample.node, sample.instance_id);
@@ -358,6 +360,7 @@ function NodeRow({
 // ─── Fleet Overview Page ───────────────────────────────────────────────────────
 
 export function AgentStatsPage() {
+  const { t } = useI18n();
   const nav = useNavigate();
   const [targetToDelete, setTargetToDelete] = useState<{ node: string; instance_id: string } | null>(null);
   const [deleteMode, setDeleteMode] = useState<"instance" | "node">("instance");
@@ -397,51 +400,51 @@ export function AgentStatsPage() {
 
   return (
     <Page
-      eyebrow="Infrastructure Fleet"
-      title="Capture Agents"
-      description="Live operational telemetry, capture health, and resource constraints for oldkernel NetworkTracing agents."
+      eyebrow={t("Infrastructure Fleet")}
+      title={t("Capture Agents")}
+      description={t("Live operational telemetry, capture health, and resource constraints for oldkernel NetworkTracing agents.")}
       actions={
         <button
           onClick={() => refetch()}
           disabled={isFetching}
           className="btn"
-          title="Refresh Fleet Status"
+          title={t("Refresh Fleet Status")}
         >
           <RefreshCw size={13} className={isFetching ? "animate-spin" : ""} />
-          Refresh
+          {t("Refresh")}
         </button>
       }
     >
       {/* Fleet KPI Summary Cards */}
       <div className="mb-6 grid grid-cols-2 gap-3 sm:grid-cols-4">
         <MetricCard
-          label="Reporting Nodes"
+          label={t("Reporting Nodes")}
           value={String(samples.length)}
-          detail={`${okCount} healthy · ${degradedCount} degraded`}
+          detail={`${okCount} ${t("healthy")} · ${degradedCount} ${t("degraded")}`}
           tone={degradedCount > 0 ? "bad" : "good"}
         />
         <MetricCard
-          label="Fleet Push Rate"
+          label={t("Fleet Push Rate")}
           value={`${n(totalFleetEps, 1)} ev/s`}
-          detail="Aggregate event shipping rate"
+          detail={t("Aggregate event shipping rate")}
         />
         <MetricCard
-          label="Fleet Bandwidth"
+          label={t("Fleet Bandwidth")}
           value={`${n(totalFleetKbps, 1)} kbps`}
-          detail="Combined uplink consumption"
+          detail={t("Combined uplink consumption")}
         />
         <MetricCard
-          label="Health Ratio"
+          label={t("Health Ratio")}
           value={samples.length ? `${((okCount / samples.length) * 100).toFixed(0)}%` : "—"}
-          detail={`${okCount} of ${samples.length} nodes nominal`}
+          detail={`${okCount} ${t("of")} ${samples.length} ${t("nodes nominal")}`}
           tone={okCount === samples.length && samples.length > 0 ? "good" : "normal"}
         />
       </div>
 
       {/* Main Table Panel */}
       <Panel
-        title="Active Agent Nodes"
-        subtitle="Click any agent row to open the complete time-series performance and metric dashboard"
+        title={t("Active Agent Nodes")}
+        subtitle={t("Click any agent row to open the complete time-series performance and metric dashboard")}
       >
         {isLoading ? (
           <Loading />
@@ -451,9 +454,9 @@ export function AgentStatsPage() {
           <div className="flex min-h-56 flex-col items-center justify-center gap-3 text-sm text-[#8b949e]">
             <Server size={36} className="opacity-20 text-indigo-400" />
             <div className="text-center">
-              <div className="font-semibold text-[#f0f3f6]">No active agents reporting</div>
+              <div className="font-semibold text-[#f0f3f6]">{t("No active agents reporting")}</div>
               <div className="mt-1 text-xs">
-                Agents ship statistics via{" "}
+                {t("Agents ship statistics via")}{" "}
                 <code className="rounded bg-white/[0.05] px-1.5 py-0.5 font-mono text-indigo-300">
                   POST /api/agent/stats
                 </code>
@@ -466,15 +469,15 @@ export function AgentStatsPage() {
               <thead>
                 <tr className="border-b border-[rgba(255,255,255,0.07)] text-[10px] uppercase tracking-wider text-[#59616b]">
                   {[
-                    "Node / Instance",
-                    "Status",
-                    "Mode",
-                    "Capture Rate",
-                    "Shipping Rate",
-                    "Queue Buffer",
-                    "CPU Core",
-                    "Memory RSS",
-                    "Last Seen",
+                    t("Node / Instance"),
+                    t("Status"),
+                    t("Mode"),
+                    t("Capture Rate"),
+                    t("Shipping Rate"),
+                    t("Queue Buffer"),
+                    t("CPU Core"),
+                    t("Memory RSS"),
+                    t("Last Seen"),
                     "",
                   ].map((h, idx) => (
                     <th key={idx} className="whitespace-nowrap px-4 py-2.5 text-left font-semibold">
@@ -502,26 +505,26 @@ export function AgentStatsPage() {
 
       {/* Delete Confirmation Modal */}
       {targetToDelete && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4">
           <div className="w-full max-w-md rounded-xl border border-[rgba(255,255,255,0.12)] bg-[#0e1116] p-5 shadow-2xl">
             <div className="flex items-center gap-3 text-rose-400">
               <div className="grid h-10 w-10 place-items-center rounded-xl bg-rose-500/10 border border-rose-500/20">
                 <Trash2 size={20} />
               </div>
               <div>
-                <h3 className="text-sm font-semibold text-[#f0f3f6]">Delete Agent Telemetry</h3>
-                <p className="text-xs text-[#8b949e]">Select deletion scope for {targetToDelete.node}</p>
+                <h3 className="text-sm font-semibold text-[#f0f3f6]">{t("Delete Agent Telemetry")}</h3>
+                <p className="text-xs text-[#8b949e]">{t("Select deletion scope for")} {targetToDelete.node}</p>
               </div>
             </div>
 
             <div className="mt-4 space-y-2.5 text-xs text-[#c9d1d9]">
               <div className="rounded-lg border border-[rgba(255,255,255,0.06)] bg-white/[0.02] p-3 space-y-1">
                 <div className="flex justify-between">
-                  <span className="text-[#8b949e]">Node:</span>
+                  <span className="text-[#8b949e]">{t("Node:")}</span>
                   <span className="font-mono font-semibold text-white">{targetToDelete.node}</span>
                 </div>
                 <div className="flex justify-between">
-                  <span className="text-[#8b949e]">Target Instance:</span>
+                  <span className="text-[#8b949e]">{t("Target Instance:")}</span>
                   <span className="font-mono text-indigo-300">{targetToDelete.instance_id}</span>
                 </div>
               </div>
@@ -536,7 +539,7 @@ export function AgentStatsPage() {
                     className="mt-0.5 accent-rose-500"
                   />
                   <div>
-                    <div className="font-semibold text-[#f0f3f6]">Delete this instance only</div>
+                    <div className="font-semibold text-[#f0f3f6]">{t("Delete this instance only")}</div>
                     <div className="text-[11px] text-[#8b949e] mt-0.5">
                       Purges only instance <code className="font-mono text-indigo-300">{targetToDelete.instance_id}</code>. Other active or historical instances of <span className="font-mono text-white">{targetToDelete.node}</span> remain unaffected.
                     </div>
@@ -552,9 +555,9 @@ export function AgentStatsPage() {
                     className="mt-0.5 accent-rose-500"
                   />
                   <div>
-                    <div className="font-semibold text-rose-300">Delete entire node "{targetToDelete.node}"</div>
+                    <div className="font-semibold text-rose-300">{t("Delete entire node")} "{targetToDelete.node}"</div>
                     <div className="text-[11px] text-[#8b949e] mt-0.5">
-                      Purges all instances and complete historical metrics recorded under this node hostname.
+                      {t("Purges all instances and complete historical metrics recorded under this node hostname.")}
                     </div>
                   </div>
                 </label>
@@ -577,7 +580,7 @@ export function AgentStatsPage() {
                   setDeleteError(null);
                 }}
               >
-                Cancel
+                {t("Cancel")}
               </button>
               <button
                 type="button"
@@ -586,7 +589,7 @@ export function AgentStatsPage() {
                 className="btn border-rose-500/40 bg-rose-600/80 hover:bg-rose-600 text-white font-semibold transition"
               >
                 <Trash2 size={13} />
-                <span>{isDeleting ? "Deleting…" : (deleteMode === "instance" ? "Delete Instance" : "Delete Whole Node")}</span>
+                <span>{isDeleting ? t("Deleting…") : (deleteMode === "instance" ? t("Delete Instance") : t("Delete Whole Node"))}</span>
               </button>
             </div>
           </div>
@@ -599,6 +602,7 @@ export function AgentStatsPage() {
 // ─── Dedicated Node Time-Series Dashboard Page ─────────────────────────────────
 
 export function AgentNodeDetailPage() {
+  const { t } = useI18n();
   const { node = "" } = useParams();
   const [searchParams, setSearchParams] = useSearchParams();
   const nav = useNavigate();
@@ -698,7 +702,7 @@ export function AgentNodeDetailPage() {
 
   if (nodeDetailQuery.isLoading && historyQuery.isLoading) {
     return (
-      <Page eyebrow="Agent Drilldown" title={node} description="Loading node telemetry and time-series history…">
+      <Page eyebrow={t("Infrastructure Drilldown")} title={node} description="Loading node telemetry and time-series history…">
         <Loading />
       </Page>
     );
@@ -707,13 +711,13 @@ export function AgentNodeDetailPage() {
   if (nodeDetailQuery.isError || (!latest && !nodeDetailQuery.isLoading)) {
     return (
       <Page
-        eyebrow="Agent Drilldown"
+        eyebrow={t("Infrastructure Drilldown")}
         title={node}
         description="Node not found or no telemetry received yet."
         actions={
           <button className="btn" onClick={() => nav("/agent-stats")}>
             <ArrowLeft size={13} />
-            Agent Fleet
+            {t("All Agents")}
           </button>
         }
       >
@@ -727,15 +731,15 @@ export function AgentNodeDetailPage() {
 
   return (
     <Page
-      eyebrow="Infrastructure Drilldown"
-      title={`Node: ${node}`}
-      description={`Mode: ${latest?.mode ?? "native"} · Instance: ${activeInstanceId ?? "—"} · Sequence: #${latest?.sequence ?? 0} · Observed ${fmtAge(latest?.observed_at ?? 0)}`}
+      eyebrow={t("Infrastructure Drilldown")}
+      title={`${t("Node")}: ${node}`}
+      description={`Mode: ${latest?.mode ?? "native"} · ${t("Target Instance:")} ${activeInstanceId ?? "—"} · #${latest?.sequence ?? 0} · ${fmtAge(latest?.observed_at ?? 0)}`}
       actions={
         <div className="flex flex-wrap items-center gap-2">
           {/* Instance Selector Dropdown if multiple instances exist */}
           {knownInstances.length > 1 && (
             <div className="flex items-center gap-1.5 rounded-lg border border-[rgba(255,255,255,0.08)] bg-white/[0.02] px-2.5 py-1">
-              <span className="text-[11px] text-[#8b949e]">Instance:</span>
+              <span className="text-[11px] text-[#8b949e]">{t("Target Instance:")}</span>
               <select
                 value={activeInstanceId}
                 onChange={(e) => {
@@ -757,10 +761,10 @@ export function AgentNodeDetailPage() {
           {/* Sample Window Limit Segmented Control */}
           <div className="flex items-center rounded-lg border border-[rgba(255,255,255,0.08)] bg-white/[0.02] p-0.5">
             {[
-              { label: "30 pts (~15m)", val: 30 },
-              { label: "60 pts (~30m)", val: 60 },
-              { label: "120 pts (~1h)", val: 120 },
-              { label: "240 pts (~2h)", val: 240 },
+              { label: `30 ${t("pts", "pts")} (~15m)`, val: 30 },
+              { label: `60 ${t("pts", "pts")} (~30m)`, val: 60 },
+              { label: `120 ${t("pts", "pts")} (~1h)`, val: 120 },
+              { label: `240 ${t("pts", "pts")} (~2h)`, val: 240 },
             ].map(({ label, val }) => (
               <button
                 key={val}
@@ -783,24 +787,24 @@ export function AgentNodeDetailPage() {
               historyQuery.refetch();
             }}
             disabled={historyQuery.isFetching}
-            title="Refresh Time Series"
+            title={t("Refresh Time Series")}
           >
             <RefreshCw size={13} className={historyQuery.isFetching ? "animate-spin" : ""} />
-            Refresh
+            {t("Refresh")}
           </button>
 
           <button
             className="btn border-rose-500/30 text-rose-400 hover:bg-rose-500/10 hover:border-rose-500/50 transition"
             onClick={() => setShowDeleteModal(true)}
-            title="Delete this agent node and its entire telemetry history"
+            title={t("Delete this agent node and its entire telemetry history")}
           >
             <Trash2 size={13} />
-            <span>Delete Node</span>
+            <span>{t("Delete Node")}</span>
           </button>
 
           <button className="btn" onClick={() => nav("/agent-stats")}>
             <ArrowLeft size={13} />
-            All Agents
+            {t("All Agents")}
           </button>
         </div>
       }
@@ -820,14 +824,14 @@ export function AgentNodeDetailPage() {
               </span>
             </div>
             <div className="mt-0.5 text-xs text-[#8b949e]">
-              Last heartbeat: <span className="font-mono text-[#c9d1d9]">{fmtFullDate(latest?.observed_at ?? 0)}</span> ({fmtAge(latest?.observed_at ?? 0)})
+              {t("Last heartbeat:")} <span className="font-mono text-[#c9d1d9]">{fmtFullDate(latest?.observed_at ?? 0)}</span> ({fmtAge(latest?.observed_at ?? 0)})
             </div>
           </div>
         </div>
 
         {reasons.length > 0 && (
           <div className="flex items-center gap-1.5">
-            <span className="text-[11px] font-semibold text-amber-400">Active Degradation Causes:</span>
+            <span className="text-[11px] font-semibold text-amber-400">{t("Active Degradation Causes:")}</span>
             {reasons.map((r) => (
               <span key={r} className="rounded bg-amber-500/15 border border-amber-500/30 px-2 py-0.5 text-xs font-mono text-amber-300">
                 {r}
@@ -840,26 +844,26 @@ export function AgentNodeDetailPage() {
       {/* Key Metric Snapshot Cards */}
       <div className="mb-6 grid grid-cols-2 gap-3 sm:grid-cols-4">
         <MetricCard
-          label="Shipping Throughput"
+          label={t("Shipping Throughput")}
           value={`${(latest?.ship_push_kbps ?? 0).toFixed(1)} kbps`}
-          detail={`${(latest?.ship_push_events_per_second ?? 0).toFixed(1)} events/sec pushed`}
+          detail={`${(latest?.ship_push_events_per_second ?? 0).toFixed(1)} ${t("events/sec pushed")}`}
         />
         <MetricCard
-          label="Drop & Loss Rate"
+          label={t("Drop & Loss Rate")}
           value={`${(latest?.ship_drop_percent ?? 0).toFixed(2)}%`}
-          detail={`Kernel drop: ${(latest?.cap_kernel_drop_percent ?? 0).toFixed(3)}%`}
+          detail={`${t("Kernel drop:")} ${(latest?.cap_kernel_drop_percent ?? 0).toFixed(3)}%`}
           tone={(latest?.ship_drop_percent ?? 0) > 2 || (latest?.cap_kernel_drop_percent ?? 0) > 1 ? "bad" : "normal"}
         />
         <MetricCard
-          label="Process CPU & Memory"
+          label={t("Process CPU & Memory")}
           value={`${(latest?.res_cpu_percent_one_core ?? 0).toFixed(1)}%`}
-          detail={`RSS: ${fmtBytes(latest?.res_rss_bytes)} (${latest?.res_threads ?? 1} threads)`}
+          detail={`RSS: ${fmtBytes(latest?.res_rss_bytes)} (${latest?.res_threads ?? 1} ${t("threads")})`}
           tone={(latest?.res_cpu_percent_one_core ?? 0) > 80 ? "bad" : "normal"}
         />
         <MetricCard
-          label="Buffer Queue Depth"
+          label={t("Buffer Queue Depth")}
           value={`${n(latest?.ship_queue_depth_events)} / ${n(latest?.ship_queue_capacity_events || 4000)}`}
-          detail={`High-water: ${n(latest?.ship_queue_high_water_events)} events`}
+          detail={`${t("High-water:")} ${n(latest?.ship_queue_high_water_events)} events`}
           tone={
             latest?.ship_queue_depth_events != null &&
             latest?.ship_queue_capacity_events != null &&
@@ -874,8 +878,8 @@ export function AgentNodeDetailPage() {
       <div className="space-y-6">
         {/* 1. Throughput & Shipping Rate Time Series */}
         <Panel
-          title="Shipping Throughput & Event Rate Over Time"
-          subtitle="Real-time uplink rate (kbps) and event publishing velocity (events/s) across sample windows"
+          title={t("Shipping Throughput & Event Rate Over Time")}
+          subtitle={t("Real-time uplink rate (kbps) and event publishing velocity (events/s) across sample windows")}
         >
           {chartPoints.length === 0 ? (
             <div className="h-64 flex items-center justify-center text-xs text-[#6e7681]">
@@ -902,7 +906,7 @@ export function AgentNodeDetailPage() {
                   <Tooltip
                     {...chartTooltip}
                     formatter={(v: any, name: any) => [
-                      name === "Throughput (kbps)" ? `${Number(v).toFixed(2)} kbps` : `${Number(v).toFixed(2)} ev/s`,
+                      name === t("Throughput (kbps)") ? `${Number(v).toFixed(2)} kbps` : `${Number(v).toFixed(2)} ev/s`,
                       name,
                     ]}
                   />
@@ -911,7 +915,7 @@ export function AgentNodeDetailPage() {
                     yAxisId="left"
                     type="monotone"
                     dataKey="pushKbps"
-                    name="Throughput (kbps)"
+                    name={t("Throughput (kbps)")}
                     stroke="#10b981"
                     strokeWidth={2}
                     fillOpacity={1}
@@ -921,7 +925,7 @@ export function AgentNodeDetailPage() {
                     yAxisId="right"
                     type="monotone"
                     dataKey="pushEps"
-                    name="Push Velocity (ev/s)"
+                    name={t("Push Velocity (ev/s)")}
                     stroke="#818cf8"
                     strokeWidth={2}
                     fillOpacity={1}
@@ -936,8 +940,8 @@ export function AgentNodeDetailPage() {
         {/* 2. Drops & Loss Timeline */}
         <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
           <Panel
-            title="Drop Rate & In-Flight Loss Over Time"
-            subtitle="Kernel socket buffer packet drop % vs Agent shipping queue drop %"
+            title={t("Drop Rate & In-Flight Loss Over Time")}
+            subtitle={t("Kernel socket buffer packet drop % vs Agent shipping queue drop %")}
           >
             {chartPoints.length === 0 ? (
               <div className="h-60 flex items-center justify-center text-xs text-[#6e7681]">No history</div>
@@ -966,7 +970,7 @@ export function AgentNodeDetailPage() {
                     <Area
                       type="monotone"
                       dataKey="shipDropPercent"
-                      name="Shipping Drop %"
+                      name={t("Shipping Drop %")}
                       stroke="#f43f5e"
                       strokeWidth={1.5}
                       fill="url(#colorShipDrop)"
@@ -974,7 +978,7 @@ export function AgentNodeDetailPage() {
                     <Area
                       type="monotone"
                       dataKey="kernelDropPercent"
-                      name="Kernel tp_drop %"
+                      name={t("Kernel tp_drop %")}
                       stroke="#f59e0b"
                       strokeWidth={1.5}
                       fill="url(#colorKernDrop)"
@@ -987,8 +991,8 @@ export function AgentNodeDetailPage() {
 
           {/* 3. System Resources Timeline */}
           <Panel
-            title="System Resources & Footprint Over Time"
-            subtitle="Pinned CPU consumption (1-core scale) and Resident Set Size (MB)"
+            title={t("System Resources & Footprint Over Time")}
+            subtitle={t("Pinned CPU consumption (1-core scale) and Resident Set Size (MB)")}
           >
             {chartPoints.length === 0 ? (
               <div className="h-60 flex items-center justify-center text-xs text-[#6e7681]">No history</div>
@@ -1003,7 +1007,7 @@ export function AgentNodeDetailPage() {
                     <Tooltip
                       {...chartTooltip}
                       formatter={(v: any, name: any) => [
-                        name === "CPU One-Core %" ? `${Number(v).toFixed(1)}%` : `${Number(v).toFixed(0)} MB`,
+                        name === t("CPU One-Core %") ? `${Number(v).toFixed(1)}%` : `${Number(v).toFixed(0)} MB`,
                         name,
                       ]}
                     />
@@ -1012,7 +1016,7 @@ export function AgentNodeDetailPage() {
                       yAxisId="left"
                       type="monotone"
                       dataKey="cpuPercent"
-                      name="CPU One-Core %"
+                      name={t("CPU One-Core %")}
                       stroke="#818cf8"
                       strokeWidth={2}
                       dot={false}
@@ -1021,7 +1025,7 @@ export function AgentNodeDetailPage() {
                       yAxisId="right"
                       type="monotone"
                       dataKey="rssMb"
-                      name="Memory RSS (MB)"
+                      name={t("Memory RSS (MB)")}
                       stroke="#34d399"
                       strokeWidth={2}
                       dot={false}
@@ -1036,8 +1040,8 @@ export function AgentNodeDetailPage() {
         {/* 4. Queue Depth & Emission Delta */}
         <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
           <Panel
-            title="Shipping Queue Backpressure Over Time"
-            subtitle="Queue buffer occupancy vs high-water mark"
+            title={t("Shipping Queue Backpressure Over Time")}
+            subtitle={t("Queue buffer occupancy vs high-water mark")}
           >
             {chartPoints.length === 0 ? (
               <div className="h-60 flex items-center justify-center text-xs text-[#6e7681]">No history</div>
@@ -1059,7 +1063,7 @@ export function AgentNodeDetailPage() {
                     <Area
                       type="monotone"
                       dataKey="queueDepth"
-                      name="Queue Depth (events)"
+                      name={t("Queue Depth (events)")}
                       stroke="#38bdf8"
                       strokeWidth={2}
                       fill="url(#colorQueue)"
@@ -1067,7 +1071,7 @@ export function AgentNodeDetailPage() {
                     <Line
                       type="stepAfter"
                       dataKey="queueHighWater"
-                      name="High-Water Mark"
+                      name={t("High-Water Mark")}
                       stroke="#fbbf24"
                       strokeWidth={1.5}
                       strokeDasharray="4 4"
@@ -1080,8 +1084,8 @@ export function AgentNodeDetailPage() {
           </Panel>
 
           <Panel
-            title="Capture Packet & Event Volume Over Time"
-            subtitle="Packets captured vs parsed events emitted per window"
+            title={t("Capture Packet & Event Volume Over Time")}
+            subtitle={t("Packets captured vs parsed events emitted per window")}
           >
             {chartPoints.length === 0 ? (
               <div className="h-60 flex items-center justify-center text-xs text-[#6e7681]">No history</div>
@@ -1097,7 +1101,7 @@ export function AgentNodeDetailPage() {
                     <Line
                       type="monotone"
                       dataKey="eventsEmittedDelta"
-                      name="Emitted Events (delta)"
+                      name={t("Emitted Events (delta)")}
                       stroke="#a855f7"
                       strokeWidth={2}
                       dot={false}
@@ -1105,7 +1109,7 @@ export function AgentNodeDetailPage() {
                     <Line
                       type="monotone"
                       dataKey="flowsActive"
-                      name="Active Network Flows"
+                      name={t("Active Network Flows")}
                       stroke="#f97316"
                       strokeWidth={1.5}
                       dot={false}
@@ -1118,60 +1122,60 @@ export function AgentNodeDetailPage() {
         </div>
 
         {/* 5. Agent Constraints & Process Isolation Specs */}
-        <Panel title="Process Safety & Hardware Constraints" subtitle="Enforced host-protection limits reported by agent">
+        <Panel title={t("Process Safety & Hardware Constraints")} subtitle={t("Enforced host-protection limits reported by agent")}>
           <div className="grid grid-cols-2 gap-4 p-5 sm:grid-cols-3 lg:grid-cols-6 text-xs">
             <div className="flex flex-col gap-1 border-r border-[rgba(255,255,255,0.06)] pr-3">
-              <span className="text-[10px] uppercase font-semibold text-[#6e7681]">CPU Core Pin</span>
+              <span className="text-[10px] uppercase font-semibold text-[#6e7681]">{t("CPU Core Pin")}</span>
               <span className="font-mono text-[#f0f3f6] text-sm">Core #{String(limits.cpu_core ?? latest?.lim_cpu_core ?? "2")}</span>
-              <span className="text-[10px] text-[#8b949e]">Affinity isolated</span>
+              <span className="text-[10px] text-[#8b949e]">{t("Affinity isolated")}</span>
             </div>
             <div className="flex flex-col gap-1 border-r border-[rgba(255,255,255,0.06)] pr-3">
-              <span className="text-[10px] uppercase font-semibold text-[#6e7681]">Bandwidth Ceiling</span>
+              <span className="text-[10px] uppercase font-semibold text-[#6e7681]">{t("Bandwidth Ceiling")}</span>
               <span className="font-mono text-[#f0f3f6] text-sm">{limits.ship_rate_kbps ?? latest?.lim_ship_rate_kbps ?? 1024} kbps</span>
-              <span className="text-[10px] text-[#8b949e]">Rate limiter capped</span>
+              <span className="text-[10px] text-[#8b949e]">{t("Rate limiter capped")}</span>
             </div>
             <div className="flex flex-col gap-1 border-r border-[rgba(255,255,255,0.06)] pr-3">
-              <span className="text-[10px] uppercase font-semibold text-[#6e7681]">Address Space Limit</span>
+              <span className="text-[10px] uppercase font-semibold text-[#6e7681]">{t("Address Space Limit")}</span>
               <span className="font-mono text-[#f0f3f6] text-sm">{fmtBytes(limits.address_space_bytes ?? latest?.lim_address_space_bytes ?? 268435456)}</span>
-              <span className="text-[10px] text-[#8b949e]">RLIMIT_AS hard ceiling</span>
+              <span className="text-[10px] text-[#8b949e]">{t("RLIMIT_AS hard ceiling")}</span>
             </div>
             <div className="flex flex-col gap-1 border-r border-[rgba(255,255,255,0.06)] pr-3">
-              <span className="text-[10px] uppercase font-semibold text-[#6e7681]">Max Upload Body</span>
+              <span className="text-[10px] uppercase font-semibold text-[#6e7681]">{t("Max Upload Body")}</span>
               <span className="font-mono text-[#f0f3f6] text-sm">{fmtBytes(limits.http_body_max_bytes ?? latest?.lim_http_body_max_bytes ?? 65536)}</span>
-              <span className="text-[10px] text-[#8b949e]">Single batch cap</span>
+              <span className="text-[10px] text-[#8b949e]">{t("Single batch cap")}</span>
             </div>
             <div className="flex flex-col gap-1 border-r border-[rgba(255,255,255,0.06)] pr-3">
-              <span className="text-[10px] uppercase font-semibold text-[#6e7681]">Max Ship Threads</span>
+              <span className="text-[10px] uppercase font-semibold text-[#6e7681]">{t("Max Ship Threads")}</span>
               <span className="font-mono text-[#f0f3f6] text-sm">{limits.ship_threads_max ?? latest?.lim_ship_threads_max ?? 8} threads</span>
-              <span className="text-[10px] text-[#8b949e]">Worker thread pool</span>
+              <span className="text-[10px] text-[#8b949e]">{t("Worker thread pool")}</span>
             </div>
             <div className="flex flex-col gap-1">
-              <span className="text-[10px] uppercase font-semibold text-[#6e7681]">WSSE Body Window</span>
+              <span className="text-[10px] uppercase font-semibold text-[#6e7681]">{t("WSSE Body Window")}</span>
               <span className="font-mono text-[#f0f3f6] text-sm">{fmtBytes(limits.wsse_body_bytes ?? latest?.lim_wsse_body_bytes ?? 8192)}</span>
-              <span className="text-[10px] text-[#8b949e]">Sanitization window</span>
+              <span className="text-[10px] text-[#8b949e]">{t("Sanitization window")}</span>
             </div>
           </div>
         </Panel>
 
         {/* 6. Chronological Sample History Table */}
         <Panel
-          title={`Historical Telemetry Snapshots (Last ${historyRaw.length} points)`}
-          subtitle="Idempotent sequential telemetry records reported by this agent node"
+          title={`${t("Historical Telemetry Snapshots")} (Last ${historyRaw.length} points)`}
+          subtitle={t("Idempotent sequential telemetry records reported by this agent node")}
         >
           <div className="overflow-x-auto">
             <table className="w-full text-xs">
               <thead>
                 <tr className="border-b border-[rgba(255,255,255,0.06)] text-[10px] uppercase tracking-wider text-[#59616b]">
-                  <th className="px-4 py-2.5 text-left font-semibold">Sequence</th>
-                  <th className="px-4 py-2.5 text-left font-semibold">Observation Time</th>
-                  <th className="px-4 py-2.5 text-left font-semibold">Status</th>
-                  <th className="px-4 py-2.5 text-left font-semibold">Throughput</th>
-                  <th className="px-4 py-2.5 text-left font-semibold">Push Rate</th>
-                  <th className="px-4 py-2.5 text-left font-semibold">Drops</th>
-                  <th className="px-4 py-2.5 text-left font-semibold">Queue</th>
-                  <th className="px-4 py-2.5 text-left font-semibold">CPU</th>
-                  <th className="px-4 py-2.5 text-left font-semibold">RSS</th>
-                  <th className="px-4 py-2.5 text-left font-semibold">Reasons / Degradation</th>
+                  <th className="px-4 py-2.5 text-left font-semibold">{t("Sequence")}</th>
+                  <th className="px-4 py-2.5 text-left font-semibold">{t("Observation Time")}</th>
+                  <th className="px-4 py-2.5 text-left font-semibold">{t("Status")}</th>
+                  <th className="px-4 py-2.5 text-left font-semibold">{t("Throughput")}</th>
+                  <th className="px-4 py-2.5 text-left font-semibold">{t("Push Rate")}</th>
+                  <th className="px-4 py-2.5 text-left font-semibold">{t("Drops")}</th>
+                  <th className="px-4 py-2.5 text-left font-semibold">{t("Queue")}</th>
+                  <th className="px-4 py-2.5 text-left font-semibold">{t("CPU")}</th>
+                  <th className="px-4 py-2.5 text-left font-semibold">{t("RSS")}</th>
+                  <th className="px-4 py-2.5 text-left font-semibold">{t("Reasons / Degradation")}</th>
                 </tr>
               </thead>
               <tbody>
@@ -1231,26 +1235,26 @@ export function AgentNodeDetailPage() {
 
       {/* Delete Confirmation Modal */}
       {showDeleteModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4">
           <div className="w-full max-w-md rounded-xl border border-[rgba(255,255,255,0.12)] bg-[#0e1116] p-5 shadow-2xl">
             <div className="flex items-center gap-3 text-rose-400">
               <div className="grid h-10 w-10 place-items-center rounded-xl bg-rose-500/10 border border-rose-500/20">
                 <Trash2 size={20} />
               </div>
               <div>
-                <h3 className="text-sm font-semibold text-[#f0f3f6]">Delete Agent Node</h3>
-                <p className="text-xs text-[#8b949e]">Confirm permanent telemetry removal</p>
+                <h3 className="text-sm font-semibold text-[#f0f3f6]">{t("Delete Agent Node")}</h3>
+                <p className="text-xs text-[#8b949e]">{t("Confirm permanent telemetry removal")}</p>
               </div>
             </div>
 
             <div className="mt-4 space-y-2.5 text-xs text-[#c9d1d9]">
               <div className="rounded-lg border border-[rgba(255,255,255,0.06)] bg-white/[0.02] p-3 space-y-1">
                 <div className="flex justify-between">
-                  <span className="text-[#8b949e]">Node:</span>
+                  <span className="text-[#8b949e]">{t("Node:")}</span>
                   <span className="font-mono font-semibold text-white">{node}</span>
                 </div>
                 <div className="flex justify-between">
-                  <span className="text-[#8b949e]">Target Instance:</span>
+                  <span className="text-[#8b949e]">{t("Target Instance:")}</span>
                   <span className="font-mono text-indigo-300">{activeInstanceId ?? "all"}</span>
                 </div>
               </div>
@@ -1266,7 +1270,7 @@ export function AgentNodeDetailPage() {
                       className="mt-0.5 accent-rose-500"
                     />
                     <div>
-                      <div className="font-semibold text-[#f0f3f6]">Delete this instance only</div>
+                      <div className="font-semibold text-[#f0f3f6]">{t("Delete this instance only")}</div>
                       <div className="text-[11px] text-[#8b949e] mt-0.5">
                         Purges only instance <code className="font-mono text-indigo-300">{activeInstanceId}</code>. Other instances for this node will remain intact.
                       </div>
@@ -1283,9 +1287,9 @@ export function AgentNodeDetailPage() {
                     className="mt-0.5 accent-rose-500"
                   />
                   <div>
-                    <div className="font-semibold text-rose-300">Delete entire node "{node}"</div>
+                    <div className="font-semibold text-rose-300">{t("Delete entire node")} "{node}"</div>
                     <div className="text-[11px] text-[#8b949e] mt-0.5">
-                      Purges all {knownInstances.length} instances and complete historical metrics recorded under this node hostname.
+                      {t("Purges all instances and complete historical metrics recorded under this node hostname.")}
                     </div>
                   </div>
                 </label>
@@ -1308,7 +1312,7 @@ export function AgentNodeDetailPage() {
                   setDeleteError(null);
                 }}
               >
-                Cancel
+                {t("Cancel")}
               </button>
               <button
                 type="button"
@@ -1317,7 +1321,7 @@ export function AgentNodeDetailPage() {
                 className="btn border-rose-500/40 bg-rose-600/80 hover:bg-rose-600 text-white font-semibold transition"
               >
                 <Trash2 size={13} />
-                <span>{isDeleting ? "Deleting…" : (deleteMode === "instance" ? "Delete Instance" : "Delete Whole Node")}</span>
+                <span>{isDeleting ? t("Deleting…") : (deleteMode === "instance" ? t("Delete Instance") : t("Delete Whole Node"))}</span>
               </button>
             </div>
           </div>

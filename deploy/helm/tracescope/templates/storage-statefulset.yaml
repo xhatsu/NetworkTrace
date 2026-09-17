@@ -3,8 +3,9 @@
 {{- $apiImg := default dict (dig "api" "image" nil $appValues) -}}
 {{- $workerImg := default dict (dig "worker" "image" nil $appValues) -}}
 {{- $migImg := default dict (dig "migrations" "image" nil $appValues) -}}
+{{- $globalTag := include "tracescope.globalImageTag" . -}}
 {{- $defaultRepo := default "xhatsu101/tracescope" (default $appImg.repository $apiImg.repository) -}}
-{{- $defaultTag := default "app-0.2.0" (default $appImg.tag $apiImg.tag) -}}
+{{- $defaultTag := default $globalTag (default $appImg.tag $apiImg.tag) -}}
 {{- $defaultPullPolicy := default "IfNotPresent" (default $appImg.pullPolicy $apiImg.pullPolicy) -}}
 apiVersion: apps/v1
 kind: StatefulSet
@@ -121,7 +122,16 @@ spec:
           image: "{{ default $defaultRepo $workerImg.repository }}:{{ default $defaultTag $workerImg.tag }}"
           imagePullPolicy: {{ default $defaultPullPolicy $workerImg.pullPolicy }}
           command: ["python", "-m", "backend.worker"]
-          args: ["--interval", {{ $appValues.worker.interval | quote }}]
+          args:
+            - "--interval"
+            - {{ $appValues.worker.interval | quote }}
+            {{- if $appValues.worker.startTime }}
+            - "--start-time"
+            - {{ $appValues.worker.startTime | quote }}
+            {{- end }}
+            {{- if $appValues.worker.ignorePastData }}
+            - "--ignore-past-data"
+            {{- end }}
           envFrom:
             - configMapRef:
                 name: {{ include "tracescope.fullname" . }}-config

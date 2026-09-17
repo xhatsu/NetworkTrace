@@ -132,27 +132,49 @@ def _run_revised_anomalies(db_path=None):
     return anomalies
 
 
-def run_jobs() -> dict[str, int]:
+def _run_elasticsearch_sync(db_path=None) -> dict:
+    from .elasticsearch import ElasticsearchReader
+    reader = ElasticsearchReader()
+    if not reader.url:
+        return {"status": "skipped", "message": "OTEL_ES_URL not configured"}
+    sync_result = reader.sync(force=True, db_path=db_path)
+    _save_stage_checkpoint("worker_elasticsearch_sync", {
+        "last_run_ms": int(time.time() * 1000),
+        "read": sync_result.get("read", 0),
+        "inserted": sync_result.get("inserted", 0),
+    }, db_path)
+    return sync_result
+
+
+def run_jobs(db_path=None) -> dict[str, Any]:
     started = int(time.time() * 1000)
-    with db_transaction() as db:
+    with db_transaction(db_path) as db:
         db.execute("DELETE FROM jobs WHERE name=?", ("behavioral-observability",))
         db.execute("INSERT INTO jobs(name,status,started_at_ms,detail,processed_count) VALUES(?,?,?,?,0)",
                    ("behavioral-observability", "running", started, ""))
     try:
-        aggregates = _run_stage("aggregate_traces", aggregate_traces)
-        baselines = _run_stage("rebuild_baselines", _run_changed_baselines)
-        anomalies = _run_stage("detect_anomalies", _run_revised_anomalies)
-        principals = _run_stage("process_principal_intelligence", process_principal_intelligence)
+        from .elasticsearch import ElasticsearchReader
+        reader = ElasticsearchReader()
+        es_sync = None
+        if reader.url:
+            es_sync = _run_stage("sync_elasticsearch", lambda: _run_elasticsearch_sync(db_path))
+        aggregates = _run_stage("aggregate_traces", lambda: aggregate_traces(db_path=db_path))
+        baselines = _run_stage("rebuild_baselines", lambda: _run_changed_baselines(db_path))
+        anomalies = _run_stage("detect_anomalies", lambda: _run_revised_anomalies(db_path))
+        principals = _run_stage("process_principal_intelligence", lambda: process_principal_intelligence(db_path=db_path))
         result = {**aggregates, "baselines": baselines, "anomalies": len(anomalies),
                   "principal_records": principals["processed"], "principal_changes": principals["changes"]}
+        if es_sync is not None:
+            result["elasticsearch_read"] = es_sync.get("read", 0)
+            result["elasticsearch_inserted"] = es_sync.get("inserted", 0)
     except Exception as exc:
-        with db_transaction() as db:
+        with db_transaction(db_path) as db:
             db.execute(
                 "UPDATE jobs SET status='failed',finished_at_ms=?,detail=? WHERE name=?",
                 (int(time.time() * 1000), str(exc)[:500], "behavioral-observability"),
             )
         raise
-    with db_transaction() as db:
+    with db_transaction(db_path) as db:
         db.execute(
             "UPDATE jobs SET status='success',finished_at_ms=?,detail=?,processed_count=? WHERE name=?",
             (int(time.time() * 1000), json.dumps(result, separators=(",", ":")), aggregates["1m_buckets"], "behavioral-observability"),
@@ -163,9 +185,17 @@ def run_jobs() -> dict[str, int]:
 def main() -> None:
     logging.basicConfig(level=logging.INFO, format="%(message)s")
     parser=argparse.ArgumentParser(description="TraceScope analytical worker")
-    parser.add_argument("--once",action="store_true")
-    parser.add_argument("--interval",type=int,default=60)
-    args=parser.parse_args()
+    parser.add_argument("--once", action="store_true")
+    parser.add_argument("--interval", type=int, default=60)
+    parser.add_argument("--start-time", type=str, default="", help="Ignore traces before this timestamp (ISO-8601, unix ms, or 'now'/'deploy_time')")
+    parser.add_argument("--ignore-past-data", action="store_true", help="Ignore past data before worker start time")
+    args = parser.parse_args()
+    if args.start_time:
+        object.__setattr__(settings, "worker_start_time", args.start_time)
+    if args.ignore_past_data:
+        object.__setattr__(settings, "worker_ignore_past_data", True)
+    if settings.worker_start_time_ms:
+        logging.info(f"Worker initialized with start time cutoff: {settings.worker_start_time_ms} ms (ignoring past data)")
     if settings.run_migrations:
         StorageRepository().migrate()
     while True:

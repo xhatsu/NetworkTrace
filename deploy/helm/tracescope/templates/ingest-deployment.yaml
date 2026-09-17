@@ -1,3 +1,4 @@
+{{- if .Values.ingest.enabled }}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -45,8 +46,15 @@ spec:
           type: RuntimeDefault
       containers:
         - name: ingest
-          image: "{{ .Values.ingest.image.repository }}:{{ .Values.ingest.image.tag }}"
+          image: "{{ .Values.ingest.image.repository }}:{{ default (include "tracescope.globalImageTag" .) .Values.ingest.image.tag }}"
           imagePullPolicy: {{ .Values.ingest.image.pullPolicy }}
+          command:
+            - uvicorn
+            - backend.ingest_main:app
+            - --host
+            - 0.0.0.0
+            - --port
+            - "8000"
           ports:
             - name: http
               containerPort: 8000
@@ -99,3 +107,4 @@ spec:
       volumes:
         - name: tmp
           emptyDir: {}
+{{- end }}

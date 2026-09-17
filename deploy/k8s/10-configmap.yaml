@@ -39,3 +39,23 @@ data:
   OTEL_INGEST_TRANSACTION_RECORDS: "50000"
   OTEL_INGEST_COMMIT_TIMEOUT_SECONDS: "65"
   OTEL_INTERNAL_REQUEST_TIMEOUT_SECONDS: "70"
+  # --- aggregation worker cutoff -------------------------------------------
+  # Timestamp (ISO-8601, epoch ms/seconds, or "now") to skip historical traces
+  OTEL_WORKER_START_TIME: ""
+  # When true, ignores all historical data prior to deployment time
+  OTEL_WORKER_IGNORE_PAST_DATA: "false"
+  # --- LLM diagnostic investigation ----------------------------------------
+  # Set to "true" to enable LLM investigation of existing findings
+  OTEL_LLM_INVESTIGATION_ENABLED: "false"
+  # Safety acknowledgement: must be "true" to acknowledge single-owner execution
+  OTEL_LLM_SINGLE_OWNER_ACK: "false"
+  # Base URL of OpenAI-compatible provider (e.g. https://api.openai.com/v1)
+  OTEL_LLM_BASE_URL: ""
+  # Model name to invoke (e.g. gpt-4o-mini, gemini-2.5-flash)
+  OTEL_LLM_MODEL: ""
+  # Response mode: json_object (default) or json_schema
+  OTEL_LLM_RESPONSE_MODE: "json_object"
+  # Allow plain HTTP only for local loopback/testing (127.0.0.1)
+  OTEL_LLM_ALLOW_LOOPBACK_HTTP: "false"
+  # Context token budget
+  OTEL_LLM_CONTEXT_TOKENS: "32768"

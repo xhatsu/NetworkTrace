@@ -93,3 +93,45 @@ def test_trace_repository_fallback_to_clickhouse():
         # Should catch exception and gracefully query ClickHouse (returning None or matching rows without crashing)
         result = repo.get_trace("non-existent-trace-id")
         assert result is None
+
+
+def test_elasticsearch_reader_no_empty_apikey_header():
+    from backend.elasticsearch import ElasticsearchReader
+    with patch.dict("os.environ", {"OTEL_ES_URL": "http://127.0.0.1:32073", "OTEL_ES_API_KEY": ""}):
+        reader = ElasticsearchReader()
+        assert reader.url == "http://127.0.0.1:32073"
+        assert reader.api_key == ""
+
+        mock_resp = MagicMock()
+        mock_resp.status_code = 200
+        mock_resp.json.return_value = {"hits": {"hits": []}}
+
+        with patch("httpx.Client") as mock_client_cls:
+            mock_client = MagicMock()
+            mock_client.__enter__.return_value = mock_client
+            mock_client.post.return_value = mock_resp
+            mock_client_cls.return_value = mock_client
+
+            pages = list(reader.pages())
+            assert len(pages) == 0
+            # Inspect headers passed to httpx.Client
+            _, kwargs = mock_client_cls.call_args
+            assert "Authorization" not in kwargs.get("headers", {})
+
+
+def test_worker_runs_elasticsearch_sync_when_configured():
+    from backend.worker import run_jobs
+
+    with patch("backend.elasticsearch.ElasticsearchReader.sync", return_value={"read": 5, "inserted": 5}) as mock_sync, \
+         patch("backend.worker.aggregate_traces", return_value={"1m_buckets": 1, "5m_buckets": 1, "service_edges": 0, "principal_edges": 0}), \
+         patch("backend.worker._run_changed_baselines", return_value=0), \
+         patch("backend.worker._run_revised_anomalies", return_value=[]), \
+         patch("backend.worker.process_principal_intelligence", return_value={"processed": 0, "changes": 0}), \
+         patch.dict("os.environ", {"OTEL_ES_URL": "http://127.0.0.1:32073"}):
+
+        result = run_jobs()
+        assert "elasticsearch_read" in result
+        assert result["elasticsearch_read"] == 5
+        assert result["elasticsearch_inserted"] == 5
+        mock_sync.assert_called_once()
+

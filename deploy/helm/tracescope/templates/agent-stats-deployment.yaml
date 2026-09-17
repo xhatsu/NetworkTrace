@@ -43,7 +43,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: agent-stats
-          image: "{{ .Values.agentStats.image.repository }}:{{ .Values.agentStats.image.tag }}"
+          image: "{{ .Values.agentStats.image.repository }}:{{ default (include "tracescope.globalImageTag" .) .Values.agentStats.image.tag }}"
           imagePullPolicy: {{ .Values.agentStats.image.pullPolicy }}
           command:
             - uvicorn

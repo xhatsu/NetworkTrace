@@ -6,6 +6,13 @@ services:
       OTEL_DEMO_MODE: "true"
       OTEL_CORS_ORIGINS: http://localhost:5173
       OTEL_RETENTION_DAYS: "30"
+      OTEL_API_KEY: "${OTEL_API_KEY:-}"
+      OTEL_LLM_INVESTIGATION_ENABLED: "${OTEL_LLM_INVESTIGATION_ENABLED:-false}"
+      OTEL_LLM_SINGLE_OWNER_ACK: "${OTEL_LLM_SINGLE_OWNER_ACK:-false}"
+      OTEL_LLM_BASE_URL: "${OTEL_LLM_BASE_URL:-}"
+      OTEL_LLM_API_KEY: "${OTEL_LLM_API_KEY:-}"
+      OTEL_LLM_MODEL: "${OTEL_LLM_MODEL:-}"
+      OTEL_LLM_RESPONSE_MODE: "${OTEL_LLM_RESPONSE_MODE:-json_object}"
     volumes:
       - tracescope_data:/data
     ports:
@@ -14,6 +21,8 @@ services:
     image: node:22-alpine
     working_dir: /app
     command: sh -c "npm install && npm run dev"
+    environment:
+      VITE_API_KEY: "${VITE_API_KEY:-}"
     volumes:
       - ./frontend:/app
       - frontend_modules:/app/node_modules

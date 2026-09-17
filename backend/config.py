@@ -6,8 +6,11 @@ edge pods from silently adopting incompatible durability or backpressure rules.
 from __future__ import annotations
 
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
+import re
+import time
+from datetime import datetime
 
 
 def _detect_clickhouse_host() -> str:
@@ -24,6 +27,25 @@ def _detect_clickhouse_host() -> str:
     return "127.0.0.1"
 
 
+def _parse_timestamp_setting(val: str | None) -> int | None:
+    if not val:
+        return None
+    val = val.strip()
+    if not val:
+        return None
+    if val.lower() in ("now", "deploy_time", "current_time"):
+        return int(time.time() * 1000)
+    if val.isdigit():
+        ts = int(val)
+        return ts * 1000 if ts < 10_000_000_000 else ts
+    try:
+        text = val.replace("Z", "+00:00")
+        text = re.sub(r"(\.\d{6})\d+", r"\1", text)
+        return int(datetime.fromisoformat(text).timestamp() * 1000)
+    except Exception:
+        return None
+
+
 @dataclass(frozen=True)
 class Settings:
     # Namespace for side files (policy.json); durable telemetry lives in ClickHouse.
@@ -37,10 +59,10 @@ class Settings:
     clickhouse_connect_timeout: float = float(os.getenv("OTEL_CLICKHOUSE_CONNECT_TIMEOUT", "10.0"))
     clickhouse_send_receive_timeout: float = float(os.getenv("OTEL_CLICKHOUSE_TIMEOUT", "30.0"))
     clickhouse_system_log_retention_days: int = max(
-        1, int(os.getenv("OTEL_CLICKHOUSE_SYSTEM_LOG_RETENTION_DAYS", "3"))
+        1, int(os.getenv("OTEL_CLICKHOUSE_SYSTEM_LOG_RETENTION_DAYS", "1"))
     )
     clickhouse_system_error_log_retention_days: int = max(
-        1, int(os.getenv("OTEL_CLICKHOUSE_SYSTEM_ERROR_LOG_RETENTION_DAYS", "7"))
+        1, int(os.getenv("OTEL_CLICKHOUSE_SYSTEM_ERROR_LOG_RETENTION_DAYS", "1"))
     )
     # Storage isolation: OTel trace data is retained in Elasticsearch; ClickHouse only stores agent trace data.
     clickhouse_only_agent_traces: bool = (
@@ -49,7 +71,7 @@ class Settings:
     # Storage Backend: 'clickhouse' (default for local testbed) or 'elasticsearch' / 'elk'
     storage_backend: str = os.getenv("OTEL_STORAGE_BACKEND", "clickhouse").lower()
     elasticsearch_url: str = os.getenv("OTEL_ES_URL", os.getenv("ELASTICSEARCH_URL", "")).rstrip("/")
-    elasticsearch_index: str = os.getenv("OTEL_ES_INDEX", "traces-apm*")
+    elasticsearch_index: str = os.getenv("OTEL_ES_INDEX", "apm-*,traces-apm*")
     elasticsearch_api_key: str = os.getenv("OTEL_ES_API_KEY", "")
     elasticsearch_user: str = os.getenv("OTEL_ES_USER", "")
     elasticsearch_password: str = os.getenv("OTEL_ES_PASSWORD", "")
@@ -60,6 +82,13 @@ class Settings:
         item.strip() for item in os.getenv(
             "OTEL_CORS_ORIGINS",
             "http://127.0.0.1:30102,http://localhost:30102,http://localhost:5173",
+        ).split(",") if item.strip()
+    )
+    # Known Load Balancer / Ingress IPs treated as supporting attribution context (confidence: low)
+    known_load_balancers: tuple[str, ...] = tuple(
+        item.strip() for item in os.getenv(
+            "OTEL_KNOWN_LOAD_BALANCERS",
+            "10.240.147.247,10.240.147.249,10.10.1.20,10.20.14.78,10.20.1.15",
         ).split(",") if item.strip()
     )
     api_key: str = os.getenv("OTEL_API_KEY", "")
@@ -116,6 +145,30 @@ class Settings:
     # Schema ownership. Exactly one pod in a fleet should run migrations
     # (default "true" preserves the historical single-process behaviour).
     run_migrations: bool = os.getenv("OTEL_RUN_MIGRATIONS", "true").lower() == "true"
+    # Worker cutoff parameters: ignore past data and start work after a specific time (e.g. deploy time)
+    worker_start_time: str = os.getenv("OTEL_WORKER_START_TIME", os.getenv("OTEL_AGGREGATION_START_TIME", ""))
+    worker_ignore_past_data: bool = os.getenv("OTEL_WORKER_IGNORE_PAST_DATA", os.getenv("OTEL_IGNORE_PAST_DATA", "false")).lower() in ("true", "1", "yes")
+
+    # Explicit, single-owner investigation worker.  Budgets are policy-v1
+    # constants in the implementation; these settings only select ownership
+    # and the operator-supplied relay destination.
+    llm_investigation_enabled: bool = os.getenv("OTEL_LLM_INVESTIGATION_ENABLED", "false").lower() in ("true", "1", "yes")
+    llm_single_owner_ack: bool = os.getenv("OTEL_LLM_SINGLE_OWNER_ACK", "false").lower() in ("true", "1", "yes")
+    llm_base_url: str = os.getenv("OTEL_LLM_BASE_URL", "").rstrip("/")
+    llm_api_key: str = field(default=os.getenv("OTEL_LLM_API_KEY", ""), repr=False)
+    llm_model: str = os.getenv("OTEL_LLM_MODEL", "")
+    llm_response_mode: str = os.getenv("OTEL_LLM_RESPONSE_MODE", "json_object")
+    llm_allow_loopback_http: bool = os.getenv("OTEL_LLM_ALLOW_LOOPBACK_HTTP", "false").lower() in ("true", "1", "yes")
+    llm_context_tokens: int = int(os.getenv("OTEL_LLM_CONTEXT_TOKENS", "32768"))
+
+    @property
+    def worker_start_time_ms(self) -> int | None:
+        ts = _parse_timestamp_setting(self.worker_start_time)
+        if ts is not None:
+            return ts
+        if self.worker_ignore_past_data:
+            return int(time.time() * 1000)
+        return None
 
 
 settings = Settings()

@@ -88,6 +88,11 @@ export type Anomaly = {
   operation?: string;
   detected_at?: string | number;
   severity: string;
+  score?: number;
+  occurrences?: number;
+  duration_mins?: number;
+  first_seen?: number;
+  last_seen?: number;
   status: string;
   unit: string;
   explanation: string;
@@ -108,3 +113,31 @@ export type Anomaly = {
     affected_operations: Array<string | { name: string; [key: string]: any }>;
   };
 };
+
+export type {
+  FindingKind,
+  FindingRef,
+  SourceEligibilityStatus,
+  SourceEligibility,
+  FindingDimensions,
+  ObservationWindow,
+  FindingSnapshot,
+  SourceSnapshotResponse,
+  InvestigationState,
+  AssessmentConfidence,
+  Hypothesis,
+  MissingEvidence,
+  Recommendation,
+  InvestigationAssessment,
+  InvestigationResult,
+  SourceCheck,
+  InvestigationRecord,
+  CreateInvestigationPayload,
+  CreateInvestigationResponse,
+  InvestigationHistoryResponse,
+} from "./investigations";
+export {
+  getFindingId,
+  isInvestigationTerminal,
+  TERMINAL_INVESTIGATION_STATES,
+} from "./investigations";

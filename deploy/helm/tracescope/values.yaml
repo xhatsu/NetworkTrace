@@ -9,6 +9,11 @@
 global:
   imageRegistry: ""
   imagePullSecrets: []
+  # Global image tag for TraceScope workloads (app, ingest, agentStats, ui).
+  # Configure this once (e.g. "0.3.3") so all components share the unified version.
+  # Can be overridden per workload below (app.image.tag, ingest.image.tag, etc.).
+  image:
+    tag: "0.3.3"
 
 nameOverride: ""
 fullnameOverride: ""
@@ -72,7 +77,8 @@ app:
   replicaCount: 1
   image:
     repository: xhatsu101/tracescope
-    tag: app-0.2.6
+    # Defaults to global.image.tag when empty ("")
+    tag: ""
     pullPolicy: IfNotPresent
   resources:
     requests:
@@ -83,6 +89,10 @@ app:
       memory: 1.5Gi
   worker:
     interval: 60
+    # Optional start time cutoff: "now", "deploy_time", ISO-8601 string (e.g. "2026-09-16T00:00:00Z"), or epoch ms/seconds.
+    startTime: ""
+    # Set to true to automatically ignore all past trace data before worker deployment
+    ignorePastData: false
     resources:
       requests:
         cpu: 150m
@@ -97,10 +107,14 @@ app:
 # Ingestion Workload (Stateless Deployment)
 # -----------------------------------------------------------------------------
 ingest:
+  # Set false when an external OpenTelemetry Collector owns ingestion.
+  # This omits the ingest Deployment, Service, HPA, and public ingest routes.
+  enabled: false
   replicaCount: 2
   image:
     repository: xhatsu101/tracescope
-    tag: ingest-0.2.6
+    # Defaults to global.image.tag when empty ("")
+    tag: ""
     pullPolicy: IfNotPresent
   autoscaling:
     enabled: true
@@ -129,7 +143,8 @@ agentStats:
   replicaCount: 2
   image:
     repository: xhatsu101/tracescope
-    tag: app-0.2.6
+    # Defaults to global.image.tag when empty ("")
+    tag: ""
     pullPolicy: IfNotPresent
   autoscaling:
     enabled: true
@@ -143,6 +158,9 @@ agentStats:
     limits:
       cpu: "1"
       memory: 1Gi
+  service:
+    type: ClusterIP
+    port: 30104
 
 # -----------------------------------------------------------------------------
 # UI Workload (Stateless Nginx Deployment)
@@ -156,7 +174,8 @@ ui:
   replicaCount: 2
   image:
     repository: xhatsu101/tracescope
-    tag: app-0.2.6
+    # Defaults to global.image.tag when empty ("")
+    tag: ""
     pullPolicy: IfNotPresent
   resources:
     requests:
@@ -167,13 +186,44 @@ ui:
       memory: 256Mi
 
 # -----------------------------------------------------------------------------
-# Secrets & Ingestion Configuration
+# Secrets Configuration
+# -----------------------------------------------------------------------------
+# To deploy securely without committing tokens to git:
+# 1. Copy the example file:
+#      cp deploy/helm/tracescope/values-secrets.example.yaml deploy/helm/tracescope/values-secrets.yaml
+# 2. Generate a 32+ char token for internalApiToken:
+#      openssl rand -base64 32
+# 3. Deploy with Helm:
+#      helm upgrade --install tracescope deploy/helm/tracescope -f deploy/helm/tracescope/values-secrets.yaml
 # -----------------------------------------------------------------------------
 secrets:
+  # Name of an externally created Secret (e.g. from HashiCorp Vault / ExternalSecrets operator)
   existingSecret: ""
-  # Real values live in gitignored values-secrets.yaml (helm upgrade -f values-secrets.yaml)
+  # Required internal storage token (min 32 chars). Generate with: openssl rand -base64 32
   internalApiToken: ""
+  # Optional operator API key for dashboard/API protection. Leave "" for open access.
   apiKey: ""
+  # Provider API Key for LLM investigation (e.g. OpenAI or gateway key). Required if llm.enabled=true.
+  llmApiKey: ""
+
+# -----------------------------------------------------------------------------
+# LLM Diagnostic Investigation Configuration
+# -----------------------------------------------------------------------------
+llm:
+  # Set true to enable LLM investigation of existing findings
+  enabled: true
+  # Safety acknowledgement: must be true to acknowledge single-owner execution
+  singleOwnerAck: true
+  # Base URL of OpenAI-compatible provider (e.g. https://api.openai.com/v1)
+  baseUrl: "https://api.ai-box.vn/v1"
+  # Model name to invoke (e.g. gpt-4o-mini, gemini-2.5-flash)
+  model: "deepseek-v4.1-flash"
+  # Response mode: json_object (default) or json_schema
+  responseMode: "json_object"
+  # Allow plain HTTP only for local loopback/testing (127.0.0.1)
+  allowLoopbackHttp: true
+  # Context token budget
+  contextTokens: 256000
 
 config:
   retentionDays: 30
@@ -195,6 +245,9 @@ config:
     transactionRecords: 50000
     commitTimeoutSeconds: 65
     internalRequestTimeoutSeconds: 70
+  # Aggregation worker cutoff parameters
+  workerStartTime: ""
+  workerIgnorePastData: false
 
 # -----------------------------------------------------------------------------
 # Ingress Configuration

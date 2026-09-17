@@ -9,6 +9,7 @@ import {
   TrendingDown,
   TrendingUp,
 } from "lucide-react";
+import { useI18n } from "./i18n";
 
 export function Page({
   eyebrow,
@@ -28,7 +29,7 @@ export function Page({
       <div className="mb-6 flex flex-wrap items-end justify-between gap-4 border-b border-[rgba(255,255,255,0.12)] pb-5">
         <div>
           <div className="mb-1.5 flex items-center gap-2">
-            <span className="h-1.5 w-1.5 rounded-full bg-violet-500 shadow-[0_0_8px_#8b5cf6]" />
+            <span className="h-1.5 w-1.5 rounded-full bg-violet-500" />
             <span className="text-[11px] font-semibold uppercase tracking-[0.12em] text-violet-400">
               {eyebrow}
             </span>
@@ -59,8 +60,8 @@ export function Panel({
   action?: ReactNode;
 }) {
   return (
-    <section className={`card overflow-hidden bg-[#1a172a] border border-[rgba(255,255,255,0.12)] shadow-panel ${className}`}>
-      <header className="flex items-center justify-between border-b border-[rgba(255,255,255,0.10)] bg-[#1e1a30]/80 px-5 py-3.5 backdrop-blur-sm">
+    <section className={`card overflow-hidden bg-[#141622] border border-[#262838] ${className}`}>
+      <header className="flex items-center justify-between border-b border-[#262838] bg-[#181a28] px-5 py-3.5">
         <div>
           <h3 className="text-xs font-semibold uppercase tracking-[0.05em] text-[#f5f3fa]">{title}</h3>
           {subtitle && (
@@ -96,35 +97,35 @@ export function MetricCard({
   };
 
   const borderAccent = {
-    normal: "hover:border-[rgba(255,255,255,0.25)]",
+    normal: "hover:border-[#383b52]",
     good: "hover:border-emerald-500/60",
     bad: "hover:border-rose-500/60",
   };
 
   const topBorderClasses = {
-    sky: "border-t-2 border-t-sky-400/80",
-    emerald: "border-t-2 border-t-emerald-400/80",
-    violet: "border-t-2 border-t-violet-400/80",
-    indigo: "border-t-2 border-t-indigo-400/80",
-    amber: "border-t-2 border-t-amber-400/80",
-    rose: "border-t-2 border-t-rose-400/80",
-    cyan: "border-t-2 border-t-cyan-400/80",
-    purple: "border-t-2 border-t-purple-400/80",
+    sky: "border-t-2 border-t-sky-400",
+    emerald: "border-t-2 border-t-emerald-400",
+    violet: "border-t-2 border-t-violet-400",
+    indigo: "border-t-2 border-t-indigo-400",
+    amber: "border-t-2 border-t-amber-400",
+    rose: "border-t-2 border-t-rose-400",
+    cyan: "border-t-2 border-t-cyan-400",
+    purple: "border-t-2 border-t-purple-400",
   };
 
   const dotClasses = {
-    sky: "bg-sky-400 shadow-[0_0_8px_rgba(56,189,248,0.8)]",
-    emerald: "bg-emerald-400 shadow-[0_0_8px_rgba(52,211,153,0.8)]",
-    violet: "bg-violet-400 shadow-[0_0_8px_rgba(167,139,250,0.8)]",
-    indigo: "bg-indigo-400 shadow-[0_0_8px_rgba(129,140,248,0.8)]",
-    amber: "bg-amber-400 shadow-[0_0_8px_rgba(251,191,36,0.8)]",
-    rose: "bg-rose-400 shadow-[0_0_8px_rgba(251,113,133,0.8)]",
-    cyan: "bg-cyan-400 shadow-[0_0_8px_rgba(34,211,238,0.8)]",
-    purple: "bg-purple-400 shadow-[0_0_8px_rgba(192,132,252,0.8)]",
+    sky: "bg-sky-400",
+    emerald: "bg-emerald-400",
+    violet: "bg-violet-400",
+    indigo: "bg-indigo-400",
+    amber: "bg-amber-400",
+    rose: "bg-rose-400",
+    cyan: "bg-cyan-400",
+    purple: "bg-purple-400",
   };
 
   const cardTopBorder = accent ? topBorderClasses[accent] : "";
-  const dotColor = accent ? dotClasses[accent] : "bg-[rgba(255,255,255,0.2)] group-hover:bg-violet-400";
+  const dotColor = accent ? dotClasses[accent] : "bg-white/20 group-hover:bg-violet-400";
 
   return (
     <div className={`card group relative overflow-hidden bg-[#1a172a] p-4 transition-all duration-200 ${cardTopBorder} ${borderAccent[tone]}`}>
@@ -155,24 +156,26 @@ export function MetricCard({
 }
 
 export function Loading() {
+  const { t } = useI18n();
   return (
     <div className="card grid min-h-64 place-items-center bg-[#1a172a] border border-[rgba(255,255,255,0.12)] p-8 text-sm text-[#c4bdd9]">
       <div className="flex flex-col items-center gap-3">
         <LoaderCircle className="animate-spin text-violet-400" size={24} />
-        <span className="text-xs font-medium tracking-wide">Aggregating real-time telemetry…</span>
+        <span className="text-xs font-medium tracking-wide">{t("Aggregating real-time telemetry…")}</span>
       </div>
     </div>
   );
 }
 
 export function ErrorState({ message }: { message: string }) {
+  const { t } = useI18n();
   return (
     <div className="card flex min-h-48 flex-col items-center justify-center gap-3 bg-[#1a172a] border border-rose-500/30 p-6 text-center text-sm text-[#fb7185]">
       <div className="grid h-10 w-10 place-items-center rounded-full bg-rose-500/15 border border-rose-500/30">
         <AlertTriangle size={18} />
       </div>
       <div className="max-w-md">
-        <div className="font-semibold text-[#f5f3fa]">Telemetry Unavailable</div>
+        <div className="font-semibold text-[#f5f3fa]">{t("Telemetry Unavailable")}</div>
         <div className="mt-1 text-xs text-[#c4bdd9]">{message}</div>
       </div>
     </div>

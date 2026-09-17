@@ -158,6 +158,19 @@ def configure_system_telemetry_retention(
     l_days = log_retention_days if log_retention_days is not None else settings.clickhouse_system_log_retention_days
     e_days = error_retention_days if error_retention_days is not None else settings.clickhouse_system_error_log_retention_days
 
+    # Drop any abandoned rotated tables from prior versions/restarts (e.g. text_log_1, query_log_0)
+    try:
+        rotated = client.query(
+            "SELECT name FROM system.tables WHERE database = 'system' AND name LIKE '%\\_log\\_%'"
+        ).result_rows
+        for row in rotated:
+            try:
+                client.command(f"DROP TABLE IF EXISTS system.{row[0]}")
+            except Exception:
+                pass
+    except Exception:
+        pass
+
     targets = [(tbl, l_days) for tbl in SYSTEM_LOG_TABLES] + [(tbl, e_days) for tbl in SYSTEM_ERROR_TABLES]
     results = {}
     for tbl, days in targets:

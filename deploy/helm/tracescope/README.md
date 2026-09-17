@@ -57,6 +57,16 @@ helm install tracescope deploy/helm/tracescope \
   --set elasticsearch.apiKey="<api-key>"
 ```
 
+### 5. External OpenTelemetry Collector Ingestion
+If an OpenTelemetry Collector already receives and exports application traces, disable TraceScope's ingest edge. The chart then omits the ingest Deployment, Service, HPA, and public OTLP/ingest routes; TraceScope continues to serve the UI, queries, analytics worker, and agent telemetry.
+```sh
+helm install tracescope deploy/helm/tracescope \
+  --set ingest.enabled=false \
+  --set storage.backend=elasticsearch \
+  --set elasticsearch.enabled=true \
+  --set elasticsearch.url="http://elasticsearch.logging.svc:9200"
+```
+
 ---
 
 ## Configuration Reference
@@ -73,10 +83,12 @@ helm install tracescope deploy/helm/tracescope \
 | `elasticsearch.apiKey` | Elasticsearch API key for authentication | `""` |
 | `elasticsearch.verifyTls` | Verify Elasticsearch TLS certificates | `true` |
 | `elasticsearch.timeout` | Elasticsearch HTTP request timeout (seconds) | `10` |
+| `global.image.tag` | Unified global image tag for all TraceScope workloads | `0.3.3` |
 | `app.replicaCount` | Storage & Worker replicas (must remain 1) | `1` |
-| `app.image.tag` | Unified application image tag | `app-0.2.6` |
+| `app.image.tag` | Application image tag (defaults to `global.image.tag`) | `""` |
 | `ingest.replicaCount` | Initial replicas for trace ingestion | `2` |
-| `ingest.image.tag` | Trace ingestion image tag | `ingest-0.2.6` |
+| `ingest.enabled` | Deploy TraceScope's built-in ingest edge; set `false` when an external OpenTelemetry Collector owns ingestion | `false` |
+| `ingest.image.tag` | Ingestion image tag (defaults to `global.image.tag`) | `""` |
 | `ingest.autoscaling.enabled`| Enable HPA for ingestion | `true` (3–12 pods) |
 | `agentStats.enabled` | Deploy dedicated agent-stats workload | `false` |
 | `ui.enabled` | Deploy dedicated Nginx UI workload | `false` |

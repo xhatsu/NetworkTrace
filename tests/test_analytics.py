@@ -153,6 +153,38 @@ def test_anomaly_retry_uses_same_deterministic_id_and_logical_row(tmp_path):
     assert listed[0]["id"] == first.id
 
 
+def test_contiguous_anomalies_are_coalesced_into_single_incident(tmp_path):
+    db_path = tmp_path / "coalesce-anomaly.db"
+    StorageRepository(db_path).migrate()
+    repo = AnomalyRepository(str(db_path))
+
+    first = AnomalyEvent(
+        detected_at=100_000, anomaly_type="unusual_time", severity="medium", score=50,
+        caller_service="checkout-service", target_service="payment-service", principal_name="alice",
+        operation="POST /charge", first_seen=100_000, last_seen=400_000,
+        current_value=12.0, baseline_value=0.1, delta_percentage=100.0,
+    )
+    repo.save_anomalies([first])
+
+    # 5 minutes later, contiguous anomaly arrives for the exact same signature
+    second = AnomalyEvent(
+        detected_at=400_000, anomaly_type="unusual_time", severity="medium", score=50,
+        caller_service="checkout-service", target_service="payment-service", principal_name="alice",
+        operation="POST /charge", first_seen=400_000, last_seen=700_000,
+        current_value=15.0, baseline_value=0.1, delta_percentage=100.0,
+    )
+    repo.save_anomalies([second])
+
+    listed = repo.list_anomalies()
+    assert len(listed) == 1, f"Expected 1 coalesced incident episode, got {len(listed)}"
+    rec = listed[0]
+    assert rec["id"] == first.id
+    assert rec["first_seen"] == 100_000
+    assert rec["last_seen"] == 700_000
+    assert rec["metadata"]["occurrences"] == 2
+    assert rec["metadata"]["duration_mins"] == 10.0
+
+
 def test_worker_stage_checkpoints_cadence_and_revision_budget(tmp_path):
     db_path = tmp_path / "worker-stage-checkpoints.db"
     StorageRepository(db_path).migrate()

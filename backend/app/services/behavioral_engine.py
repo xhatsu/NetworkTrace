@@ -30,6 +30,8 @@ EVENT_FAMILY = {
     # Origin family (cap: 35)
     "NEW_CALLER": "origin",
     "NEW_SOURCE_IP": "origin",
+    "SOURCE_IP_DISTRIBUTION_SHIFT": "origin",
+    "NEW_IP_CALLER_PAIR": "origin",
     "NEW_PRINCIPAL_ON_SOURCE": "origin",
     "SOURCE_FANOUT_SURGE": "origin",
     # Access family (cap: 40)
@@ -60,6 +62,8 @@ EVENT_FAMILY = {
 BASE_IMPORTANCE = {
     "NEW_CALLER": "high",
     "NEW_SOURCE_IP": "low",
+    "SOURCE_IP_DISTRIBUTION_SHIFT": "low",
+    "NEW_IP_CALLER_PAIR": "low",
     "NEW_PRINCIPAL_ON_SOURCE": "medium",
     "SOURCE_FANOUT_SURGE": "medium",
     "NEW_TARGET": "medium",
@@ -86,6 +90,8 @@ EVENT_SCORES = {
     # Origin
     "NEW_CALLER": 30,
     "NEW_SOURCE_IP": 10,
+    "SOURCE_IP_DISTRIBUTION_SHIFT": 10,
+    "NEW_IP_CALLER_PAIR": 10,
     "NEW_PRINCIPAL_ON_SOURCE": 15,
     "SOURCE_FANOUT_SURGE": 25,
     # Access
@@ -178,7 +184,7 @@ def evaluate_readiness_from_stats(
     first_seen_ms, last_seen_ms, active_days, total_obs = row
     elapsed_days = (current_time_ms - first_seen_ms) / 86_400_000.0
 
-    if detector in {"NEW_CALLER", "NEW_TARGET", "NEW_OPERATION", "NEW_RELATIONSHIP", "NEW_SOURCE_IP"}:
+    if detector in {"NEW_CALLER", "NEW_TARGET", "NEW_OPERATION", "NEW_RELATIONSHIP", "NEW_SOURCE_IP", "SOURCE_IP_DISTRIBUTION_SHIFT", "NEW_IP_CALLER_PAIR"}:
         if elapsed_days >= 7.0 and active_days >= 3 and total_obs >= 100:
             return True, "ready"
         if total_obs >= 10 or (elapsed_days >= 1.0 and total_obs >= 5):
@@ -443,6 +449,33 @@ def recalculate_incident_score(db, incident_id: str):
                 # Remove AUTH_FAILURE_BURST contribution in favor of FAILURE_THEN_SUCCESS (35 vs 30)
                 del family_contributions["authentication"]["AUTH_FAILURE_BURST"]
                 suppressed.append({"event_id": ev["id"], "change_type": "AUTH_FAILURE_BURST", "reason": "Replaced by stronger FAILURE_THEN_SUCCESS contribution"})
+
+        # 4. IP Attribution Confidence rule:
+        # Known or likely load balancer IP -> suppressed or low weight
+        # High confidence client IP -> meaningful
+        if ctype in {"NEW_SOURCE_IP", "SOURCE_IP_DISTRIBUTION_SHIFT", "NEW_IP_CALLER_PAIR"}:
+            reason_raw = ev.get("reason_json") or ev.get("reason") or {}
+            if isinstance(reason_raw, str):
+                try:
+                    reason_data = json.loads(reason_raw)
+                except Exception:
+                    reason_data = {}
+            elif isinstance(reason_raw, dict):
+                reason_data = reason_raw
+            else:
+                reason_data = {}
+
+            role = reason_data.get("source_ip_role")
+            conf = reason_data.get("attribution_confidence")
+            if not role and ev.get("source_ip"):
+                from backend.app.services.normalization import classify_source_ip_role
+                role, _, conf = classify_source_ip_role(ev.get("source_ip"))
+
+            if role == "load_balancer" or conf == "low":
+                base_score = 0
+                suppressed.append({"event_id": ev["id"], "change_type": ctype, "reason": "Likely load balancer / hop address; suppressed from security score"})
+            elif conf == "medium":
+                base_score = 5
 
         if base_score > 0:
             family_contributions[fam][f"{ctype}:{val}"] = base_score

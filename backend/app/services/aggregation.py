@@ -323,6 +323,7 @@ def _run_explicit_window(start_ms: int, end_ms: int, db_path: Optional[str]) -> 
 
 
 def _start_or_resume_bootstrap(db_path: Optional[str]) -> Optional[Dict[str, Any]]:
+    start_time_ms = settings.worker_start_time_ms
     with get_connection(db_path) as db:
         checkpoint_row = db.execute(
             "SELECT cursor_json FROM checkpoints FINAL WHERE source='aggregation_cursor'"
@@ -333,18 +334,62 @@ def _start_or_resume_bootstrap(db_path: Optional[str]) -> Optional[Dict[str, Any
             except (TypeError, ValueError, json.JSONDecodeError):
                 checkpoint = {}
             if checkpoint.get("mode") == "bootstrap":
+                if start_time_ms is not None and start_time_ms > int(checkpoint.get("next_slice_start_ms", 0)):
+                    checkpoint["next_slice_start_ms"] = start_time_ms
+                    _save_checkpoint(checkpoint, db_path)
                 return checkpoint
             if "ingest_order" in checkpoint and "row_uid" in checkpoint:
+                if start_time_ms is not None and start_time_ms > int(checkpoint.get("last_ts", 0)):
+                    # Fast-forward cursor past historical traces
+                    past_row = db.execute(
+                        "SELECT ingest_order, toString(row_uid) FROM traces "
+                        "WHERE timestamp_ms < ? ORDER BY ingest_order DESC, row_uid DESC LIMIT 1",
+                        (start_time_ms,),
+                    ).fetchone()
+                    if past_row:
+                        checkpoint["ingest_order"] = max(int(checkpoint.get("ingest_order", 0)), int(past_row[0]))
+                        checkpoint["row_uid"] = str(past_row[1])
+                    checkpoint["last_ts"] = start_time_ms
+                    _save_checkpoint(checkpoint, db_path)
                 return checkpoint
-        bounds = db.execute("SELECT MIN(timestamp_ms), MAX(timestamp_ms) FROM traces").fetchone()
-        if not bounds or bounds[0] is None:
+
+        where_clause = ""
+        params: List[Any] = []
+        if start_time_ms is not None:
+            where_clause = "WHERE timestamp_ms >= ?"
+            params.append(start_time_ms)
+
+        bounds = db.execute(f"SELECT count(), MIN(timestamp_ms), MAX(timestamp_ms) FROM traces {where_clause}", params).fetchone()
+        row_count = int(bounds[0]) if bounds else 0
+        if not bounds or row_count == 0 or bounds[1] is None or int(bounds[1]) == 0:
+            # If start_time_ms is configured but no traces exist at or after it yet,
+            # checkpoint at the current latest trace so that all past data is skipped.
+            if start_time_ms is not None:
+                latest = db.execute(
+                    "SELECT ingest_order, toString(row_uid) FROM traces "
+                    "ORDER BY ingest_order DESC, row_uid DESC LIMIT 1"
+                ).fetchone()
+                if latest:
+                    checkpoint = {
+                        "mode": "incremental",
+                        "ingest_order": int(latest[0]),
+                        "row_uid": str(latest[1]),
+                        "last_ts": start_time_ms,
+                    }
+                    _save_checkpoint(checkpoint, db_path)
+                    return checkpoint
             return None
+
+        eff_start = int(bounds[1])
+        if start_time_ms is not None and start_time_ms > eff_start:
+            eff_start = start_time_ms
+
         high_water = db.execute(
             "SELECT ingest_order, toString(row_uid) FROM traces "
             "ORDER BY ingest_order DESC, row_uid DESC LIMIT 1"
         ).fetchone()
 
-    bootstrap_start, bootstrap_end = _aligned_window(int(bounds[0]), int(bounds[1]) + 1)
+    bootstrap_start, bootstrap_end = _aligned_window(eff_start, int(bounds[2]) + 1)
     checkpoint = {
         "mode": "bootstrap", "next_slice_start_ms": bootstrap_start,
         "bootstrap_end_ms": bootstrap_end,
@@ -380,13 +425,20 @@ def _run_incremental(checkpoint: Dict[str, Any], db_path: Optional[str]) -> Dict
     cursor_order = int(checkpoint.get("ingest_order", 0))
     cursor_uid = str(checkpoint.get("row_uid", ZERO_UUID))
     last_ts = int(checkpoint.get("last_ts", 0))
+    start_time_ms = settings.worker_start_time_ms
     while True:
         with get_connection(db_path) as db:
+            where_sql = "WHERE (ingest_order, row_uid) > (?, toUUID(?))"
+            params: List[Any] = [cursor_order, cursor_uid]
+            if start_time_ms is not None:
+                where_sql += " AND timestamp_ms >= ?"
+                params.append(start_time_ms)
+            params.append(CURSOR_BATCH_SIZE)
             rows = db.execute(
-                "SELECT ingest_order, toString(row_uid) AS cursor_uid, timestamp_ms FROM traces "
-                "WHERE (ingest_order, row_uid) > (?, toUUID(?)) "
-                "ORDER BY ingest_order, row_uid LIMIT ?",
-                (cursor_order, cursor_uid, CURSOR_BATCH_SIZE),
+                f"SELECT ingest_order, toString(row_uid) AS cursor_uid, timestamp_ms FROM traces "
+                f"{where_sql} "
+                f"ORDER BY ingest_order, row_uid LIMIT ?",
+                params,
             ).fetchall()
         if not rows:
             break

@@ -55,7 +55,9 @@ from backend.app.api.users import router as users_router
 from backend.app.api.reference_compat import router as reference_compat_router
 from backend.app.api.agent_stats import router as agent_stats_router
 from backend.app.api.internal_storage import router as internal_storage_router
+from backend.app.api.investigations import router as investigations_router
 from backend.app.services.ingest_writer import ingest_writer
+from backend.app.services.investigation import InvestigationRunner
 from backend.app.services.storage_owner_client import StorageOwnerError, storage_owner_client
 
 
@@ -103,6 +105,7 @@ def create_app(role: str = ROLE_ALL) -> FastAPI:
         )
 
     repo = StorageRepository()
+    investigation_runner = InvestigationRunner()
 
     @asynccontextmanager
     async def lifespan(_app: FastAPI):
@@ -116,9 +119,19 @@ def create_app(role: str = ROLE_ALL) -> FastAPI:
             await storage_owner_client.start()
         if owns_writer:
             ingest_writer.start()
+        if role == ROLE_ALL and settings.llm_investigation_enabled:
+            try:
+                await investigation_runner.start()
+                _app.state.investigation_start_error = None
+            except Exception as exc:
+                # Investigation availability must never take ingestion or the
+                # deterministic analytics application down.
+                _app.state.investigation_start_error = str(getattr(exc, "code", "owner_unavailable"))
         try:
             yield
         finally:
+            if role == ROLE_ALL:
+                await investigation_runner.shutdown()
             if owns_writer:
                 ingest_writer.shutdown()
             if storage_owner_client.enabled:
@@ -165,6 +178,8 @@ def create_app(role: str = ROLE_ALL) -> FastAPI:
         return await call_next(request)
     # Exposed for tests / diagnostics: which workload surface this app serves.
     app.state.tracescope_role = role
+    app.state.investigation_runner = investigation_runner
+    app.state.investigation_start_error = None
 
     if role == ROLE_ALL:
         for router in _ANALYTICS_ROUTERS:
@@ -174,6 +189,7 @@ def create_app(role: str = ROLE_ALL) -> FastAPI:
         for router in _AGENT_STATS_ROUTERS:
             app.include_router(router)
         app.include_router(internal_storage_router)
+        app.include_router(investigations_router)
     elif role == ROLE_INGEST:
         for router in _INGEST_ROUTERS:
             app.include_router(router)

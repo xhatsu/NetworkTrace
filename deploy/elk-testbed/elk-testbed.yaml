@@ -27,7 +27,7 @@ metadata:
   name: tmp-elk-svc
   namespace: tmp-elk
 spec:
-  type: ClusterIP
+  type: NodePort
   selector:
     app: tmp-elk
   ports:
@@ -111,7 +111,7 @@ metadata:
   name: apm-server
   namespace: tmp-elk
 spec:
-  type: ClusterIP
+  type: NodePort
   selector:
     app: tmp-apm-server
   ports:

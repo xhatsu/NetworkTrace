@@ -1,10 +1,8 @@
+import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
 import {
   Area,
-  AreaChart,
-  Bar,
-  BarChart,
   CartesianGrid,
   Cell,
   ComposedChart,
@@ -14,6 +12,8 @@ import {
   Tooltip,
   XAxis,
   YAxis,
+  BarChart,
+  Bar,
 } from "recharts";
 import {
   Activity,
@@ -22,8 +22,17 @@ import {
   Clock,
   ExternalLink,
   Layers,
+  Radio,
   RefreshCw,
-  Zap,
+  Search,
+  Share2,
+  Shield,
+  ShieldAlert,
+  ShieldCheck,
+  Sparkles,
+  TrendingUp,
+  User,
+  Users,
 } from "lucide-react";
 import { api, queryString } from "../api";
 import {
@@ -38,253 +47,387 @@ import {
   pct,
 } from "../components";
 import { useFilters } from "../App";
-import type { Anomaly, SeriesPoint, Summary } from "../types";
+import { useI18n } from "../i18n";
+import type { SeriesPoint, Summary } from "../types";
 
-type Degraded = {
-  service_name: string;
-  name: string;
-  current_p95_ms: number;
-  baseline_p95_ms: number;
-  absolute_change_ms: number;
-  relative_change: number | null;
-  current_samples: number;
-  baseline_samples: number;
+type UserSummary = {
+  observed_principals: number;
+  active_principals: number;
+  new_principals_today: number;
+  principals_with_changes: number;
+  dormant_reactivated: number;
+  new_service_relationships: number;
+  new_caller_relationships: number;
 };
 
-type Rankings = {
-  services: {
-    name: string;
-    requests: number;
-    avg_ms: number;
-    failure_rate: number;
-  }[];
-  operations: {
-    service_name: string;
-    name: string;
-    requests: number;
-    avg_ms: number;
-    slow_rate: number;
-  }[];
-  accounts: { name: string; requests: number }[];
-  degraded_absolute: Degraded[];
-  degraded_relative: Degraded[];
+type UserItem = {
+  id: number;
+  principal_name: string;
+  principal_type: string;
+  first_seen: number;
+  last_seen: number;
+  total_requests: number;
+  unique_callers: number;
+  unique_sources: number;
+  unique_targets: number;
+  unique_operations: number;
+  status: string;
+  behavior_score: number;
+  behavior_level: "High" | "Medium" | "Low";
+  learning_status: string;
+  recent_changes?: number;
 };
 
-type Heat = {
-  service_name: string;
-  bucket_ms: number;
-  samples: number;
-  avg_ms: number;
-  failure_rate: number;
+type UserChangeEvent = {
+  id: number;
+  principal_name: string;
+  change_type: string;
+  caller_service?: string;
+  target_service?: string;
+  operation?: string;
+  source_ip?: string;
+  severity: string;
+  score: number;
+  detected_at: number;
+  status: string;
+  explanation?: string;
+  reason?: Record<string, any>;
+};
+
+type UserIncident = {
+  incident_id: string;
+  principal_name: string;
+  score: number;
+  priority: string;
+  started_at: number;
+  last_seen_at: number;
+  status: string;
+  triggers?: string[];
+  relationship_chain?: string[];
 };
 
 export function OverviewPage() {
   const { filters, setFilter } = useFilters();
+  const { t } = useI18n();
   const nav = useNavigate();
   const qs = queryString(filters);
+  const [userSearch, setUserSearch] = useState("");
+  const [riskFilter, setRiskFilter] = useState<"all" | "high" | "med" | "active">("all");
 
-  const summary = useQuery({
+  // 1. User Summary KPIs
+  const userSummaryQuery = useQuery({
+    queryKey: ["users-summary", qs],
+    queryFn: () => api<UserSummary>(`/api/v1/users/summary?${qs}`),
+    refetchInterval: 60000,
+  });
+
+  // 2. User Directory List
+  const usersQuery = useQuery({
+    queryKey: ["users-list", qs],
+    queryFn: () => api<{ items: UserItem[]; count: number }>(`/api/v1/users?limit=100&sort=most_active&${qs}`),
+    refetchInterval: 60000,
+  });
+
+  // 3. User Intelligence Analytics
+  const userAnalyticsQuery = useQuery({
+    queryKey: ["user-analytics", qs],
+    queryFn: () => api<any>(`/api/v1/user-analytics?${qs}`),
+    refetchInterval: 60000,
+  });
+
+  // 4. Recent Behavioral Change Events Feed
+  const userChangesQuery = useQuery({
+    queryKey: ["user-changes-feed", qs],
+    queryFn: () => api<{ items: UserChangeEvent[]; count: number }>(`/api/v1/user-changes?limit=8&${qs}`),
+    refetchInterval: 60000,
+  });
+
+  // 5. Active User Incidents Queue
+  const incidentsQuery = useQuery({
+    queryKey: ["user-incidents-feed", qs],
+    queryFn: () => api<{ items: UserIncident[]; count?: number }>(`/api/v1/incidents?limit=6&${qs}`),
+    refetchInterval: 60000,
+  });
+
+  // 6. Time-Series Traffic & Error Velocity
+  const seriesQuery = useQuery({
+    queryKey: ["series", qs],
+    queryFn: () => api<{ items: SeriesPoint[] }>(`/api/v1/dashboard/series?${qs}`),
+    refetchInterval: 60000,
+  });
+
+  // 7. Overall System Volume Context
+  const summaryQuery = useQuery({
     queryKey: ["summary", qs],
     queryFn: () => api<Summary>(`/api/v1/dashboard/summary?${qs}`),
     refetchInterval: 60000,
   });
 
-  const series = useQuery({
-    queryKey: ["series", qs],
-    queryFn: () =>
-      api<{ items: SeriesPoint[] }>(`/api/v1/dashboard/series?${qs}`),
-    refetchInterval: 60000,
-  });
+  const isLoading = userSummaryQuery.isLoading || usersQuery.isLoading;
+  const isError = userSummaryQuery.error || usersQuery.error;
 
-  const ranks = useQuery({
-    queryKey: ["rankings", qs],
-    queryFn: () => api<Rankings>(`/api/v1/dashboard/rankings?${qs}`),
-  });
-
-  const heat = useQuery({
-    queryKey: ["heatmap", qs],
-    queryFn: () => api<{ items: Heat[] }>(`/api/v1/dashboard/heatmap?${qs}`),
-  });
-
-  const anomalies = useQuery({
-    queryKey: ["anomalies", qs],
-    queryFn: () => api<{ items: Anomaly[] }>(`/api/v1/anomalies?${qs}`),
-  });
-  const userChanges = useQuery({
-    queryKey: ["overview-user-changes", qs],
-    queryFn: () => api<{items: Array<{id:number;principal_name:string;change_type:string;detected_at:number;severity:string}>}>(`/api/v1/user-changes?${qs}&limit=5`),
-  });
-
-  if (summary.isLoading || series.isLoading) {
+  if (isLoading) {
     return (
       <Page
-        eyebrow="System Health"
-        title="Live Estate Overview"
-        description="Observed OpenTelemetry server transactions with transparent coverage."
+        eyebrow={t("User Intelligence")}
+        title={t("User Behavioral Observability Dashboard")}
+        description={t("Executive identity monitoring: real-time account behavior, baseline deviations, novel touchpoints, and active triage.")}
       >
         <Loading />
       </Page>
     );
   }
 
-  if (summary.error || series.error) {
+  if (isError) {
     return (
       <Page
-        eyebrow="System Health"
-        title="Live Estate Overview"
+        eyebrow={t("User Intelligence")}
+        title={t("User Behavioral Observability Dashboard")}
         description=""
       >
         <ErrorState
-          message={(summary.error || series.error)?.message || "Unable to load estate metrics."}
+          message={(userSummaryQuery.error || usersQuery.error)?.message || "Unable to load identity metrics."}
         />
       </Page>
     );
   }
 
-  const s = summary.data || {
-    observed_rps: 0,
-    observed_tps: 0,
-    total_requests: 0,
-    active_services: 0,
-    active_accounts: 0,
-    p95_latency_ms: 0,
-    http_5xx_rate: 0,
-    slow_request_rate: 0,
-    active_anomalies: 0,
-    latest_ingested_ms: null,
-    sampling_coverage: "100%",
-    tps_equals_rps: true,
-    sample_count: 0,
+  const uSum = userSummaryQuery.data || {
+    observed_principals: 0,
+    active_principals: 0,
+    new_principals_today: 0,
+    principals_with_changes: 0,
+    dormant_reactivated: 0,
+    new_service_relationships: 0,
+    new_caller_relationships: 0,
   };
-  const points = series.data?.items || [];
+
+  const allUsers = usersQuery.data?.items || [];
+  const points = seriesQuery.data?.items || [];
+  const changes = userChangesQuery.data?.items || [];
+  const incidents = incidentsQuery.data?.items || [];
+  const analytics = userAnalyticsQuery.data || {};
+  const s = summaryQuery.data;
+
+  // Cohort Computations
+  const highRiskUsers = allUsers.filter((u) => (u.behavior_score || 0) >= 60);
+  const medRiskUsers = allUsers.filter((u) => (u.behavior_score || 0) >= 25 && (u.behavior_score || 0) < 60);
+  const lowRiskUsers = allUsers.filter((u) => (u.behavior_score || 0) < 25);
+  const activeUsers = allUsers.filter((u) => u.status === "Active");
+
+  // Filtered Users Table
+  const filteredUsers = allUsers.filter((u) => {
+    if (userSearch) {
+      const q = userSearch.toLowerCase();
+      const matchName = u.principal_name.toLowerCase().includes(q);
+      const matchType = (u.principal_type || "").toLowerCase().includes(q);
+      if (!matchName && !matchType) return false;
+    }
+    if (riskFilter === "high") return (u.behavior_score || 0) >= 60;
+    if (riskFilter === "med") return (u.behavior_score || 0) >= 25 && (u.behavior_score || 0) < 60;
+    if (riskFilter === "active") return u.status === "Active";
+    return true;
+  });
+
+  const cohortData = [
+    { name: t("High Risk (≥60)"), count: highRiskUsers.length, fill: "#ff1744" },
+    { name: t("Medium Risk (25-59)"), count: medRiskUsers.length, fill: "#ffab00" },
+    { name: t("Low Risk (<25)"), count: lowRiskUsers.length, fill: "#00e676" },
+    { name: t("Actively Transacting"), count: activeUsers.length, fill: "#00f0ff" },
+  ];
 
   return (
     <Page
-      eyebrow="Estate Monitor"
-      title="Transaction Health & Latency Distribution"
-      description="Real-time OpenTelemetry ingestion metrics, latency percentiles, error rates, and identity distributions."
+      eyebrow={t("Identity & Credential Intelligence")}
+      title={t("User Behavioral Observability Dashboard")}
+      description={t("Executive identity monitoring: real-time account behavior, baseline deviations, novel touchpoints, and active triage.")}
       actions={
-        <div className="flex items-center gap-2">
-          <div className="flex items-center gap-1.5 rounded-md border border-[rgba(255,255,255,0.08)] bg-white/[0.02] px-2.5 py-1 text-xs text-[#8b949e]">
-            <RefreshCw size={12} className="text-emerald-400" />
-            <span>Updated {age(s.latest_ingested_ms)}</span>
+        <div className="flex flex-wrap items-center gap-2">
+          <div className="flex items-center gap-1.5 rounded-md border border-emerald-500/40 bg-emerald-500/10 px-2.5 py-1 text-xs font-mono font-bold text-emerald-300">
+            <span className="h-2 w-2 rounded-full bg-emerald-400" />
+            <span>{t("Behavioral Engine Active")}</span>
           </div>
-          <div className="chip">
-            Coverage: <span className="font-mono text-[#f0f3f6]">{s.sampling_coverage}</span>
-          </div>
+          <button
+            onClick={() => nav("/users")}
+            className="btn-cyan text-xs"
+          >
+            <Users size={14} />
+            <span>{t("User Directory")} ({uSum.observed_principals})</span>
+            <ArrowRight size={12} />
+          </button>
         </div>
       }
     >
-      {/* 8 Primary Signal Cards */}
+      {/* 8 Primary User Signal Cards */}
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-4 lg:grid-cols-8">
         <MetricCard
-          label="Observed RPS"
-          value={n(s.observed_rps, 2)}
-          detail={`${n(s.total_requests)} HTTP in window`}
-          accent="sky"
-        />
-        <MetricCard
-          label="Observed TPS"
-          value={n(s.observed_tps, 2)}
-          detail={
-            s.tps_equals_rps
-              ? "Equivalent to RPS"
-              : "All server transactions"
-          }
-          accent="emerald"
-        />
-        <MetricCard
-          label="Total Volume"
-          value={n(s.total_requests)}
-          detail={`${n(s.sample_count)} span records`}
-          accent="indigo"
-        />
-        <MetricCard
-          label="Active Services"
-          value={n(s.active_services, 0)}
-          detail="Traffic in window"
-          accent="violet"
-        />
-        <MetricCard
-          label="System Accounts"
-          value={n(s.active_accounts, 0)}
-          detail="Presented identities"
+          label={t("Tracked Users")}
+          value={n(uSum.observed_principals, 0)}
+          detail={t("Total distinct identities")}
           accent="cyan"
         />
         <MetricCard
-          label="p95 Latency"
-          value={`${n(s.p95_latency_ms)} ms`}
-          detail={`Log merged · n=${n(s.sample_count)}`}
-          tone={s.p95_latency_ms > 500 ? "bad" : "normal"}
-          accent="purple"
+          label={t("Active Accounts")}
+          value={n(uSum.active_principals, 0)}
+          detail={t("Transacting in 5m window")}
+          accent="emerald"
         />
         <MetricCard
-          label="HTTP 5xx Rate"
-          value={pct(s.http_5xx_rate)}
-          detail="Server-side errors"
-          tone={s.http_5xx_rate > 0.02 ? "bad" : "normal"}
+          label={t("High-Risk Users")}
+          value={String(highRiskUsers.length)}
+          detail={t("Score ≥ 60/100")}
+          tone={highRiskUsers.length > 0 ? "bad" : "normal"}
           accent="rose"
         />
         <MetricCard
-          label="Active Anomalies"
-          value={String(s.active_anomalies)}
-          detail="Open or acknowledged"
-          tone={s.active_anomalies ? "bad" : "good"}
+          label={t("Medium-Risk")}
+          value={String(medRiskUsers.length)}
+          detail={t("Score 25–59/100")}
           accent="amber"
+        />
+        <MetricCard
+          label={t("Baseline Drift")}
+          value={n(uSum.principals_with_changes, 0)}
+          detail={t("Users violating baselines")}
+          tone={uSum.principals_with_changes > 0 ? "bad" : "good"}
+          accent="violet"
+        />
+        <MetricCard
+          label={t("New Target Edges")}
+          value={n(uSum.new_service_relationships, 0)}
+          detail={t("Novel target services accessed")}
+          accent="indigo"
+        />
+        <MetricCard
+          label={t("New Caller Paths")}
+          value={n(uSum.new_caller_relationships, 0)}
+          detail={t("Unprecedented caller paths")}
+          accent="sky"
+        />
+        <MetricCard
+          label={t("Active Incidents")}
+          value={String(incidents.length)}
+          detail={t("Multi-signal user investigations")}
+          tone={incidents.length > 0 ? "bad" : "good"}
+          accent="rose"
         />
       </div>
 
-      {/* Primary Charts: Throughput and Latency */}
+      {/* User Quick Search & Filter Toolbar */}
+      <div className="mt-4 rounded-xl border border-[#262838] bg-[#141622] p-3.5">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div className="flex flex-1 items-center gap-2 min-w-[260px] max-w-md">
+            <div className="relative w-full">
+              <Search className="absolute left-3 top-2.5 text-[#94a3b8]" size={14} />
+              <input
+                type="text"
+                placeholder={t("Search user account or credential...")}
+                value={userSearch}
+                onChange={(e) => setUserSearch(e.target.value)}
+                className="w-full rounded-lg border border-[#262838] bg-[#0c0d14] pl-9 pr-3 py-1.5 text-xs text-white placeholder:text-[#94a3b8] focus:border-cyan-400 focus:outline-none"
+              />
+            </div>
+          </div>
+
+          <div className="flex flex-wrap items-center gap-2 text-xs">
+            <span className="text-[#94a3b8] text-[11px] uppercase font-bold tracking-wider">{t("Cohort Filter:")}</span>
+            {[
+              { key: "all", label: `${t("All Users")} (${allUsers.length})` },
+              { key: "high", label: `${t("High Risk")} (${highRiskUsers.length})` },
+              { key: "med", label: `${t("Medium Risk")} (${medRiskUsers.length})` },
+              { key: "active", label: `${t("Active Only")} (${activeUsers.length})` },
+            ].map((tab) => (
+              <button
+                key={tab.key}
+                onClick={() => setRiskFilter(tab.key as any)}
+                className={`rounded-lg px-2.5 py-1 text-xs font-semibold transition ${
+                  riskFilter === tab.key
+                    ? "bg-cyan-500/20 border border-cyan-500/50 text-cyan-300 font-bold"
+                    : "border border-[#262838] bg-[#1a1d2c] text-[#cbd5e1] hover:border-[#3d425b] hover:text-white"
+                }`}
+              >
+                {tab.label}
+              </button>
+            ))}
+          </div>
+        </div>
+      </div>
+
+      {/* Central Visualizations: User Ingress Velocity vs Error Dynamics & Risk Cohort Split */}
       <div className="mt-4 grid gap-4 lg:grid-cols-12">
+        {/* Left 7 Cols: Identity Traffic Velocity & Error Dynamics */}
         <Panel
-          title="Throughput & Baselines"
-          subtitle="60s bucketed HTTP RPS and server TPS vs historical baseline"
+          title={t("Identity Traffic Velocity & Error Rates")}
+          subtitle={t("60s bucketed transaction throughput vs HTTP failure proportions")}
           className="lg:col-span-7"
+          action={
+            <div className="flex items-center gap-2 text-xs font-mono text-[#94a3b8]">
+              <span>TPS: <strong className="text-cyan-300 font-bold">{n(s?.observed_rps || 0, 1)}</strong></span>
+              <span>•</span>
+              <span>5xx: <strong className="text-rose-400 font-bold">{pct(s?.http_5xx_rate || 0)}</strong></span>
+            </div>
+          }
         >
           <div className="h-[290px] p-3">
             <ResponsiveContainer>
               <ComposedChart data={points}>
-                <defs>
-                  <linearGradient id="rpsGrad" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="0%" stopColor="#0ea5e9" stopOpacity={0.35} />
-                    <stop offset="100%" stopColor="#0284c7" stopOpacity={0.02} />
-                  </linearGradient>
-                </defs>
-                <CartesianGrid stroke="rgba(255,255,255,0.08)" vertical={false} />
+                <CartesianGrid stroke="rgba(255,255,255,0.06)" vertical={false} />
                 <XAxis
                   dataKey="timestamp_ms"
                   tickFormatter={(v) => formatTime(v, filters.timezone)}
                   minTickGap={50}
                   stroke="#766e92"
                 />
-                <YAxis width={40} stroke="#766e92" />
+                <YAxis
+                  yAxisId="left"
+                  stroke="#766e92"
+                  width={45}
+                  unit=" tps"
+                />
+                <YAxis
+                  yAxisId="right"
+                  orientation="right"
+                  stroke="#f43f5e"
+                  width={45}
+                  tickFormatter={(v) => `${Math.round(v * 100)}%`}
+                />
                 <Tooltip
                   {...chartTooltip}
-                  labelFormatter={(v) => formatTime(Number(v), filters.timezone)}
+                  formatter={(val: any, name: any) => {
+                    if (name === "5xx Failure Rate" || String(name).includes("5xx")) {
+                      return [`${(Number(val || 0) * 100).toFixed(2)}%`, name];
+                    }
+                    return [`${Number(val || 0).toFixed(2)} tps`, name];
+                  }}
                 />
                 <Legend wrapperStyle={{ fontSize: 11, paddingTop: 4 }} />
                 <Area
+                  yAxisId="left"
                   type="monotone"
                   dataKey="rps"
-                  name="Observed RPS"
-                  stroke="#38bdf8"
-                  fill="url(#rpsGrad)"
+                  name={t("Observed Throughput (TPS)")}
+                  stroke="#00f0ff"
+                  fill="#00f0ff"
+                  fillOpacity={0.12}
                   strokeWidth={2}
                 />
                 <Line
+                  yAxisId="left"
                   type="monotone"
-                  dataKey="tps"
-                  name="Observed TPS"
-                  stroke="#10b981"
-                  strokeWidth={2}
+                  dataKey="baseline_rps"
+                  name={t("Historical Baseline TPS")}
+                  stroke="#a78bfa"
+                  strokeDasharray="4 4"
+                  strokeWidth={1.5}
                   dot={false}
                 />
                 <Line
-                  dataKey="baseline_rps"
-                  name="Robust Baseline"
-                  stroke="#818cf8"
-                  strokeDasharray="4 4"
-                  strokeWidth={1.5}
+                  yAxisId="right"
+                  type="monotone"
+                  dataKey="http_5xx_rate"
+                  name={t("5xx Failure Rate")}
+                  stroke="#f43f5e"
+                  strokeWidth={2}
                   dot={false}
                 />
               </ComposedChart>
@@ -292,219 +435,29 @@ export function OverviewPage() {
           </div>
         </Panel>
 
+        {/* Right 5 Cols: Identity Cohort Risk Breakdown */}
         <Panel
-          title="Latency Distribution"
-          subtitle="Merged logarithmic histogram percentiles (p50 / p95 / p99)"
+          title={t("Identity Risk & Status Distribution")}
+          subtitle={t("Account distribution across behavioral risk levels and activity states")}
           className="lg:col-span-5"
         >
           <div className="h-[290px] p-3">
             <ResponsiveContainer>
-              <AreaChart data={points}>
-                <defs>
-                  <linearGradient id="p95Grad" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="0%" stopColor="#f59e0b" stopOpacity={0.32} />
-                    <stop offset="100%" stopColor="#f59e0b" stopOpacity={0.02} />
-                  </linearGradient>
-                </defs>
-                <CartesianGrid stroke="rgba(255,255,255,0.08)" vertical={false} />
-                <XAxis
-                  dataKey="timestamp_ms"
-                  tickFormatter={(v) => formatTime(v, filters.timezone)}
-                  minTickGap={50}
-                  stroke="#766e92"
-                />
-                <YAxis width={45} stroke="#766e92" unit="ms" />
-                <Tooltip {...chartTooltip} />
-                <Legend wrapperStyle={{ fontSize: 11, paddingTop: 4 }} />
-                <Area
-                  dataKey="p99_ms"
-                  name="p99 Latency"
-                  stroke="#f43f5e"
-                  fill="#f43f5e"
-                  fillOpacity={0.12}
-                  strokeWidth={2}
-                />
-                <Area
-                  dataKey="p95_ms"
-                  name="p95 Latency"
-                  stroke="#fbbf24"
-                  fill="url(#p95Grad)"
-                  strokeWidth={2}
-                />
-                <Area
-                  dataKey="p50_ms"
-                  name="p50 Median"
-                  stroke="#2dd4bf"
-                  fill="#2dd4bf"
-                  fillOpacity={0.12}
-                  strokeWidth={2}
-                />
-              </AreaChart>
-            </ResponsiveContainer>
-          </div>
-        </Panel>
-      </div>
-
-      {/* Latency Heatmap and Error Rate Series */}
-      <div className="mt-4 grid gap-4 lg:grid-cols-12">
-        <Panel
-          title="Service × Time Heatmap"
-          subtitle="5-minute bucketed average latency — click any service to drill into detailed traces"
-          className="lg:col-span-7"
-        >
-          <Heatmap
-            rows={heat.data?.items || []}
-            timezone={filters.timezone}
-            onService={(name) =>
-              nav(`/services/${encodeURIComponent(name)}?${qs}`)
-            }
-          />
-        </Panel>
-
-        <Panel
-          title="Error & Status Rates"
-          subtitle="HTTP 5xx, 4xx, and outcome failure proportions per minute"
-          className="lg:col-span-5"
-        >
-          <div className="h-[270px] p-3">
-            <ResponsiveContainer>
-              <AreaChart data={points}>
-                <CartesianGrid stroke="rgba(255,255,255,0.08)" vertical={false} />
-                <XAxis
-                  dataKey="timestamp_ms"
-                  tickFormatter={(v) => formatTime(v, filters.timezone)}
-                  minTickGap={50}
-                  stroke="#766e92"
-                />
-                <YAxis
-                  tickFormatter={(v) => `${Math.round(v * 100)}%`}
-                  width={42}
-                  stroke="#766e92"
-                />
-                <Tooltip
-                  {...chartTooltip}
-                  formatter={(v) => `${(Number(v) * 100).toFixed(2)}%`}
-                />
-                <Legend wrapperStyle={{ fontSize: 11, paddingTop: 4 }} />
-                <Area
-                  dataKey="http_5xx_rate"
-                  name="HTTP 5xx"
-                  stackId="status"
-                  stroke="#f43f5e"
-                  fill="#f43f5e"
-                  fillOpacity={0.35}
-                />
-                <Area
-                  dataKey="http_4xx_rate"
-                  name="HTTP 4xx"
-                  stackId="status"
-                  stroke="#f59e0b"
-                  fill="#f59e0b"
-                  fillOpacity={0.25}
-                />
-                <Line
-                  dataKey="failure_rate"
-                  name="Failure Rate"
-                  stroke="#d946ef"
-                  strokeWidth={2}
-                  dot={false}
-                />
-              </AreaChart>
-            </ResponsiveContainer>
-          </div>
-        </Panel>
-      </div>
-
-      {/* Rankings: Services, Operations, Accounts */}
-      <div className="mt-4 grid gap-4 lg:grid-cols-3">
-        <Panel
-          title="Top Services by Volume"
-          subtitle="Click to view operation breakdown and dependency edges"
-        >
-          <RankTable
-            rows={ranks.data?.services || []}
-            onClick={(name) =>
-              nav(`/services/${encodeURIComponent(name)}?${qs}`)
-            }
-          />
-        </Panel>
-
-        <Panel
-          title="Top Operations"
-          subtitle="Transaction count and slow rate fraction (>1s)"
-        >
-          <div className="overflow-auto max-h-[360px] scrollbar">
-            <table className="w-full">
-              <thead>
-                <tr className="border-b border-[rgba(255,255,255,0.06)] bg-white/[0.01]">
-                  <th className="table-head px-4 py-2.5">Operation</th>
-                  <th className="table-head text-right pr-4">Requests</th>
-                  <th className="table-head text-right pr-4">Slow %</th>
-                </tr>
-              </thead>
-              <tbody>
-                {(ranks.data?.operations || []).map((row) => (
-                  <tr
-                    key={`${row.service_name}-${row.name}`}
-                    className="cursor-pointer border-b border-[rgba(255,255,255,0.04)] transition hover:bg-white/[0.04]"
-                    onClick={() => {
-                      setFilter("operation", row.name);
-                      nav(
-                        `/services/${encodeURIComponent(row.service_name)}?${queryString({ ...filters, operation: row.name })}`,
-                      );
-                    }}
-                  >
-                    <td className="max-w-[190px] px-4 py-2.5">
-                      <div className="truncate text-xs font-medium text-[#f5f3fa]">
-                        {row.name}
-                      </div>
-                      <div className="truncate text-[10px] text-violet-300/80">
-                        {row.service_name}
-                      </div>
-                    </td>
-                    <td className="text-right pr-4 font-mono text-xs tabular-nums text-[#c4bdd9]">
-                      {n(row.requests)}
-                    </td>
-                    <td className="text-right pr-4 font-mono text-xs tabular-nums text-amber-300">
-                      {pct(row.slow_rate)}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </Panel>
-
-        <Panel
-          title="Identity Volume (Accounts)"
-          subtitle="Presented request identity volume distribution"
-        >
-          <div className="h-[320px] p-3">
-            <ResponsiveContainer>
-              <BarChart data={ranks.data?.accounts || []} layout="vertical">
-                <CartesianGrid stroke="rgba(255,255,255,0.08)" horizontal={false} />
-                <XAxis type="number" hide />
+              <BarChart data={cohortData} layout="vertical" margin={{ left: 20, right: 20, top: 10, bottom: 10 }}>
+                <CartesianGrid stroke="rgba(255,255,255,0.06)" horizontal={false} />
+                <XAxis type="number" stroke="#766e92" />
                 <YAxis
                   type="category"
                   dataKey="name"
-                  width={100}
-                  tick={{ fill: "#9e96b8", fontSize: 11 }}
                   stroke="#766e92"
+                  width={140}
+                  tick={{ fill: "#cbd5e1", fontSize: 11, fontWeight: 500 }}
                 />
                 <Tooltip {...chartTooltip} />
-                <Bar
-                  dataKey="requests"
-                  radius={[0, 4, 4, 0]}
-                  onClick={(row) =>
-                    nav(
-                      `/accounts/${encodeURIComponent(String(row.name))}?${qs}`,
-                    )
-                  }
-                >
-                  {(ranks.data?.accounts || []).map((_, i) => {
-                    const colors = ["#06b6d4", "#8b5cf6", "#10b981", "#f59e0b", "#f43f5e", "#0ea5e9", "#d946ef", "#14b8a6"];
-                    return <Cell key={`cell-${i}`} fill={colors[i % colors.length]} />;
-                  })}
+                <Bar dataKey="count" name={t("Principal Identity")} radius={[0, 4, 4, 0]}>
+                  {cohortData.map((entry, index) => (
+                    <Cell key={`cell-${index}`} fill={entry.fill} />
+                  ))}
                 </Bar>
               </BarChart>
             </ResponsiveContainer>
@@ -512,114 +465,273 @@ export function OverviewPage() {
         </Panel>
       </div>
 
-      {/* Degradations */}
-      <Panel
-        title="Top Degraded Operations"
-        subtitle="p95 latency shifts versus prior baseline window (calculated from merged histograms)"
-        className="mt-4"
-      >
-        <div className="grid gap-px bg-[rgba(255,255,255,0.10)] lg:grid-cols-2">
-          <DegradedTable
-            title="Largest Absolute Increase (ms)"
-            rows={ranks.data?.degraded_absolute || []}
-          />
-          <DegradedTable
-            title="Largest Relative Increase (%)"
-            rows={ranks.data?.degraded_relative || []}
-          />
-        </div>
-      </Panel>
+      {/* Actionable User Tables: Riskiest Users vs Shared Credentials */}
+      <div className="mt-4 grid gap-4 lg:grid-cols-12">
+        {/* Left 7 Cols: Top Riskiest / Most Active User Accounts */}
+        <Panel
+          title={t("Prioritized User & Service Accounts")}
+          subtitle={t("Identities sorted by behavioral risk score, active baseline deviations, and request volume")}
+          className="lg:col-span-7"
+          action={
+            <button
+              onClick={() => nav("/users")}
+              className="text-xs font-semibold text-cyan-300 hover:text-white flex items-center gap-1"
+            >
+              <span>{t("View full directory")} ({allUsers.length})</span>
+              <ArrowRight size={12} />
+            </button>
+          }
+        >
+          <div className="overflow-x-auto scrollbar max-h-[380px]">
+            <table className="w-full text-xs">
+              <thead>
+                <tr className="border-b border-[#262838] bg-[#10121a]">
+                  <th className="table-head px-4 py-2.5">{t("Principal Identity")}</th>
+                  <th className="table-head px-3 py-2.5">{t("Type")}</th>
+                  <th className="table-head px-3 py-2.5">{t("Risk Score")}</th>
+                  <th className="table-head px-3 py-2.5 text-right">{t("Volume")}</th>
+                  <th className="table-head px-3 py-2.5 text-right">{t("Scope")}</th>
+                  <th className="table-head px-4 py-2.5 text-right">{t("Actions")}</th>
+                </tr>
+              </thead>
+              <tbody>
+                {filteredUsers.slice(0, 10).map((u) => {
+                  const score = u.behavior_score || 0;
+                  const isHigh = score >= 60;
+                  const isMed = score >= 25 && score < 60;
+                  return (
+                    <tr
+                      key={u.principal_name}
+                      className="border-b border-[#1f2230] hover:bg-[#181b28] transition-colors cursor-pointer"
+                      onClick={() => nav(`/users/${encodeURIComponent(u.principal_name)}/overview`)}
+                    >
+                      <td className="px-4 py-2.5">
+                        <div className="flex items-center gap-2">
+                          <div className="grid h-6 w-6 place-items-center rounded-md bg-[#222536] text-cyan-300 text-[10px] font-bold">
+                            {u.principal_name.slice(0, 2).toUpperCase()}
+                          </div>
+                          <div>
+                            <div className="font-mono font-bold text-white truncate max-w-[180px]" title={u.principal_name}>
+                              {u.principal_name}
+                            </div>
+                            <div className="flex items-center gap-1.5 text-[10px] text-[#94a3b8]">
+                              <span className={`h-1.5 w-1.5 rounded-full ${u.status === "Active" ? "bg-emerald-400" : "bg-slate-500"}`} />
+                              <span>{t(u.status)}</span>
+                            </div>
+                          </div>
+                        </div>
+                      </td>
 
-      {/* Recent Anomalies */}
+                      <td className="px-3 py-2.5 text-[#cbd5e1] font-mono text-[11px]">
+                        {t(u.principal_type || "service_account")}
+                      </td>
+
+                      <td className="px-3 py-2.5">
+                        <span
+                          className={`inline-flex items-center gap-1 rounded px-2 py-0.5 text-[10px] font-bold border ${
+                            isHigh
+                              ? "border-rose-500/50 bg-rose-500/15 text-rose-300"
+                              : isMed
+                              ? "border-amber-500/50 bg-amber-500/15 text-amber-300"
+                              : "border-emerald-500/50 bg-emerald-500/15 text-emerald-300"
+                          }`}
+                        >
+                          {isHigh ? <ShieldAlert size={11} /> : <Shield size={11} />}
+                          <span>{score}/100</span>
+                        </span>
+                      </td>
+
+                      <td className="px-3 py-2.5 text-right font-mono font-bold text-white">
+                        {(u.total_requests || 0).toLocaleString()}
+                      </td>
+
+                      <td className="px-3 py-2.5 text-right font-mono text-[11px] text-[#cbd5e1]">
+                        <span className="text-cyan-300">{u.unique_targets || 0} tgts</span>
+                        <span className="text-[#94a3b8]"> · </span>
+                        <span>{u.unique_sources || 0} IPs</span>
+                      </td>
+
+                      <td className="px-4 py-2.5 text-right">
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            nav(`/users/${encodeURIComponent(u.principal_name)}/overview`);
+                          }}
+                          className="btn text-[11px] py-1 px-2.5 hover:border-cyan-400 text-cyan-300"
+                        >
+                          <span>{t("Inspect")}</span>
+                          <ExternalLink size={10} />
+                        </button>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        </Panel>
+
+        {/* Right 5 Cols: Shared Credentials & High Fan-Out Ingress */}
+        <Panel
+          title={t("Shared Credentials & Fan-Out Ingress")}
+          subtitle={t("Identities invoking microservices through multiple distinct callers or distributed IPs")}
+          className="lg:col-span-5"
+          action={
+            <button
+              onClick={() => nav("/user-graph")}
+              className="text-xs font-semibold text-violet-300 hover:text-white flex items-center gap-1"
+            >
+              <span>{t("Explore Graph")}</span>
+              <ArrowRight size={12} />
+            </button>
+          }
+        >
+          <div className="overflow-x-auto scrollbar max-h-[380px]">
+            <table className="w-full text-xs">
+              <thead>
+                <tr className="border-b border-[#262838] bg-[#10121a]">
+                  <th className="table-head px-4 py-2.5">{t("Credential")}</th>
+                  <th className="table-head px-3 py-2.5 text-right">{t("Callers")}</th>
+                  <th className="table-head px-3 py-2.5 text-right">{t("Volume")}</th>
+                  <th className="table-head px-4 py-2.5 text-right">{t("Status")}</th>
+                </tr>
+              </thead>
+              <tbody>
+                {(analytics.shared_credentials || []).slice(0, 10).map((sc: any) => (
+                  <tr
+                    key={sc.principal_name}
+                    className="border-b border-[#1f2230] hover:bg-[#181b28] transition-colors cursor-pointer"
+                    onClick={() => nav(`/users/${encodeURIComponent(sc.principal_name)}/topology`)}
+                  >
+                    <td className="px-4 py-2.5">
+                      <div className="flex items-center gap-2">
+                        <Share2 size={13} className="text-violet-400 shrink-0" />
+                        <span className="font-mono font-bold text-white truncate max-w-[150px]" title={sc.principal_name}>
+                          {sc.principal_name}
+                        </span>
+                      </div>
+                    </td>
+                    <td className="px-3 py-2.5 text-right font-mono font-bold text-amber-300">
+                      {sc.callers} {t("Callers")}
+                    </td>
+                    <td className="px-3 py-2.5 text-right font-mono text-[#cbd5e1]">
+                      {(sc.requests || 0).toLocaleString()}
+                    </td>
+                    <td className="px-4 py-2.5 text-right">
+                      <span className="rounded border border-amber-500/40 bg-amber-500/15 px-2 py-0.5 text-[10px] font-bold text-amber-300">
+                        {t("Multi-Caller")}
+                      </span>
+                    </td>
+                  </tr>
+                ))}
+                {(!analytics.shared_credentials || analytics.shared_credentials.length === 0) && (
+                  <tr>
+                    <td colSpan={4} className="px-4 py-8 text-center text-xs text-[#94a3b8]">
+                      {t("No shared credential anomalies detected in current window.")}
+                    </td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+        </Panel>
+      </div>
+
+      {/* Latest Behavioral Change Events Stream */}
       <Panel
-        title="Recent Structural Anomalies"
-        subtitle="Wilson score and MAD baseline deviations with calculated evidence"
+        title={t("Live Behavioral Change Events Stream")}
+        subtitle={t("Real-time baseline deviations: novel services, unprecedented callers, foreign IPs, and method anomalies")}
         className="mt-4"
         action={
           <button
-            onClick={() => nav(`/anomalies?${qs}`)}
-            className="btn text-violet-300 hover:text-white"
+            onClick={() => nav("/user-changes")}
+            className="text-xs font-semibold text-cyan-300 hover:text-white flex items-center gap-1"
           >
-            View all findings
+            <span>{t("View all change events")}</span>
             <ArrowRight size={12} />
           </button>
         }
       >
-        <div className="overflow-auto scrollbar">
-          <table className="w-full min-w-[860px]">
+        <div className="overflow-x-auto scrollbar">
+          <table className="w-full text-xs">
             <thead>
-              <tr className="border-b border-[rgba(255,255,255,0.12)] bg-white/[0.02]">
-                {[
-                  "Severity",
-                  "Entity / Type",
-                  "Current Value",
-                  "Expected Baseline",
-                  "Delta",
-                  "Samples",
-                  "Detected",
-                  "Status",
-                ].map((h) => (
-                  <th className="table-head px-4 py-2.5" key={h}>
-                    {h}
-                  </th>
-                ))}
+              <tr className="border-b border-[#262838] bg-[#10121a]">
+                <th className="table-head px-4 py-2.5">{t("Account / Principal")}</th>
+                <th className="table-head px-3 py-2.5">{t("Deviation Type")}</th>
+                <th className="table-head px-3 py-2.5">{t("Observed Touchpoint")}</th>
+                <th className="table-head px-3 py-2.5">{t("Score")}</th>
+                <th className="table-head px-3 py-2.5">{t("Detected")}</th>
+                <th className="table-head px-4 py-2.5 text-right">{t("Actions")}</th>
               </tr>
             </thead>
             <tbody>
-              {anomalies.data?.items.slice(0, 6).map((a) => (
-                <tr
-                  key={a.id}
-                  onClick={() => nav(`/anomalies/${a.id}`)}
-                  className="cursor-pointer border-b border-[rgba(255,255,255,0.08)] transition hover:bg-white/[0.05]"
-                >
-                  <td className="px-4 py-3">
-                    <span
-                      className={`inline-flex items-center gap-1 rounded px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider ${
-                        a.severity === "critical"
-                          ? "border border-rose-500/40 bg-rose-500/15 text-rose-300"
-                          : a.severity === "warning"
-                            ? "border border-amber-500/40 bg-amber-500/15 text-amber-300"
-                            : "border border-violet-500/40 bg-violet-500/15 text-violet-300"
-                      }`}
-                    >
-                      {a.severity}
-                    </span>
-                  </td>
-                  <td className="px-4 py-3">
-                    <div className="text-xs font-medium text-[#f5f3fa]">{a.entity_id}</div>
-                    <div className="text-[10px] text-[#9e96b8]">
-                      {a.anomaly_type.replaceAll("_", " ")}
-                    </div>
-                  </td>
-                  <td className="px-4 font-mono text-xs tabular-nums text-[#f5f3fa]">
-                    {n(a.current_value)} {a.unit}
-                  </td>
-                  <td className="px-4 font-mono text-xs tabular-nums text-[#c4bdd9]">
-                    {a.baseline_value === null ? "—" : n(a.baseline_value)}
-                  </td>
-                  <td className="px-4 font-mono text-xs tabular-nums text-[#fb7185]">
-                    {a.percent_change == null && a.delta_percentage == null
-                      ? (a.absolute_difference != null ? n(a.absolute_difference) : "n/a")
-                      : `${Number(a.percent_change ?? a.delta_percentage ?? 0) > 0 ? "+" : ""}${Number(a.percent_change ?? a.delta_percentage ?? 0).toFixed(0)}%`}
-                  </td>
-                  <td className="px-4 font-mono text-xs tabular-nums text-[#c4bdd9]">
-                    {n(a.current_samples)}
-                  </td>
-                  <td className="px-4 text-xs text-[#c4bdd9]">
-                    {age(a.last_detected_ms)}
-                  </td>
-                  <td className="px-4">
-                    <span className="chip uppercase text-[10px]">{a.status}</span>
-                  </td>
-                </tr>
-              ))}
-              {!anomalies.data?.items.length && (
-                <tr>
-                  <td
-                    colSpan={8}
-                    className="p-12 text-center text-xs text-[#c4bdd9]"
+              {changes.slice(0, 8).map((ch) => {
+                const targetText = ch.target_service || ch.caller_service || ch.operation || ch.source_ip || "System endpoint";
+                const isCrit = ch.severity === "critical" || ch.score >= 50;
+                return (
+                  <tr
+                    key={ch.id}
+                    className="border-b border-[#1f2230] hover:bg-[#181b28] transition-colors cursor-pointer"
+                    onClick={() => nav(`/users/${encodeURIComponent(ch.principal_name)}/changes`)}
                   >
-                    No anomalies detected in the selected time window.
+                    <td className="px-4 py-2.5">
+                      <div className="flex items-center gap-2">
+                        <User size={13} className="text-cyan-400" />
+                        <span className="font-mono font-bold text-white truncate max-w-[180px]" title={ch.principal_name}>
+                          {ch.principal_name}
+                        </span>
+                      </div>
+                    </td>
+
+                    <td className="px-3 py-2.5">
+                      <span
+                        className={`inline-flex items-center gap-1 rounded px-2 py-0.5 text-[10px] font-bold border ${
+                          ch.change_type === "NEW_TARGET"
+                            ? "border-cyan-500/40 bg-cyan-500/10 text-cyan-300"
+                            : ch.change_type === "NEW_CALLER"
+                            ? "border-violet-500/40 bg-violet-500/10 text-violet-300"
+                            : ch.change_type === "NEW_SOURCE_IP"
+                            ? "border-amber-500/40 bg-amber-500/10 text-amber-300"
+                            : "border-rose-500/40 bg-rose-500/10 text-rose-300"
+                        }`}
+                      >
+                        {t(ch.change_type, ch.change_type.replaceAll("_", " "))}
+                      </span>
+                    </td>
+
+                    <td className="px-3 py-2.5 font-mono text-[11px] text-[#cbd5e1] truncate max-w-[240px]" title={targetText}>
+                      {targetText}
+                    </td>
+
+                    <td className="px-3 py-2.5 font-mono font-bold">
+                      <span className={isCrit ? "text-rose-400" : "text-amber-400"}>
+                        +{ch.score}
+                      </span>
+                    </td>
+
+                    <td className="px-3 py-2.5 font-mono text-[11px] text-[#94a3b8]">
+                      {age(ch.detected_at)}
+                    </td>
+
+                    <td className="px-4 py-2.5 text-right">
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          nav(`/users/${encodeURIComponent(ch.principal_name)}/changes`);
+                        }}
+                        className="btn text-[11px] py-1 px-2.5 hover:border-cyan-400 text-cyan-300"
+                      >
+                        <span>{t("Analyze")}</span>
+                        <ArrowRight size={10} />
+                      </button>
+                    </td>
+                  </tr>
+                );
+              })}
+              {changes.length === 0 && (
+                <tr>
+                  <td colSpan={6} className="px-4 py-8 text-center text-xs text-[#94a3b8]">
+                    {t("No recent baseline changes detected in the selected time range.")}
                   </td>
                 </tr>
               )}
@@ -628,192 +740,99 @@ export function OverviewPage() {
         </div>
       </Panel>
 
-      <Panel title="Recent User Behavior Changes" subtitle="Credential relationship changes during the selected period" className="mt-4" action={<button className="btn text-violet-300 hover:text-white" onClick={()=>nav(`/user-changes?${qs}`)}>View all <ArrowRight size={12}/></button>}>
-        <div className="grid gap-2 p-3 sm:grid-cols-2 lg:grid-cols-5">{(userChanges.data?.items||[]).map(change=><button key={change.id} onClick={()=>nav(`/users/${encodeURIComponent(change.principal_name)}?${qs}`)} className="rounded-lg border border-[rgba(255,255,255,0.12)] bg-white/[0.04] p-3 text-left hover:border-violet-500/50 hover:bg-white/[0.07] transition"><div className="font-mono text-xs text-violet-300 font-medium">{change.principal_name}</div><div className="mt-2 text-[10px] font-semibold uppercase text-amber-300">{change.change_type.replaceAll("_"," ")}</div><div className="mt-1 text-[10px] text-[#c4bdd9]">{age(change.detected_at)}</div></button>)}{!userChanges.data?.items.length&&<div className="p-3 text-xs text-[#c4bdd9]">No user behavior changes in this window.</div>}</div>
-      </Panel>
+      {/* Active User Behavioral Security Incidents */}
+      <Panel
+        title={t("Correlated Multi-Signal User Incidents")}
+        subtitle={t("High-confidence behavioral security incidents grouped by principal lifetime window")}
+        className="mt-4"
+        action={
+          <button
+            onClick={() => nav("/incidents")}
+            className="text-xs font-semibold text-rose-300 hover:text-white flex items-center gap-1"
+          >
+            <span>{t("View Incident Queue")} ({incidents.length})</span>
+            <ArrowRight size={12} />
+          </button>
+        }
+      >
+        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 p-1">
+          {incidents.slice(0, 6).map((inc) => (
+            <div
+              key={inc.incident_id}
+              onClick={() => nav(`/users/${encodeURIComponent(inc.principal_name)}/investigations`)}
+              className="cursor-pointer rounded-xl border border-[#262838] bg-[#12141f] p-4 transition-colors hover:border-[#383b52] hover:bg-[#161826] space-y-3"
+            >
+              <div className="flex items-center justify-between gap-2 border-b border-[#262838] pb-2.5">
+                <div className="flex items-center gap-2 truncate font-mono text-xs font-bold text-white">
+                  <User size={13} className="text-cyan-400 shrink-0" />
+                  <span className="truncate">{inc.principal_name}</span>
+                </div>
+                <span
+                  className={`rounded px-2 py-0.5 text-[10px] font-bold border ${
+                    inc.score >= 50 || inc.priority === "high"
+                      ? "border-rose-500/50 bg-rose-500/15 text-rose-300"
+                      : "border-amber-500/50 bg-amber-500/15 text-amber-300"
+                  }`}
+                >
+                  Score: {inc.score}
+                </span>
+              </div>
 
-      {/* Footer caveats / methodology */}
-      <div className="mt-5 flex flex-wrap items-center justify-between gap-3 border-t border-[rgba(255,255,255,0.12)] pt-4 text-[11px] text-[#c4bdd9]">
-        <div className="flex items-center gap-2">
-          <Clock size={12} className="text-violet-400" />
-          <span>60-second rollup granularity</span>
-          <span>·</span>
-          <span>Fixed logarithmic histogram bounds (48 bins)</span>
-          <span>·</span>
-          <span>Percentiles never averaged</span>
+              <div className="space-y-1.5 text-xs">
+                <div className="flex items-center justify-between text-[#94a3b8] text-[11px]">
+                  <span>{t("Duration")}</span>
+                  <span className="font-mono text-white">
+                    {new Date(inc.started_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })} – {new Date(inc.last_seen_at || inc.started_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+                  </span>
+                </div>
+
+                <div className="flex items-center justify-between text-[#94a3b8] text-[11px]">
+                  <span>{t("Active Status")}</span>
+                  <span className="font-mono text-emerald-300 font-bold uppercase">{t(inc.status || "open")}</span>
+                </div>
+
+                {inc.triggers && inc.triggers.length > 0 && (
+                  <div className="mt-2 pt-2 border-t border-[#262838] space-y-1">
+                    <span className="text-[10px] uppercase font-bold text-[#94a3b8] tracking-wider">{t("Trigger Signals:")}</span>
+                    <div className="flex flex-wrap gap-1">
+                      {inc.triggers.slice(0, 3).map((trig, tIdx) => (
+                        <span key={tIdx} className="rounded bg-[#1a1d2c] border border-[#2d3145] px-1.5 py-0.5 text-[9px] font-mono text-[#cbd5e1]">
+                          {trig}
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              <div className="pt-2 flex justify-end">
+                <span className="text-xs font-bold text-cyan-300 hover:text-white flex items-center gap-1">
+                  <span>{t("Open Investigation")}</span>
+                  <ArrowRight size={11} />
+                </span>
+              </div>
+            </div>
+          ))}
+
+          {incidents.length === 0 && (
+            <div className="col-span-full py-8 text-center text-xs text-[#94a3b8]">
+              {t("No active correlated user incidents in the selected time window.")}
+            </div>
+          )}
         </div>
-        <div>
-          <span>Observed records only · No business throughput claim</span>
-        </div>
-      </div>
+      </Panel>
     </Page>
   );
 }
 
-function RankTable({
-  rows,
-  onClick,
-}: {
-  rows: Rankings["services"];
-  onClick: (name: string) => void;
-}) {
-  const max = Math.max(...rows.map((r) => r.requests), 1);
-  const gradients = [
-    "from-sky-400 to-blue-600",
-    "from-violet-400 to-indigo-600",
-    "from-emerald-400 to-teal-600",
-    "from-amber-400 to-orange-600",
-    "from-rose-400 to-pink-600",
-    "from-cyan-400 to-blue-500",
-    "from-purple-400 to-fuchsia-600",
-    "from-teal-400 to-emerald-600",
-  ];
-
-  return (
-    <div className="divide-y divide-[rgba(255,255,255,0.08)]">
-      {rows.map((r, i) => (
-        <button
-          key={r.name}
-          onClick={() => onClick(r.name)}
-          className="group grid w-full grid-cols-[24px_1fr_auto] items-center gap-3 px-4 py-2.5 text-left transition hover:bg-white/[0.05]"
-        >
-          <span className="font-mono text-[10px] text-[#9e96b8]">
-            {String(i + 1).padStart(2, "0")}
-          </span>
-          <span className="min-w-0">
-            <span className="block truncate text-xs font-medium text-[#f5f3fa] group-hover:text-cyan-300 transition">
-              {r.name}
-            </span>
-            <span className="mt-1 block h-1.5 w-full overflow-hidden rounded-full bg-white/[0.08]">
-              <span
-                className={`block h-full rounded-full bg-gradient-to-r ${gradients[i % gradients.length]} transition-all duration-300`}
-                style={{ width: `${(r.requests / max) * 100}%` }}
-              />
-            </span>
-          </span>
-          <span className="font-mono text-xs tabular-nums text-[#c4bdd9]">
-            {n(r.requests)}
-          </span>
-        </button>
-      ))}
-    </div>
-  );
-}
-
-function DegradedTable({ title, rows }: { title: string; rows: Degraded[] }) {
-  return (
-    <div className="bg-[#1a172a] p-4">
-      <div className="text-[10px] font-semibold uppercase tracking-wider text-[#9e96b8] mb-3">
-        {title}
-      </div>
-      <div className="divide-y divide-[rgba(255,255,255,0.08)]">
-        {rows.slice(0, 6).map((row) => (
-          <div
-            key={`${row.service_name}:${row.name}`}
-            className="grid grid-cols-[1fr_auto] gap-3 py-2.5 first:pt-0 last:pb-0"
-          >
-            <div className="min-w-0">
-              <div className="truncate text-xs font-medium text-[#f5f3fa]">{row.name}</div>
-              <div className="mt-0.5 truncate text-[10px] text-[#c4bdd9]">
-                {row.service_name} · n={n(row.current_samples)} vs {n(row.baseline_samples)}
-              </div>
-            </div>
-            <div className="text-right font-mono text-xs tabular-nums">
-              <div className={row.absolute_change_ms > 0 ? "text-[#fb7185] font-semibold" : "text-[#34d399] font-semibold"}>
-                {row.absolute_change_ms > 0 ? "+" : ""}
-                {n(row.absolute_change_ms)} ms
-              </div>
-              <div className="mt-0.5 text-[10px] text-[#c4bdd9]">
-                {row.relative_change == null
-                  ? "n/a"
-                  : `${Number(row.relative_change) > 0 ? "+" : ""}${(Number(row.relative_change) * 100).toFixed(0)}%`}
-              </div>
-            </div>
-          </div>
-        ))}
-        {!rows.length && (
-          <div className="py-8 text-center text-xs text-[#c4bdd9]">
-            No operations with sufficient comparison samples in both windows.
-          </div>
-        )}
-      </div>
-    </div>
-  );
-}
-
-function Heatmap({
-  rows,
-  onService,
-  timezone,
-}: {
-  rows: Heat[];
-  onService: (name: string) => void;
-  timezone: string;
-}) {
-  const services = [...new Set(rows.map((r) => r.service_name))].slice(0, 12);
-  const buckets = [...new Set(rows.map((r) => r.bucket_ms))]
-    .sort((a, b) => a - b)
-    .slice(-24);
-  const lookup = new Map(rows.map((r) => [`${r.service_name}:${r.bucket_ms}`, r]));
-
-  const getCellColor = (avgMs: number) => {
-    if (avgMs <= 0) return "rgba(255,255,255,0.04)";
-    if (avgMs < 100) return "rgba(16, 185, 129, 0.6)";  // Optimal emerald
-    if (avgMs < 250) return "rgba(6, 182, 212, 0.65)";  // Normal cyan
-    if (avgMs < 500) return "rgba(245, 158, 11, 0.75)";  // Elevated amber
-    return "rgba(244, 63, 94, 0.85)";                   // High rose
-  };
-
-  return (
-    <div className="overflow-auto p-4 scrollbar">
-      <div
-        className="grid min-w-[620px] gap-1.5"
-        style={{
-          gridTemplateColumns: `140px repeat(${Math.max(1, buckets.length)}, 1fr)`,
-        }}
-      >
-        {services.map((service) => (
-          <div className="contents" key={service}>
-            <button
-              onClick={() => onService(service)}
-              className="truncate pr-2 text-left text-[11px] font-medium text-[#c4bdd9] hover:text-[#f5f3fa] transition"
-              title={service}
-            >
-              {service}
-            </button>
-            {buckets.map((bucket) => {
-              const cell = lookup.get(`${service}:${bucket}`);
-              const avgMs = cell?.avg_ms || 0;
-              return (
-                <button
-                  key={bucket}
-                  onClick={() => onService(service)}
-                  title={`${service} · ${formatTime(bucket, timezone)} · ${avgMs} ms average · n=${cell?.samples || 0}`}
-                  className="h-5 rounded-[3px] border border-white/[0.08] transition hover:scale-110 hover:border-white/40"
-                  style={{
-                    backgroundColor: cell ? getCellColor(avgMs) : "#161424",
-                  }}
-                  aria-label={`${service}, ${avgMs} milliseconds average, ${cell?.samples || 0} samples`}
-                />
-              );
-            })}
-          </div>
-        ))}
-      </div>
-      <div className="mt-3 flex flex-wrap items-center justify-end gap-3 text-[10px] text-[#c4bdd9]">
-        <div className="flex items-center gap-1.5"><span className="h-2 w-2 rounded-sm bg-emerald-500 shadow-[0_0_6px_rgba(16,185,129,0.8)]" /> &lt;100ms</div>
-        <div className="flex items-center gap-1.5"><span className="h-2 w-2 rounded-sm bg-cyan-500 shadow-[0_0_6px_rgba(6,182,212,0.8)]" /> 100-250ms</div>
-        <div className="flex items-center gap-1.5"><span className="h-2 w-2 rounded-sm bg-amber-500 shadow-[0_0_6px_rgba(245,158,11,0.8)]" /> 250-500ms</div>
-        <div className="flex items-center gap-1.5"><span className="h-2 w-2 rounded-sm bg-rose-500 shadow-[0_0_6px_rgba(244,63,94,0.8)]" /> &gt;500ms</div>
-      </div>
-    </div>
-  );
-}
-
 function formatTime(value: number, timezone: string) {
-  return new Intl.DateTimeFormat([], {
-    hour: "2-digit",
-    minute: "2-digit",
-    timeZone: timezone === "local" ? undefined : timezone,
-  }).format(new Date(value));
+  try {
+    return new Intl.DateTimeFormat([], {
+      hour: "2-digit",
+      minute: "2-digit",
+      timeZone: timezone === "local" ? undefined : timezone,
+    }).format(new Date(Number(value)));
+  } catch {
+    return new Date(Number(value)).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+  }
 }

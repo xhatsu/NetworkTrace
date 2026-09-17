@@ -24,7 +24,7 @@ def detect_revised_anomalies(
         args = (max(1, max_windows),) if max_windows is not None else ()
         rows = db.execute(
             "SELECT DISTINCT bucket_ms FROM dirty_buckets FINAL "
-            "WHERE reason='aggregation-revised' ORDER BY bucket_ms" + limit_clause,
+            "WHERE reason='aggregation-revised' ORDER BY bucket_ms DESC" + limit_clause,
             args,
         ).fetchall()
     if not rows:
@@ -223,6 +223,10 @@ def detect_anomalies(
     with get_connection(db_path) as db:
         historical_caller_targets = {f"{row[0]}->{row[1]}" for row in db.execute("SELECT caller_service, target_service FROM service_edges FINAL WHERE first_seen < ?", (window_start_sec,)).fetchall()}
         historical_principal_targets = {f"{row[0]}->{row[1]}" for row in db.execute("SELECT principal_name, target_service FROM principal_service_edges FINAL WHERE first_seen < ?", (window_start_sec,)).fetchall()}
+        try:
+            established_principals = {row[0] for row in db.execute("SELECT principal_name FROM principal_baselines FINAL WHERE sample_count >= 10").fetchall()}
+        except Exception:
+            established_principals = set()
 
     for r in current_rows:
         c = r["caller_service"]
@@ -277,8 +281,14 @@ def detect_anomalies(
                 )]
             ))
 
-        # Detector 8: Unusual Execution Time (e.g. 02:00 - 05:00 UTC for human accounts)
-        if 2 <= hod <= 4 and p and p not in {"batch-recon", "svc-checkout", "svc-billing", "shared-legacy", "unknown"} and reqs >= 3:
+        # Detector 8: Unusual Execution Time (e.g. 02:00 - 05:00 UTC for established human accounts)
+        # Exclude anonymous, automated machine accounts and unestablished cold-start traffic
+        is_human_account = p and p not in {
+            "batch-recon", "svc-checkout", "svc-billing", "shared-legacy",
+            "unknown", "-anonymous-", "anonymous", ""
+        }
+        has_baseline = (p in established_principals) or bool(historical_principal_targets and any(pt.startswith(f"{p}->") for pt in historical_principal_targets))
+        if 2 <= hod <= 4 and is_human_account and has_baseline and reqs >= 3:
             anomalies.append(AnomalyEvent(
                 detected_at=detected_at,
                 anomaly_type="unusual_time",
@@ -296,7 +306,7 @@ def detect_anomalies(
                     contribution=60,
                     baseline=0.0,
                     current=float(reqs),
-                    text=f"Off-hours activity detected: principal '{p}' active at {hod:02d}:00 UTC ({reqs} requests)"
+                    text=f"Off-hours activity detected: established principal '{p}' active at {hod:02d}:00 UTC ({reqs} requests)"
                 )]
             ))
 

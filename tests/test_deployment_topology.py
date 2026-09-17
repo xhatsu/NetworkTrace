@@ -330,6 +330,76 @@ def test_helm_requires_private_token_and_propagates_storage_credentials():
     assert "app-0.1.0" not in rendered and "ingest-0.1.0" not in rendered
 
 
+def test_helm_global_image_tag_and_component_overrides():
+    helm = shutil.which("helm")
+    if helm is None:
+        pytest.skip("helm is not installed")
+    chart = REPO_ROOT / "deploy" / "helm" / "tracescope"
+    token = "0123456789abcdef0123456789abcdef"
+
+    # 1. Default uses global.image.tag ("0.3.3") across all workloads
+    rendered = subprocess.run([
+        helm, "template", "test", str(chart),
+        "--set", f"secrets.internalApiToken={token}",
+        "--set", "ingest.enabled=true",
+        "--set", "agentStats.enabled=true",
+        "--set", "ui.enabled=true",
+    ], text=True, capture_output=True, check=True).stdout
+    images = [line.strip().split(": ", 1)[1].strip('"') for line in rendered.splitlines() if line.strip().startswith("image:")]
+    assert "xhatsu101/tracescope:0.3.3" in images
+    assert "clickhouse/clickhouse-server:24.8" in images
+    # No old hardcoded tags
+    assert not any("app-0.3.2" in img or "ingest-0.3.2" in img for img in images)
+    # Exactly 6 tracescope containers with 0.3.3
+    tracescope_imgs = [img for img in images if "tracescope" in img and "clickhouse" not in img]
+    assert len(tracescope_imgs) == 6
+    assert all(img.endswith(":0.3.3") for img in tracescope_imgs)
+
+    # 2. Dynamic override via global.image.tag
+    rendered_dyn = subprocess.run([
+        helm, "template", "test", str(chart),
+        "--set", f"secrets.internalApiToken={token}",
+        "--set", "ingest.enabled=true",
+        "--set", "agentStats.enabled=true",
+        "--set", "ui.enabled=true",
+        "--set", "global.image.tag=0.3.4",
+    ], text=True, capture_output=True, check=True).stdout
+    images_dyn = [line.strip().split(": ", 1)[1].strip('"') for line in rendered_dyn.splitlines() if line.strip().startswith("image:")]
+    tracescope_dyn = [img for img in images_dyn if "tracescope" in img and "clickhouse" not in img]
+    assert len(tracescope_dyn) == 6
+    assert all(img.endswith(":0.3.4") for img in tracescope_dyn)
+
+    # 3. Dynamic override via global.imageTag
+    rendered_alias = subprocess.run([
+        helm, "template", "test", str(chart),
+        "--set", f"secrets.internalApiToken={token}",
+        "--set", "ingest.enabled=true",
+        "--set", "agentStats.enabled=true",
+        "--set", "ui.enabled=true",
+        "--set", "global.imageTag=0.3.5",
+    ], text=True, capture_output=True, check=True).stdout
+    images_alias = [line.strip().split(": ", 1)[1].strip('"') for line in rendered_alias.splitlines() if line.strip().startswith("image:")]
+    tracescope_alias = [img for img in images_alias if "tracescope" in img and "clickhouse" not in img]
+    assert len(tracescope_alias) == 6
+    assert all(img.endswith(":0.3.5") for img in tracescope_alias)
+
+    # 4. Per-component override
+    rendered_override = subprocess.run([
+        helm, "template", "test", str(chart),
+        "--set", f"secrets.internalApiToken={token}",
+        "--set", "ingest.enabled=true",
+        "--set", "agentStats.enabled=true",
+        "--set", "ui.enabled=true",
+        "--set", "global.image.tag=0.3.3",
+        "--set", "ingest.image.tag=ingest-custom",
+    ], text=True, capture_output=True, check=True).stdout
+    images_override = [line.strip().split(": ", 1)[1].strip('"') for line in rendered_override.splitlines() if line.strip().startswith("image:")]
+    assert "xhatsu101/tracescope:ingest-custom" in images_override
+    non_ingest = [img for img in images_override if "tracescope" in img and "clickhouse" not in img and "ingest-custom" not in img]
+    assert len(non_ingest) == 5
+    assert all(img.endswith(":0.3.3") for img in non_ingest)
+
+
 def test_only_clickhouse_mounts_data_and_edges_scale():
     _, documents = validator.validate(MANIFEST_DIR)
     workloads = [d for d in documents if d.get("kind") in ("Deployment", "StatefulSet")]

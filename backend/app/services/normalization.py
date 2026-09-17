@@ -69,6 +69,50 @@ def _is_trusted_proxy(ip: Optional[str]) -> bool:
     )
 
 
+def classify_source_ip_role(ip: Optional[str], known_lbs: tuple[str, ...] = ()) -> tuple[str, str, str]:
+    """Classify an IP's role, display label, and attribution confidence.
+
+    Returns:
+        (source_ip_role, role_label, attribution_confidence)
+        Roles: 'load_balancer', 'reverse_proxy', 'nat_gateway', 'service_ingress', 'client', 'unknown'
+        Confidence: 'high', 'medium', 'low'
+    """
+    if not ip or ip in {"unknown", ""}:
+        return "unknown", "Unknown source", "low"
+    clean = ip.strip()
+
+    if not known_lbs:
+        try:
+            from backend.config import settings
+            known_lbs = settings.known_load_balancers
+        except Exception:
+            known_lbs = ()
+
+    # 1. Configured or known Load Balancer list
+    if clean in known_lbs or any(clean == lb.strip() for lb in known_lbs):
+        return "load_balancer", "Likely load balancer", "low"
+
+    lower = clean.lower()
+    if "lb" in lower or "loadbalancer" in lower:
+        return "load_balancer", "Likely load balancer", "low"
+    if "proxy" in lower:
+        return "reverse_proxy", "Reverse proxy", "low"
+    if "gateway" in lower or "nat" in lower:
+        return "nat_gateway", "NAT gateway", "low"
+    if "ingress" in lower:
+        return "service_ingress", "Service ingress", "low"
+
+    # 2. Localhost or private RFC 1918 ranges (cluster/internal service mesh or LB hop)
+    if clean in {"127.0.0.1", "::1", "localhost"}:
+        return "reverse_proxy", "Localhost / Proxy", "low"
+    if clean.startswith("10.") or clean.startswith("192.168.") or any(clean.startswith(f"172.{i}.") for i in range(16, 32)):
+        return "load_balancer", "Likely load balancer", "low"
+
+    # 3. Public routable address without LB markers: likely client address
+    return "client", "Client address", "high"
+
+
+
 def derive_source_group(ip: Optional[str]) -> Optional[str]:
     if not ip or ip in {"unknown", ""}:
         return None
@@ -397,8 +441,13 @@ def normalize_otel_record(raw: dict[str, Any], source_label: str = "import") -> 
 
     # Client IP, Forwarded IP, and Source Group
     network_peer_ip = peer_address or client_ip
-    forwarded_for = pick("x_forwarded_for", "http.request.headers.x-forwarded-for")
-    if forwarded_for and _is_trusted_proxy(peer_address):
+    forwarded_for = pick(
+        "x_real_ip",
+        "http.request.headers.x-real-ip",
+        "x_forwarded_for",
+        "http.request.headers.x-forwarded-for",
+    )
+    if forwarded_for and (_is_trusted_proxy(peer_address) or _is_trusted_proxy(client_ip)):
         original_client_ip = str(forwarded_for).split(",")[0].strip()
         original_client_ip_trusted = 1
     else:

@@ -25,6 +25,7 @@ import {
   n,
 } from "../components";
 import { useFilters } from "../App";
+import { useI18n } from "../i18n";
 
 export type TraceSummaryItem = {
   id: number;
@@ -48,6 +49,7 @@ export type TraceSummaryItem = {
 
 export function TracesPage() {
   const { filters } = useFilters();
+  const { t } = useI18n();
   const nav = useNavigate();
   const [params, setParams] = useSearchParams();
 
@@ -70,16 +72,16 @@ export function TracesPage() {
 
   return (
     <Page
-      eyebrow="Transaction Analytics"
-      title="Distributed Traces & Spans"
-      description="Inspect multi-hop transaction waterfalls across services, operations, and authenticated principals."
+      eyebrow={t("Transaction Analytics")}
+      title={t("Distributed Traces & Spans")}
+      description={t("Inspect multi-hop transaction waterfalls across services, operations, and authenticated principals.")}
       actions={
         <div className="flex flex-wrap items-center gap-2">
           <div className="relative">
             <Search className="absolute left-2.5 top-2 text-[#8b949e]" size={13} />
             <input
               type="text"
-              placeholder="Filter by Trace ID..."
+              placeholder={t("Filter by Trace ID...")}
               value={traceIdFilter}
               onChange={(e) => setTraceIdFilter(e.target.value)}
               className="h-8 w-48 rounded-lg border border-[rgba(255,255,255,0.08)] bg-white/[0.02] pl-8 pr-3 text-xs text-[#f0f3f6] placeholder:text-[#6e7681] focus:border-indigo-500/50 focus:outline-none"
@@ -88,7 +90,7 @@ export function TracesPage() {
           <div className="relative">
             <input
               type="text"
-              placeholder="Service..."
+              placeholder={`${t("Service")}...`}
               value={serviceFilter}
               onChange={(e) => setServiceFilter(e.target.value)}
               className="h-8 w-32 rounded-lg border border-[rgba(255,255,255,0.08)] bg-white/[0.02] px-3 text-xs text-[#f0f3f6] placeholder:text-[#6e7681] focus:border-indigo-500/50 focus:outline-none"
@@ -97,7 +99,7 @@ export function TracesPage() {
           <div className="relative">
             <input
               type="text"
-              placeholder="Principal..."
+              placeholder={`${t("Principal")}...`}
               value={principalFilter}
               onChange={(e) => setPrincipalFilter(e.target.value)}
               className="h-8 w-28 rounded-lg border border-[rgba(255,255,255,0.08)] bg-white/[0.02] px-3 text-xs text-[#f0f3f6] placeholder:text-[#6e7681] focus:border-indigo-500/50 focus:outline-none"
@@ -108,9 +110,9 @@ export function TracesPage() {
             onChange={(e) => setStatusFilter(e.target.value)}
             className="btn h-8 bg-[rgba(255,255,255,0.02)] text-xs cursor-pointer"
           >
-            <option value="" className="bg-[#12151a]">All Statuses</option>
-            <option value="error" className="bg-[#12151a]">Errors Only (5xx/Failure)</option>
-            <option value="ok" className="bg-[#12151a]">Success (2xx)</option>
+            <option value="" className="bg-[#12151a]">{t("All Statuses")}</option>
+            <option value="error" className="bg-[#12151a]">{t("Errors Only (5xx/Failure)")}</option>
+            <option value="ok" className="bg-[#12151a]">{t("Success (2xx)")}</option>
           </select>
         </div>
       }
@@ -121,68 +123,68 @@ export function TracesPage() {
         <ErrorState message={q.error.message} />
       ) : (
         <Panel
-          title={`${q.data?.items.length || 0} Traces Found`}
-          subtitle="Showing latest trace executions. Select a row to explore full parent-child waterfall timing."
+          title={`${q.data?.items.length || 0} ${t("Traces Found")}`}
+          subtitle={t("Showing latest trace executions. Select a row to explore full parent-child waterfall timing.")}
         >
           <div className="overflow-auto scrollbar">
             <table className="w-full min-w-[1000px] text-left">
               <thead>
                 <tr className="border-b border-[rgba(255,255,255,0.06)] bg-white/[0.01] text-[11px] font-semibold uppercase tracking-wider text-[#8b949e]">
-                  <th className="px-4 py-3">Trace ID</th>
-                  <th className="px-4 py-3">Timestamp</th>
-                  <th className="px-4 py-3">Service & Operation</th>
-                  <th className="px-4 py-3">Principal</th>
-                  <th className="px-4 py-3 text-right">Duration</th>
-                  <th className="px-4 py-3 text-right">Status</th>
-                  <th className="px-4 py-3 text-right">Action</th>
+                  <th className="px-4 py-3">{t("Trace ID")}</th>
+                  <th className="px-4 py-3">{t("Timestamp")}</th>
+                  <th className="px-4 py-3">{t("Service & Operation")}</th>
+                  <th className="px-4 py-3">{t("Principal")}</th>
+                  <th className="px-4 py-3 text-right">{t("Duration")}</th>
+                  <th className="px-4 py-3 text-right">{t("Status")}</th>
+                  <th className="px-4 py-3 text-right">{t("Action")}</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-[rgba(255,255,255,0.04)] text-xs">
-                {q.data?.items.map((t) => {
-                  const isError = (t.http_status && t.http_status >= 400) || t.outcome === "failure";
+                {q.data?.items.map((item) => {
+                  const isError = (item.http_status && item.http_status >= 400) || item.outcome === "failure";
                   return (
                     <tr
-                      key={`${t.trace_id}-${t.span_id || t.id}`}
-                      onClick={() => nav(`/traces/${t.trace_id}`)}
+                      key={`${item.trace_id}-${item.span_id || item.id}`}
+                      onClick={() => nav(`/traces/${item.trace_id}`)}
                       className="cursor-pointer transition hover:bg-white/[0.03]"
                     >
                       <td className="px-4 py-3 font-mono text-indigo-400">
-                        <span className="hover:underline">{t.trace_id.slice(0, 16)}...</span>
+                        <span className="hover:underline">{item.trace_id.slice(0, 16)}...</span>
                       </td>
                       <td className="px-4 py-3 font-mono text-[#8b949e]">
-                        {new Date(t.timestamp_ms).toLocaleTimeString()}
+                        {new Date(item.timestamp_ms).toLocaleTimeString()}
                       </td>
                       <td className="px-4 py-3">
                         <div className="flex items-center gap-1.5">
-                          <span className="font-mono text-emerald-400 font-medium">{t.service_name || t.target_service}</span>
+                          <span className="font-mono text-emerald-400 font-medium">{item.service_name || item.target_service}</span>
                           <span className="text-[#8b949e]">/</span>
-                          <span className="font-mono text-[#f0f3f6]">{t.operation}</span>
+                          <span className="font-mono text-[#f0f3f6]">{item.operation}</span>
                         </div>
                       </td>
                       <td className="px-4 py-3 font-mono text-[#8b949e]">
-                        {t.principal_name && t.principal_name !== "unknown" ? (
-                          <span className="text-indigo-300 font-medium">{t.principal_name}</span>
+                        {item.principal_name && item.principal_name !== "unknown" ? (
+                          <span className="text-indigo-300 font-medium">{item.principal_name}</span>
                         ) : (
                           <span className="text-[#6e7681]">unknown</span>
                         )}
                       </td>
                       <td className="px-4 py-3 text-right font-mono text-[#c9d1d9]">
-                        {t.duration_ms ? `${t.duration_ms.toFixed(1)} ms` : "0.0 ms"}
+                        {item.duration_ms ? `${item.duration_ms.toFixed(1)} ms` : "0.0 ms"}
                       </td>
                       <td className="px-4 py-3 text-right font-mono">
                         {isError ? (
                           <span className="inline-flex items-center gap-1 rounded bg-rose-500/10 px-2 py-0.5 text-[11px] font-semibold text-rose-400 border border-rose-500/20">
-                            {t.http_status || "500"} ERROR
+                            {item.http_status || "500"} ERROR
                           </span>
                         ) : (
                           <span className="inline-flex items-center gap-1 rounded bg-emerald-500/10 px-2 py-0.5 text-[11px] font-semibold text-emerald-400 border border-emerald-500/20">
-                            {t.http_status || "200"} OK
+                            {item.http_status || "200"} OK
                           </span>
                         )}
                       </td>
                       <td className="px-4 py-3 text-right">
                         <span className="inline-flex items-center gap-1 text-[11px] text-indigo-400 hover:text-indigo-300">
-                          Waterfall <ChevronRight size={12} />
+                          {t("Waterfall")} <ChevronRight size={12} />
                         </span>
                       </td>
                     </tr>
@@ -191,7 +193,7 @@ export function TracesPage() {
                 {(!q.data?.items || q.data.items.length === 0) && (
                   <tr>
                     <td colSpan={7} className="px-4 py-8 text-center text-xs text-[#8b949e]">
-                      No traces match current filters.
+                      {t("No traces match current filters.")}
                     </td>
                   </tr>
                 )}
@@ -221,6 +223,7 @@ function formatAttributes(value: string): string {
 
 export function TraceDetailPage() {
   const { id = "" } = useParams();
+  const { t } = useI18n();
   const nav = useNavigate();
   const [selectedSpan, setSelectedSpan] = useState<TraceSummaryItem | null>(null);
 
@@ -231,7 +234,7 @@ export function TraceDetailPage() {
 
   if (q.isLoading) {
     return (
-      <Page eyebrow="Trace Waterfall" title={`Loading ${id}...`} description="">
+      <Page eyebrow={t("Trace Waterfall")} title={`${t("Loading...")} ${id}`} description="">
         <Loading />
       </Page>
     );
@@ -239,8 +242,8 @@ export function TraceDetailPage() {
 
   if (q.error || !q.data) {
     return (
-      <Page eyebrow="Trace Waterfall" title="Trace Not Found" description="">
-        <ErrorState message={q.error?.message || "Trace identifier not found in analytics store."} />
+      <Page eyebrow={t("Trace Waterfall")} title={t("Trace Not Found")} description="">
+        <ErrorState message={q.error?.message || t("Trace identifier not found in analytics store.")} />
       </Page>
     );
   }
@@ -255,26 +258,26 @@ export function TraceDetailPage() {
 
   return (
     <Page
-      eyebrow="Distributed Trace Waterfall"
-      title={`Trace: ${id}`}
-      description={`Multi-tier distributed execution across ${uniqueServices.length} services with ${spans.length} spans.`}
+      eyebrow={t("Distributed Trace Waterfall")}
+      title={`${t("Trace: ")}${id}`}
+      description={`${t("Multi-tier distributed execution across")} ${uniqueServices.length} ${t("services with")} ${spans.length} ${t("spans.")}`}
       actions={
         <div className="flex items-center gap-2">
           <button className="btn" onClick={() => nav(-1)}>
             <ArrowLeft size={13} />
-            Back
+            {t("Back")}
           </button>
         </div>
       }
     >
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
-        <MetricCard label="Total Spans" value={String(spans.length)} detail="in trace hierarchy" />
-        <MetricCard label="Trace Latency" value={`${totalDuration.toFixed(1)} ms`} detail="end-to-end duration" />
-        <MetricCard label="Services Involved" value={String(uniqueServices.length)} detail={uniqueServices.slice(0, 3).join(", ")} />
+        <MetricCard label={t("Total Spans")} value={String(spans.length)} detail={t("in trace hierarchy")} />
+        <MetricCard label={t("Trace Latency")} value={`${totalDuration.toFixed(1)} ms`} detail={t("end-to-end duration")} />
+        <MetricCard label={t("Services Involved")} value={String(uniqueServices.length)} detail={uniqueServices.slice(0, 3).join(", ")} />
         <MetricCard
-          label="Trace Status"
-          value={hasError ? "Errors Detected" : "Normal"}
-          detail={hasError ? "One or more failed spans" : "All operations succeeded"}
+          label={t("Trace Status")}
+          value={hasError ? t("Errors Detected") : t("Normal")}
+          detail={hasError ? t("One or more failed spans") : t("All operations succeeded")}
           tone={hasError ? "bad" : "good"}
         />
       </div>
@@ -283,8 +286,8 @@ export function TraceDetailPage() {
         {/* Waterfall diagram */}
         <div className={selectedSpan ? "lg:col-span-2" : "lg:col-span-3"}>
           <Panel
-            title="Execution Timeline Waterfall"
-            subtitle="Click a span row to inspect runtime attributes, thread info, and request metadata."
+            title={t("Execution Timeline Waterfall")}
+            subtitle={t("Click a span row to inspect runtime attributes, thread info, and request metadata.")}
           >
             <div className="space-y-1 overflow-auto scrollbar py-2">
               {spans.map((span) => {
@@ -353,47 +356,47 @@ export function TraceDetailPage() {
         {selectedSpan && (
           <div className="lg:col-span-1">
             <Panel
-              title="Span Metadata"
+              title={t("Span Metadata")}
               subtitle={`Span ID: ${selectedSpan.span_id || "N/A"}`}
               action={
                 <button
                   onClick={() => setSelectedSpan(null)}
                   className="text-xs text-[#8b949e] hover:text-white"
                 >
-                  Close
+                  {t("Close")}
                 </button>
               }
             >
               <div className="space-y-3 text-xs">
                 <div>
-                  <span className="text-[10px] font-semibold uppercase text-[#8b949e]">Service</span>
+                  <span className="text-[10px] font-semibold uppercase text-[#8b949e]">{t("Service")}</span>
                   <div className="font-mono text-[#f0f3f6] font-medium">{selectedSpan.service_name || selectedSpan.target_service}</div>
                 </div>
 
                 <div>
-                  <span className="text-[10px] font-semibold uppercase text-[#8b949e]">Operation</span>
+                  <span className="text-[10px] font-semibold uppercase text-[#8b949e]">{t("Operation")}</span>
                   <div className="font-mono text-[#f0f3f6] break-all">{selectedSpan.operation}</div>
                 </div>
 
                 <div className="grid grid-cols-2 gap-2">
                   <div>
-                    <span className="text-[10px] font-semibold uppercase text-[#8b949e]">Duration</span>
+                    <span className="text-[10px] font-semibold uppercase text-[#8b949e]">{t("Duration")}</span>
                     <div className="font-mono text-[#c9d1d9]">{selectedSpan.duration_ms?.toFixed(2)} ms</div>
                   </div>
                   <div>
-                    <span className="text-[10px] font-semibold uppercase text-[#8b949e]">HTTP Status</span>
+                    <span className="text-[10px] font-semibold uppercase text-[#8b949e]">{t("HTTP Status")}</span>
                     <div className="font-mono text-[#c9d1d9]">{selectedSpan.http_status || "N/A"}</div>
                   </div>
                 </div>
 
                 <div>
-                  <span className="text-[10px] font-semibold uppercase text-[#8b949e]">Principal Actor</span>
+                  <span className="text-[10px] font-semibold uppercase text-[#8b949e]">{t("Principal Actor")}</span>
                   <div className="font-mono text-indigo-300">{selectedSpan.principal_name || "unknown"}</div>
                 </div>
 
                 {selectedSpan.caller_service && (
                   <div>
-                    <span className="text-[10px] font-semibold uppercase text-[#8b949e]">Caller Service</span>
+                    <span className="text-[10px] font-semibold uppercase text-[#8b949e]">{t("Caller Service")}</span>
                     <div className="font-mono text-[#8b949e]">{selectedSpan.caller_service}</div>
                   </div>
                 )}
@@ -401,7 +404,7 @@ export function TraceDetailPage() {
                 {selectedSpan.attributes_json && (
                   <div>
                     <span className="text-[10px] font-semibold uppercase text-[#8b949e] mb-1 flex items-center gap-1">
-                      <FileJson size={12} /> Attributes JSON
+                      <FileJson size={12} /> {t("Attributes JSON")}
                     </span>
                     <pre className="max-h-56 overflow-auto rounded bg-black/40 p-2 font-mono text-[10px] text-[#c9d1d9] border border-[rgba(255,255,255,0.06)]">
                       {formatAttributes(selectedSpan.attributes_json)}

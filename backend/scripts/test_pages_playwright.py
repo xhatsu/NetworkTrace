@@ -55,19 +55,21 @@ def main():
 
     pages_to_test = [
         ("/", "Overview Dashboard"),
-        ("/topology", "Topology Canvas"),
+        ("/topology", "Topology Route (Redirects to Users)"),
         ("/anomalies", "Anomalies Finding List"),
         (f"/anomalies/{anom_id}", f"Anomaly Detail #{anom_id}"),
         ("/services", "Services Inventory"),
         (f"/services/{svc_name}", f"Service Drilldown ({svc_name})"),
         ("/principals", "Principals Inventory"),
-        (f"/principals/{p_name}", f"Principal Profile ({p_name})"),
-        ("/users", "User Intelligence Inventory"),
-        (f"/users/{user_name}", f"User Profile ({user_name})"),
-        ("/user-changes", "User Behavior Change Feed"),
-        ("/user-graph", "User Relationship Graph"),
-        ("/user-analytics", "User Intelligence Analytics"),
+        ("/users", "User Intelligence Directory"),
+        (f"/users/{user_name}/overview", f"User Overview Tab ({user_name})"),
+        (f"/users/{user_name}/activity", f"User Activity & Performance Tab ({user_name})"),
+        (f"/users/{user_name}/topology", f"User Access & Topology Tab ({user_name})"),
+        (f"/users/{user_name}/changes", f"User Behavior Changes Tab ({user_name})"),
+        (f"/users/{user_name}/patterns", f"User Usage Patterns Tab ({user_name})"),
+        (f"/users/{user_name}/investigations", f"User Anomalies & Investigations Tab ({user_name})"),
         ("/traces", "Distributed Traces List"),
+        ("/agent-stats", "Agent Fleet Infrastructure"),
     ]
     if tr_id:
         pages_to_test.append((f"/traces/{tr_id}", f"Trace Waterfall ({tr_id[:12]}...)"))

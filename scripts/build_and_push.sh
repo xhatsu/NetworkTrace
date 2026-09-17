@@ -23,45 +23,50 @@ VERSION=""
 PLATFORM=""
 DRY_RUN=0
 NO_PUSH=0
+UNIFIED_ONLY=0
+INGEST_ONLY=0
 
 show_help() {
     cat << 'HELP_EOF'
 Usage:
-  sh scripts/build_and_push.sh <IMAGE_REPO_OR_PATTERN> <VERSION> [OPTIONS]
+  sh deploy/docker/build_and_push.sh <IMAGE_REPO_OR_PATTERN> <VERSION> [OPTIONS]
 
 Arguments:
   IMAGE_REPO_OR_PATTERN
       Repository name or image pattern template.
       Examples:
         - "xhatsu101/tracescope"
-          -> Builds:
-               xhatsu101/tracescope:app-<version>
-               xhatsu101/tracescope:ingest-<version>
+          -> Builds and pushes:
+               xhatsu101/tracescope:<version>     (Global unified image for Helm)
+               xhatsu101/tracescope:app-<version> (Main App alias)
+               xhatsu101/tracescope:ingest-<version> (Standalone Ingest)
         - "xhatsu101/tracescope:{image}-{tag}"
           -> Replaces {image} with app / ingest, and {tag} with version
         - "registry.example.com/team/{image}:{tag}"
 
   VERSION
-      Version tag string (e.g. "0.2.0", "v1.0.0", "latest").
+      Version tag string (e.g. "0.3.3", "v1.0.0", "latest").
 
 Options:
-  -p, --platform  Target platform(s), e.g. "linux/amd64" or "linux/amd64,linux/arm64"
-  -n, --no-push   Build images only; do not push to remote registry
-  -d, --dry-run   Print the commands and tags without executing them
-  -h, --help      Show this help message and exit
+  -u, --unified-only  Build & push only the unified application image (:0.3.3)
+      --ingest-only   Build & push only the standalone ingest image (:ingest-0.3.3)
+  -p, --platform      Target platform(s), e.g. "linux/amd64" or "linux/amd64,linux/arm64"
+  -n, --no-push       Build images only; do not push to remote registry
+  -d, --dry-run       Print the commands and tags without executing them
+  -h, --help          Show this help message and exit
 
 Examples:
+  # Standard build and push with global tag 0.3.3 (matches Helm global.image.tag):
+  sh deploy/docker/build_and_push.sh xhatsu101/tracescope 0.3.3
+
   # Multi-arch build and push (x86_64 + ARM64):
-  sh scripts/build_and_push.sh xhatsu101/tracescope 0.2.0 --platform linux/amd64,linux/arm64
+  sh deploy/docker/build_and_push.sh xhatsu101/tracescope 0.3.3 --platform linux/amd64,linux/arm64
 
-  # x86_64 only build and push:
-  sh scripts/build_and_push.sh xhatsu101/tracescope 0.2.0 --platform linux/amd64
+  # Build only the unified image:
+  sh deploy/docker/build_and_push.sh xhatsu101/tracescope 0.3.3 --unified-only
 
-  # Tag diff on single repository xhatsu101/tracescope:
-  sh scripts/build_and_push.sh xhatsu101/tracescope 0.2.0
-
-  # Build only (dry run):
-  sh scripts/build_and_push.sh xhatsu101/tracescope 0.2.0 --dry-run
+  # Dry run to preview commands and tags:
+  sh deploy/docker/build_and_push.sh xhatsu101/tracescope 0.3.3 --dry-run
 HELP_EOF
     exit 0
 }
@@ -74,6 +79,14 @@ while [ $# -gt 0 ]; do
             ;;
         -d|--dry-run)
             DRY_RUN=1
+            shift
+            ;;
+        -u|--unified-only)
+            UNIFIED_ONLY=1
+            shift
+            ;;
+        --ingest-only)
+            INGEST_ONLY=1
             shift
             ;;
         -n|--no-push)
@@ -214,8 +227,21 @@ format_tag() {
 APP_IMAGE=$(format_tag "$IMAGE_PATTERN" "app" "$VERSION")
 INGEST_IMAGE=$(format_tag "$IMAGE_PATTERN" "ingest" "$VERSION")
 
+GLOBAL_IMAGE=""
+case "$IMAGE_PATTERN" in
+    *"{image}"*)
+        GLOBAL_IMAGE=""
+        ;;
+    *:*)
+        GLOBAL_IMAGE="${IMAGE_PATTERN%%:*}:${VERSION}"
+        ;;
+    *)
+        GLOBAL_IMAGE="${IMAGE_PATTERN}:${VERSION}"
+        ;;
+esac
+
 echo "================================================================="
-echo " TraceScope 2-Image Multi-Stage Build & Push"
+echo " TraceScope Multi-Stage Build & Push"
 echo "================================================================="
 echo " Repository root : $REPO_ROOT"
 echo " Dockerfile      : $DOCKERFILE"
@@ -225,8 +251,15 @@ if [ -n "$PLATFORM" ]; then
 else
     echo " Platform(s)     : default (host architecture)"
 fi
-echo " Image 1 (App)   : $APP_IMAGE"
-echo " Image 2 (Ingest): $INGEST_IMAGE"
+if [ -n "$GLOBAL_IMAGE" ]; then
+    echo " Global Tag      : $GLOBAL_IMAGE (matches Helm global.image.tag)"
+fi
+if [ "$INGEST_ONLY" -eq 0 ]; then
+    echo " Main App Image  : $APP_IMAGE"
+fi
+if [ "$UNIFIED_ONLY" -eq 0 ]; then
+    echo " Ingest Image    : $INGEST_IMAGE"
+fi
 if [ "$NO_PUSH" -eq 1 ]; then
     echo " Push to remote  : DISABLED (--no-push)"
 else
@@ -241,19 +274,47 @@ if [ "$DRY_RUN" -eq 1 ]; then
     echo ""
     echo "[DRY RUN] Would execute:"
     if [ -n "$PLATFORM" ]; then
-        if [ "$NO_PUSH" -eq 1 ]; then
-            echo "  docker buildx build --platform $PLATFORM -f $DOCKERFILE --target api -t $APP_IMAGE $REPO_ROOT"
-            echo "  docker buildx build --platform $PLATFORM -f $DOCKERFILE --target ingest -t $INGEST_IMAGE $REPO_ROOT"
-        else
-            echo "  docker buildx build --platform $PLATFORM -f $DOCKERFILE --target api -t $APP_IMAGE --push $REPO_ROOT"
-            echo "  docker buildx build --platform $PLATFORM -f $DOCKERFILE --target ingest -t $INGEST_IMAGE --push $REPO_ROOT"
+        if [ "$INGEST_ONLY" -eq 0 ]; then
+            if [ -n "$GLOBAL_IMAGE" ] && [ "$GLOBAL_IMAGE" != "$APP_IMAGE" ]; then
+                _app_flags="-t $GLOBAL_IMAGE -t $APP_IMAGE"
+            else
+                _app_flags="-t $APP_IMAGE"
+            fi
+            if [ "$NO_PUSH" -eq 1 ]; then
+                echo "  docker buildx build --platform $PLATFORM -f $DOCKERFILE --target api $_app_flags $REPO_ROOT"
+            else
+                echo "  docker buildx build --platform $PLATFORM -f $DOCKERFILE --target api $_app_flags --push $REPO_ROOT"
+            fi
+        fi
+        if [ "$UNIFIED_ONLY" -eq 0 ]; then
+            if [ "$NO_PUSH" -eq 1 ]; then
+                echo "  docker buildx build --platform $PLATFORM -f $DOCKERFILE --target ingest -t $INGEST_IMAGE $REPO_ROOT"
+            else
+                echo "  docker buildx build --platform $PLATFORM -f $DOCKERFILE --target ingest -t $INGEST_IMAGE --push $REPO_ROOT"
+            fi
         fi
     else
-        echo "  docker build -f $DOCKERFILE --target api -t $APP_IMAGE $REPO_ROOT"
-        echo "  docker build -f $DOCKERFILE --target ingest -t $INGEST_IMAGE $REPO_ROOT"
+        if [ "$INGEST_ONLY" -eq 0 ]; then
+            if [ -n "$GLOBAL_IMAGE" ] && [ "$GLOBAL_IMAGE" != "$APP_IMAGE" ]; then
+                _app_flags="-t $GLOBAL_IMAGE -t $APP_IMAGE"
+            else
+                _app_flags="-t $APP_IMAGE"
+            fi
+            echo "  docker build -f $DOCKERFILE --target api $_app_flags $REPO_ROOT"
+        fi
+        if [ "$UNIFIED_ONLY" -eq 0 ]; then
+            echo "  docker build -f $DOCKERFILE --target ingest -t $INGEST_IMAGE $REPO_ROOT"
+        fi
         if [ "$NO_PUSH" -eq 0 ]; then
-            echo "  docker push $APP_IMAGE"
-            echo "  docker push $INGEST_IMAGE"
+            if [ "$INGEST_ONLY" -eq 0 ]; then
+                if [ -n "$GLOBAL_IMAGE" ] && [ "$GLOBAL_IMAGE" != "$APP_IMAGE" ]; then
+                    echo "  docker push $GLOBAL_IMAGE"
+                fi
+                echo "  docker push $APP_IMAGE"
+            fi
+            if [ "$UNIFIED_ONLY" -eq 0 ]; then
+                echo "  docker push $INGEST_IMAGE"
+            fi
         fi
     fi
     echo ""
@@ -267,74 +328,133 @@ if ! command -v docker > /dev/null 2>&1; then
     exit 1
 fi
 
+if [ -n "$GLOBAL_IMAGE" ] && [ "$GLOBAL_IMAGE" != "$APP_IMAGE" ]; then
+    APP_TAG_CMD="-t $GLOBAL_IMAGE -t $APP_IMAGE"
+else
+    APP_TAG_CMD="-t $APP_IMAGE"
+fi
+
 if [ -n "$PLATFORM" ]; then
     if [ "$NO_PUSH" -eq 1 ]; then
-        echo ""
-        echo "==> [1/2] Building Main App Image ($PLATFORM, Target: api): $APP_IMAGE..."
-        docker buildx build --platform "$PLATFORM" -f "$DOCKERFILE" --target api -t "$APP_IMAGE" "$REPO_ROOT"
+        if [ "$INGEST_ONLY" -eq 0 ]; then
+            echo ""
+            echo "==> Building Main App Image ($PLATFORM, Target: api): $GLOBAL_IMAGE $APP_IMAGE..."
+            # shellcheck disable=SC2086
+            docker buildx build --platform "$PLATFORM" -f "$DOCKERFILE" --target api $APP_TAG_CMD "$REPO_ROOT"
+        fi
 
-        echo ""
-        echo "==> [2/2] Building Ingest Image ($PLATFORM, Target: ingest): $INGEST_IMAGE..."
-        docker buildx build --platform "$PLATFORM" -f "$DOCKERFILE" --target ingest -t "$INGEST_IMAGE" "$REPO_ROOT"
+        if [ "$UNIFIED_ONLY" -eq 0 ]; then
+            echo ""
+            echo "==> Building Ingest Image ($PLATFORM, Target: ingest): $INGEST_IMAGE..."
+            docker buildx build --platform "$PLATFORM" -f "$DOCKERFILE" --target ingest -t "$INGEST_IMAGE" "$REPO_ROOT"
+        fi
 
         echo ""
         echo "================================================================="
         echo " Build successful! (--no-push was specified; skipping push)"
         echo " Images built for platform(s): $PLATFORM"
-        echo "   - $APP_IMAGE"
-        echo "   - $INGEST_IMAGE"
+        if [ "$INGEST_ONLY" -eq 0 ]; then
+            if [ -n "$GLOBAL_IMAGE" ]; then
+                echo "   - Global Unified: $GLOBAL_IMAGE"
+            fi
+            echo "   - Main App:       $APP_IMAGE"
+        fi
+        if [ "$UNIFIED_ONLY" -eq 0 ]; then
+            echo "   - Ingest:         $INGEST_IMAGE"
+        fi
         echo "================================================================="
         exit 0
     else
-        echo ""
-        echo "==> [1/2] Building and pushing Main App Image ($PLATFORM, Target: api): $APP_IMAGE..."
-        docker buildx build --platform "$PLATFORM" -f "$DOCKERFILE" --target api -t "$APP_IMAGE" --push "$REPO_ROOT"
+        if [ "$INGEST_ONLY" -eq 0 ]; then
+            echo ""
+            echo "==> Building and pushing Main App Image ($PLATFORM, Target: api): $GLOBAL_IMAGE $APP_IMAGE..."
+            # shellcheck disable=SC2086
+            docker buildx build --platform "$PLATFORM" -f "$DOCKERFILE" --target api $APP_TAG_CMD --push "$REPO_ROOT"
+        fi
 
-        echo ""
-        echo "==> [2/2] Building and pushing Ingest Image ($PLATFORM, Target: ingest): $INGEST_IMAGE..."
-        docker buildx build --platform "$PLATFORM" -f "$DOCKERFILE" --target ingest -t "$INGEST_IMAGE" --push "$REPO_ROOT"
+        if [ "$UNIFIED_ONLY" -eq 0 ]; then
+            echo ""
+            echo "==> Building and pushing Ingest Image ($PLATFORM, Target: ingest): $INGEST_IMAGE..."
+            docker buildx build --platform "$PLATFORM" -f "$DOCKERFILE" --target ingest -t "$INGEST_IMAGE" --push "$REPO_ROOT"
+        fi
 
         echo ""
         echo "================================================================="
-        echo " Successfully built and pushed 2 multi-platform TraceScope images!"
+        echo " Successfully built and pushed TraceScope images!"
         echo " Platform(s): $PLATFORM"
-        echo "   1. Main App: $APP_IMAGE"
-        echo "   2. Ingest:   $INGEST_IMAGE"
+        if [ "$INGEST_ONLY" -eq 0 ]; then
+            if [ -n "$GLOBAL_IMAGE" ]; then
+                echo "   - Global Unified: $GLOBAL_IMAGE"
+            fi
+            echo "   - Main App:       $APP_IMAGE"
+        fi
+        if [ "$UNIFIED_ONLY" -eq 0 ]; then
+            echo "   - Ingest:         $INGEST_IMAGE"
+        fi
         echo "================================================================="
         exit 0
     fi
 fi
 
-echo ""
-echo "==> [1/2] Building Main App Image (Target: api): $APP_IMAGE..."
-docker build -f "$DOCKERFILE" --target api -t "$APP_IMAGE" "$REPO_ROOT"
+if [ "$INGEST_ONLY" -eq 0 ]; then
+    echo ""
+    echo "==> Building Main App Image (Target: api): $GLOBAL_IMAGE $APP_IMAGE..."
+    # shellcheck disable=SC2086
+    docker build -f "$DOCKERFILE" --target api $APP_TAG_CMD "$REPO_ROOT"
+fi
 
-echo ""
-echo "==> [2/2] Building Ingest Image (Target: ingest): $INGEST_IMAGE..."
-docker build -f "$DOCKERFILE" --target ingest -t "$INGEST_IMAGE" "$REPO_ROOT"
+if [ "$UNIFIED_ONLY" -eq 0 ]; then
+    echo ""
+    echo "==> Building Ingest Image (Target: ingest): $INGEST_IMAGE..."
+    docker build -f "$DOCKERFILE" --target ingest -t "$INGEST_IMAGE" "$REPO_ROOT"
+fi
 
 if [ "$NO_PUSH" -eq 1 ]; then
     echo ""
     echo "================================================================="
     echo " Build successful! (--no-push was specified; skipping push)"
     echo " Images built locally:"
-    echo "   - $APP_IMAGE"
-    echo "   - $INGEST_IMAGE"
+    if [ "$INGEST_ONLY" -eq 0 ]; then
+        if [ -n "$GLOBAL_IMAGE" ]; then
+            echo "   - Global Unified: $GLOBAL_IMAGE"
+        fi
+        echo "   - Main App:       $APP_IMAGE"
+    fi
+    if [ "$UNIFIED_ONLY" -eq 0 ]; then
+        echo "   - Ingest:         $INGEST_IMAGE"
+    fi
     echo "================================================================="
     exit 0
 fi
 
-echo ""
-echo "==> Pushing Main App Image: $APP_IMAGE..."
-docker push "$APP_IMAGE"
+if [ "$INGEST_ONLY" -eq 0 ]; then
+    if [ -n "$GLOBAL_IMAGE" ] && [ "$GLOBAL_IMAGE" != "$APP_IMAGE" ]; then
+        echo ""
+        echo "==> Pushing Global Unified Image: $GLOBAL_IMAGE..."
+        docker push "$GLOBAL_IMAGE"
+    fi
 
-echo ""
-echo "==> Pushing Ingest Image: $INGEST_IMAGE..."
-docker push "$INGEST_IMAGE"
+    echo ""
+    echo "==> Pushing Main App Image: $APP_IMAGE..."
+    docker push "$APP_IMAGE"
+fi
+
+if [ "$UNIFIED_ONLY" -eq 0 ]; then
+    echo ""
+    echo "==> Pushing Ingest Image: $INGEST_IMAGE..."
+    docker push "$INGEST_IMAGE"
+fi
 
 echo ""
 echo "================================================================="
-echo " Successfully built and pushed 2 TraceScope images!"
-echo "   1. Main App: $APP_IMAGE"
-echo "   2. Ingest:   $INGEST_IMAGE"
+echo " Successfully built and pushed TraceScope images!"
+if [ "$INGEST_ONLY" -eq 0 ]; then
+    if [ -n "$GLOBAL_IMAGE" ]; then
+        echo "   - Global Unified: $GLOBAL_IMAGE"
+    fi
+    echo "   - Main App:       $APP_IMAGE"
+fi
+if [ "$UNIFIED_ONLY" -eq 0 ]; then
+    echo "   - Ingest:         $INGEST_IMAGE"
+fi
 echo "================================================================="

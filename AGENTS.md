@@ -20,6 +20,10 @@
 - **NetworkTracing Hub Port**: `0.0.0.0:30102` (OTLP / Ingest Hub in `~/Viettel/NetworkTracing`).
 - **Ingest NodePort**: `http://<node-ip>:30103/api/ingest` (Plain HTTP / non-SSL NodePort entrypoint for legacy C++ shippers such as `nt-ship-cpp` / `nt-sniff-cpp`; verified on public node `129.150.59.233:30103`).
 - **Ingress HTTP NodePort**: `http://<node-ip>:31561` (Cluster Ingress-Nginx plain HTTP NodePort routing `/api/ingest`, `/api/agent/stats`, `/api`, and `/` without TLS; verified on public node `129.150.59.233:31561`).
+- **Cluster APM & Elasticsearch Services**:
+  - `tmp-elk-svc` (NodePort `9200:32073/TCP`, ClusterIP `10.97.180.119:9200`): Elasticsearch 7.17.24 holding APM indices (`apm-*-transaction-*`, `apm-*-metric-*`, `apm-*-span-*`, `apm-*-error-*`). Wired directly to `tracescope-worker` and dashboard on `http://127.0.0.1:32073`.
+  - `apm-server` (NodePort `10.99.87.70:8200` -> NodePort `32765`): Ingestion gateway daemon streaming APM data into Elasticsearch.
+
 
 ---
 
@@ -64,7 +68,7 @@
   - `aggregate_repository.py`: Rollup storage, time-series query, KPI summaries.
   - `topology_repository.py`: Edge materialization, topology graph generation, caller/dependency traversal.
   - `baseline_repository.py`: Baseline storage and retrieval by hour-of-day/day-of-week.
-  - `anomaly_repository.py`: Anomaly event querying, lifecycle patching (open, investigating, resolved, suppressed). Pruned unobtained attributes from responses.
+  - `anomaly_repository.py`: Anomaly event querying, lifecycle patching (open, investigating, resolved, suppressed). Coalesces contiguous open anomaly occurrences for identical dimensional signatures within 15 minutes, preserving root incident ID, extending `last_seen`, tracking `occurrences` count, and calculating `duration_mins` in metadata via ClickHouse `ReplacingMergeTree ORDER BY id`.
   - `principal_repository.py`: Principal rankings and comprehensive behavioral profiling.
   - `user_repository.py`: User inventory, fingerprint profiles, timelines, explainable changes, graph, analytics, operator review actions, and incidents query.
   - `agent_stats_repository.py`: Agent health sample storage — upserts `agent_stats_latest` (one live row per node+instance), appends to `agent_stats_history` (idempotent via UNIQUE on `(node, instance_id, sequence)`), prunes history to 2880 rows/node, and provides atomic `delete_node` purging.
@@ -74,7 +78,7 @@
   - `normalization.py`: Normalizes OTel / ELK payloads, derives trusted IP / proxies, extracts WSSE usernames with case preservation, sets canonical `operation_key` (`Service/operation`), and maps decoupled `auth_result` / `auth_evidence`.
   - `aggregation.py`: Computes 60s and 300s rollups with exact p50/p95/p99 percentiles.
   - `baseline.py`: Computes rolling median and MAD across dimensions.
-  - `anomaly_detection.py`: Detectors 1–8.
+  - `anomaly_detection.py`: Detectors 1–8. Detector 8 (`unusual_time`) enforces an established baseline maturity gate (`sample_count >= 10`) for human principals, suppressing cold-start false positives for `-anonymous-` and periodic polling endpoints.
   - `blast_radius.py`: Recursive caller traversal and impact calculation.
   - `root_cause.py`: Probable origin heuristic.
   - `principal_extractor.py`, `principal_relationships.py`, `principal_profile.py`, `principal_baseline.py`, `principal_change_detector.py`, `principal_graph.py`, `principal_analytics.py`: incremental credential-behavior derivation from the existing sanitized `traces` table.
@@ -86,31 +90,38 @@
 
 ### Frontend (`frontend/`)
 - **Tech Stack**: React 19, Vite, TypeScript, Tailwind CSS, TanStack Query, Recharts, HTML5 Canvas.
-- **Design System & Typography**: Moderately colorful, glanceable observability monitor design system.
-  - Typography: 120% base font scaling (`html { font-size: 120%; }`), 13px Recharts axis ticks, 13px/12px HTML5 Canvas labels, and proportional arbitrary pixel text scaling (`text-[9px]` -> 11px, `text-[10px]` -> 12px, `text-[11px]` -> 13.5px, etc.).
-  - Canvas: Deep purple-black container (`#12101b`), elevated panels (`#161424`), crisp card containers (`#1a172a`), with subtle ambient multi-accent glow (cyan + violet + amber).
-  - Borders: Crisp, high-contrast borders `rgba(255, 255, 255, 0.14)` and `rgba(255, 255, 255, 0.12)`.
+- **Design System & Typography**: Clean, matte, non-glossy glanceable observability monitor design system.
+  - Typography: 100% standard font scaling, 12px Recharts axis ticks, crisp typography hierarchy.
+  - Surfaces: Clean matte dark canvas (`#0c0d14`), elevated panels (`#141622`), side navigation (`#0c0e17`).
+  - Zero Glossy Effects: Eliminated all `radial-gradient` ambient sheens, `backdrop-blur` frosted glass filters, and glowing `shadow-[0_0_...` neon halos.
+  - Borders: Crisp, flat borders `#262838`.
   - Multi-Accent Palette:
-    - User Intelligence & Identity: Cyan / Sky (`#06b6d4`, `#22d3ee`, active pill `glow-cyan`).
-    - Observability & Services: Sentry Violet / Indigo (`#8b5cf6`, `#6366f1`, active pill `glow-violet`).
-    - Infrastructure & Fleet: Golden Amber (`#f59e0b`, `#fbbf24`, active pill `glow-amber`).
+    - User Intelligence & Identity: Crisp Cyan (`#00f0ff`).
+    - Observability & Services: Sentry Violet / Indigo (`#8b5cf6`, `#6366f1`).
+    - Infrastructure & Fleet: Golden Amber (`#f59e0b`, `#fbbf24`).
     - Performance & Signals: Sky Blue for Throughput/RPS, Emerald for TPS/Optimal Latency, Violet for p95, Rose for 5xx/Errors.
-  - Multi-Color Visualizations: Multi-percentile AreaCharts (Rose p99, Amber p95, Mint p50), distinct `Cell` fills for account volumes, gradient rank bars in `RankTable`, 4-tier latency heatmap color ramp (<100ms emerald, 100-250ms cyan, 250-500ms amber, >500ms rose), and group-coded topology nodes and edge states.
+  - Multi-Color Visualizations: Multi-percentile AreaCharts (Rose p99, Amber p95, Mint p50), distinct `Cell` fills for account volumes, 4-tier latency heatmap color ramp (<100ms emerald, 100-250ms cyan, 250-500ms amber, >500ms rose), and group-coded topology nodes and edge states without specular sheen.
 - **Built Output**: `frontend/dist` served directly by FastAPI on port 30102.
 - **Navigation & Pages**:
-  - `Overview` (`/`): Estate health KPIs, comparative traffic & latency series, open anomalies list, top services & principals.
-  - `Topology` (`/topology`): Interactive canvas graph with Edge Inspector drawer (showing top principals and top operations per edge).
-  - `Anomalies` (`/anomalies`, `/anomalies/:id`): Incident list and Anomaly Detail with "WHAT CHANGED COMPARED WITH NORMAL?" explainability card, probable root cause, blast radius, and lifecycle action controls.
+  - `Overview` (`/`): User Behavioral Observability Dashboard focusing strictly on identity behavior: 8 User KPIs, traffic velocity vs error dynamics, risk cohort distribution, prioritized anomalous accounts with 1-click workspace inspector, shared credentials, and live change/incident triage.
+  - `Topology` (Legacy `/topology`): Redundant generic service topology removed from primary navigation; redirects cleanly to `/users`. User access topology is served within the user workspace at `/users/:principal/topology`.
+  - `Anomalies` (`/anomalies`, `/anomalies/:id`): Dual-mode Incident Episode list (`Group Incidents` vs `Raw Findings`) collapsing repetitive 5-minute alerts into aggregated continuous episodes with recurrence badges (`Nx recurrent`), time spans, duration, peak/latest values, and expandable slice accordions. Anomaly Detail with "WHAT CHANGED COMPARED WITH NORMAL?" explainability card, probable root cause, blast radius, and lifecycle action controls.
   - `Services` (`/services`, `/services/:name`): Service catalog, operation percentiles, caller graphs, instances.
   - `Principals` (`/principals`, `/principals/:name`): Identity behavior explorer, target services, operations, callers, and hourly activity profiles.
   - `Traces` (`/traces`, `/traces/:id`): Trace explorer with filters and multi-tier interactive waterfall visualization.
   - `User Intelligence`:
-    - `Users` (`/users`, `/users/:principal`): Searchable principal inventory and evidence-rich credential profile.
-    - `User Changes` (`/user-changes`): Redesigned with Agent Fleet style Global Graph Dashboard (event velocity & risk score dual-axis AreaChart, severity breakdown, behavioral drift categories timeline, top flagged principals ranking, and 7-questions explainability drawer).
-    - `User Graph` (`/user-graph`): Redesigned with Agent Fleet style Detailed Graph Dashboard (request invocations & call share AreaChart, identity ingress vs target fan-out dynamics, edge drift distribution, relationship matrix table, and classic topology canvas toggle).
-    - `User Analytics` (`/user-analytics`): Multi-dimensional identity analytics (active, changed, shared credentials, source diversity, broadest access).
-  - `Infrastructure`: `Agent Fleet` (`/agent-stats`) and `Agent Drilldown` (`/agent-stats/:node`) with interactive time-series dashboards (throughput kbps & ev/s, drop rates, pinned CPU core & RSS memory, queue backpressure, flow volume, and process limits).
+    - `User Directory` (`/users`): Searchable principal inventory with live stats, risk level badges, sort controls, and launcher into user workspace.
+    - `User Workspace & Layout` (`/users/:principal`): Sticky entity header with user avatar, type indicator, behavior score pill, current 5m RPS, active targets, quick account switcher dropdown, and 6 dedicated operational tabs:
+      1. `User Overview` (`/users/:principal/overview`): Current 5m vs baseline deltas across 8 KPIs, 4 high-contrast line charts in a 2x2 grid (two lines, each line two cards: RPS vs base, error rate, p95 latency, Abnormality Score Spike scaled with high RPS deviation), mini change timeline, and relationship expansion summary.
+      2. `Activity & Performance` (`/users/:principal/activity`): Throughput RPS, req/min volume, 100% stacked status distribution (2xx/4xx/5xx/timeout), multi-percentile latency area chart (p50/p95/p99), and interactive pinned time-slice inspector.
+      3. `Access & Topology` (`/users/:principal/topology`): Dedicated `User → Caller → Target` canvas topology graph, collapsible target operations breakdown, edge metrics inspector drawer.
+      4. `Behavior Changes` (`/users/:principal/changes`): Deviation-only behavioral shifts, before vs now category distribution bars, and 7-questions explainability timeline.
+      5. `Usage Patterns` (`/users/:principal/patterns`): 24h × 7d activity heatmap, target services distribution bars, operations distribution bars, and behavioral scope time series.
+      6. `Anomalies & Investigations` (`/users/:principal/investigations`): Triage queue, trigger hypotheses, BEFORE vs NOW metrics comparison table, causal relationship chain, and operator review controls.
+    - Global Feeds & Analytics: `/user-changes`, `/user-graph`, `/user-analytics`, `/incidents`.
+  - `Infrastructure`: `Agent Fleet` (`/agent-stats`) and `Agent Drilldown` (`/agent-stats/:node`) with interactive time-series dashboards.
   - Global Search in header: Search services, principals, or jump directly to trace waterfall by ID.
+  - **Localization (i18n)**: Full, authentic Vietnamese localization across all 17 pages, charts, tables, cards, and modals with persistent language switcher (`🇻🇳 VI` / `🇬🇧 EN`) defaulting to Vietnamese.
 
 ---
 
@@ -125,22 +136,26 @@
 ---
 
 ## 4. Current State & Verification
-- **Test Suite**: 139/139 tests passed in an isolated temporary-database harness (`.venv/bin/python -m pytest tests/ -q`); production data is never mutated by tests:
+- **Test Suite**: 167/167 tests passed in an isolated temporary-database harness (`.venv/bin/python -m pytest tests/ -q`); production data is never mutated by tests:
+  - Unified Helm global image tag resolution and component overrides (`tests/test_deployment_topology.py`).
+  - LLM diagnostic investigation subsystem unit, integration, and security tests (`tests/test_llm_investigation_*.py`) including `_parse_object` resilience across markdown code fences, `<think>` tags, and reasoning token limits.
   - Unit & domain tests in `tests/test_analytics.py`, `tests/test_api.py`, `tests/test_ingestion.py`.
   - Ingestion batch deduplication and gzip decompression tests in `tests/test_batch_dedup_and_gzip.py`.
   - High-concurrency request coalescing, atomic concurrent deduplication, bounded-queue backpressure, and retryable HTTP 429 tests in `tests/test_ingest_writer.py`.
   - Comprehensive behavioral API tests in `tests/test_behavioral_api.py`.
   - Canonical identity normalization, realm removal, multi-layer baselines, detector readiness, capped family scoring, and bounded incident lifetime tests in `tests/test_identity_normalization_and_incidents.py`.
   - Dedicated IP anomaly and novel user on host tests in `tests/test_user_ip_anomalies.py`.
+  - F5 BIG-IP load balancer SNAT, XFF, X-Real-IP, and IP spoofing rejection in `tests/test_f5_lb_normalization.py`.
   - Reference compatibility and WSSE ingestion tests in `tests/test_reference_compat.py` and `tests/test_wsse_ingestion.py`.
   - Service boundary, workload splitting, and topology tests in `tests/test_service_boundaries.py`, `tests/test_split_workloads_integration.py`, and `tests/test_deployment_topology.py`.
   - Host/probe agent trace isolation in ClickHouse (`tests/test_agent_traces_only.py`).
   - System telemetry log retention and truncation (`tests/test_system_retention.py`).
   - Compact AggregatingMergeTree principal readiness summary (`tests/test_principal_readiness_summary.py`).
+  - Aggregation worker start time cutoff, historical data bypass, checkpoint fast-forwarding, and Elasticsearch sync initial page range filtering (`tests/test_worker_start_time.py`).
   - All 22 code review findings verified and documented in `FIX_REPORT.md`.
-- **End-to-End Curl & JS Safety Test Suite**: 42/42 tests passed (`sh backend/scripts/curl_test_all_pages.sh`).
-  - Tested all 17 SPA routes (including `/agent-stats` and `/agent-stats/:node`) with HTTP 200 and valid HTML shell bundle delivery.
-  - Tested 25 backing APIs against frontend TypeScript contracts via `backend/scripts/validate_js_safety.py`.
+- **End-to-End Curl & JS Safety Test Suite**: 48/48 tests passed (`sh backend/scripts/curl_test_all_pages.sh`).
+  - Tested all 20 SPA routes (including `/agent-stats`, `/agent-stats/:node`, and 6 user workspace sub-routes) with HTTP 200 and valid HTML shell bundle delivery.
+  - Tested 28 backing APIs against frontend TypeScript contracts via `backend/scripts/validate_js_safety.py`.
   - 0 JavaScript crash risks identified (zero undefined `toFixed`, `length`, or `map` vulnerabilities).
 - **Frontend Lint/Build**: Passed (`tsc --noEmit -p tsconfig.app.json` and `tsc -b && vite build`).
   - Added defensive optional chaining and fallback arrays across `Overview.tsx`, `Services.tsx`, `Principals.tsx`, `Anomalies.tsx`, and `Traces.tsx`.
@@ -151,7 +166,7 @@
   - 0 unhandled `pageerror` exceptions, 0 React render crash boundaries, and 0 console error failures.
 - **Port 30102 Status**: Online and healthy, listening on all interfaces (`http://0.0.0.0:30102`).
 - **High-TPS Hub Deployment (2026-09-11)**: Bounded/coalescing writer is active on `:30102`; live ingestion status reported `writer_alive=true`, queue `0/256`, successful durable commits, zero failed requests, and atomic duplicate replay. Full isolated test suite passed 74/74 and the live curl/JavaScript contract suite passed 42/42 after deployment.
-- **Dataset Baseline (historical, pre-ClickHouse)**: The 50,000-trace abnormal sample ingested 50,000 traces from `/home/ubuntu/Viettel/Data/sample_abnormal_traces_50k.jsonl.gz` with ground-truth anomalies. Computed 46,307 1m buckets, 36,562 5m buckets, 33 service edges, 232 principal edges, 3,860 rolling baselines (median & MAD), 1,654 core observability anomalies (Detectors 1-8), 3,113 user behavioral change events across 7 types, and 41 bounded security incidents with family-capped scores.
+- **Dataset Baseline (1-month dataset via Elasticsearch & ClickHouse)**: Ingested 60,000 documents spanning 30 days from `/home/ubuntu/Viettel/Data/otel_elk_traces_1month.jsonl.gz` into Elasticsearch NodePort `:32073` (`apm-7.17.24-transaction-000001`, 29.6 MB). Synced into ClickHouse `traces` (24.79 MiB) by `tracescope-worker`. Computed 153,181 metric buckets (1m and 5m), 7,418 principal baselines, 48,914 service baselines, 3,448 user behavioral change events, and 55 security incidents. All accounts established (`learning_status: established`). System logs truncated to 2.25 MiB with 1-day TTL.
 - **Data Correctness**: Anomaly APIs filter and investigate by telemetry observation windows, expose measured bucket/baseline sample counts and MAD ranges, return matching trace evidence, and include metadata-associated principals. User scores count distinct evidence types once and explicitly distinguish learning from established baselines.
 - **WSSE UsernameToken Attribution**: Active `/api/ingest` and `/v1/traces` ingestion safely normalize namespaced WSSE usernames and store only `principal_name` with `auth_scheme=wsse`. OASIS 2004 plus legacy 2002/07, 2002/12, and 2003/06 `secext` namespaces are supported; malformed, unnamespaced, DTD/entity, oversized, and invalid usernames remain anonymous. SOAP bodies, passwords/digests, and nonces are never persisted or logged. Verified live on `:30102` with HTTP 200 and trace/API/database evidence.
 - **Java WSSE OTLP Fixture**: `/tmp/wsse-java-service` accepts bounded SOAP on
@@ -198,7 +213,14 @@
   - **Universal Fleet Package (`bundle.tar.gz`)**: Packaged with both modern eBPF and real oldkernel agent code (`oldkernel/` containing `install-firstrun-el68.sh`, `nt-sniff-cpp`, `nt-ship-cpp`, `nt-sniff.py`, `nt-ship.py`, supervisor, and resource guards).
   - **Installer Auto-Delegation (`bundle/install.sh`)**: Automatically detects kernel floor (< 5.5) or `--oldkernel` flag and delegates to the packaged oldkernel installer.
   - **Bootstrap Daemon**: Managed directly via `run_server.sh` alongside TraceScope API (`:30102`).
-  - Verified 100% distribution pass via `verify-oldkernel-bootstrap.sh` and `package-oldkernel.sh` (`bundle.tar.gz`, 37,329,702 bytes, PID 14422).
+- **Presentation Layer Migration (RPS to TPS)**: Standardized all user-facing throughput units, metrics, tooltips, chart legends, and comparison tables across the React frontend and API responses (`/users/{principal}/investigations`, `/anomalies`) from RPS / `req/s` to TPS / `tps` without breaking underlying database schemas or compatibility.
+- **JavaScript Safe Integer Precision & Anomaly ID Guard**:
+  - `deterministic_anomaly_id` (`anomaly_repository.py`) uses `(raw_hash % 9_000_000_000_000_000) + 1` to guarantee newly generated anomaly IDs strictly fit within JavaScript `Number.MAX_SAFE_INTEGER` ($2^{53} - 1 = 9,007,199,254,740,991$), preventing IEEE-754 precision loss and trailing-zero rounding in web browsers.
+  - `get_anomaly`, `update_status`, and `anomaly_users` implement automatic float64 ULP tolerance fallback ($\pm 4096$) for any IDs $> 9 \times 10^{15}$, ensuring legacy or bookmarked URLs resolve accurately.
+  - Database reset executed via `backend/scripts/reset_testbed.py` (truncated ClickHouse analytical tables, deleted Elasticsearch APM indices, truncated system telemetry logs).
+- **Behavioral Change Events Deduplication (`principal_change_events FINAL`)**:
+  - Enforced ClickHouse `FINAL` modifier across all `principal_change_events` queries in `UserRepository` (`list_changes`, `summary`, `analytics`, `service_users`, `graph`), ensuring `ReplacingMergeTree` collapses duplicate rows inserted across periodic micro-batches.
+  - Added client-side defensive deduplication by fingerprint/key in `UserChangesTab.tsx`.
 - **Reference**: Refer to `STATE.md` for full endpoints, features, and run guides.
 
 ---
@@ -259,8 +281,8 @@
     - `PRAGMA table_info` -> `DESCRIBE TABLE`.
     - `cursor.lastrowid`: simulated via `SELECT max(id) FROM {table}` for autoincrement parity.
 - **Verification Suite**:
-  - Pytest Suite: 98/98 tests passed across all 13 modules in `tests/` in an isolated test database harness (`test_pytest_<id>`).
-  - End-to-End Curl & Safety Suite: 42/42 checks passed (`sh backend/scripts/curl_test_all_pages.sh`), covering all 17 SPA routes and 25 backing API endpoints with 0 JavaScript crash vulnerabilities.
+  - Pytest Suite: 150/150 tests passed across all 13 modules in `tests/` in an isolated test database harness (`test_pytest_<id>`).
+  - End-to-End Curl & Safety Suite: 48/48 checks passed (`sh backend/scripts/curl_test_all_pages.sh`), covering all 17 SPA routes and 31 backing API endpoints with 0 JavaScript crash vulnerabilities.
   - Manifest Validation: `python3 deploy/k8s/validate_manifests.py deploy/k8s` passed with 16 documents and 0 errors.
   - Live Ingestion & Coalescing Writer: Direct ClickHouse asynchronous batched inserts (`traces` and `ingest_batches`), bounded queue backpressure (429 + `Retry-After: 1`), and atomic replay deduplication.
 
@@ -396,4 +418,93 @@
   - `deploy/k8s/validate_manifests.py`: 17 documents across 10 resource kinds verified (0 errors).
   - Helm chart `deploy/helm/tracescope`: `helm lint` passes cleanly with `values-secrets.yaml`, and `helm template` renders valid Kubernetes manifests.
   - Strictly adherence to the constraint: never execute `kubectl` command.
+
+---
+
+## 12. 6 User-Centric Pages & Supporting Attribution Signal Architecture (2026-09-16)
+
+- **6 User-Centric Operational Pages**:
+  1. `User Overview` (`/users/:principal/overview`): *“Is this user behaving normally right now?”* — 8 KPI cards, 4 high-contrast line charts in a 2x2 grid (two lines, each line two cards: RPS vs base, error rate, p95, Abnormality Score Spike scaled with high RPS deviation where 10% off base = 10 pts, protected with a 0.5 req/s baseline significance floor to prevent sub-second traffic from inflating to 100 pts), mini change timeline, new relationship summary.
+  2. `Activity & Performance` (`/users/:principal/activity`): *“How has this user’s traffic/performance changed?”* — Throughput RPS line chart, 100% stacked status distribution (2xx/4xx/5xx/timeout), multi-percentile latency area chart (p50/p95/p99), and interactive pinned time-slice inspector.
+  3. `Access & Topology` (`/users/:principal/topology`): *“What systems is this user touching?”* — Dedicated canvas graph (`User → Caller → Target → Operation`), collapsible target operations breakdown, edge metrics inspector drawer.
+  4. `Behavior Changes` (`/users/:principal/changes`): *“What is different from the user’s normal behavior?”* — Deviation-only behavioral shifts, before vs now category distribution bars, and 7-questions explainability timeline.
+  5. `Usage Patterns` (`/users/:principal/patterns`): *“When and how does this user normally operate?”* — 24h × 7d activity heatmap, target services distribution bars, operations distribution bars, and behavioral scope time series.
+  6. `Anomalies & Investigations` (`/users/:principal/investigations`): *“What needs investigation?”* — Triage queue, trigger hypotheses, BEFORE vs NOW metrics comparison table, causal relationship chain, and operator review controls.
+- **Supporting Attribution Signal Architecture (IP as Context)**:
+  - **Core Model**: Primary behavioral path is `User → Caller → Target → Operation`. Aggregation key is `principal × caller × target × operation`.
+  - **IP Context**: Observed source IP is attached as supporting context (`observed_source_ip`, `effective_client_ip`, `source_ip_role`, `attribution_confidence`).
+  - **Classification**: `classify_source_ip_role` categorizes IPs into `load_balancer`, `reverse_proxy`, `nat_gateway`, `service_ingress`, `client`, and `infrastructure` with `high`, `medium`, and `low` confidence.
+  - **Incident Weighting**: Known/likely load balancers (`low` confidence) are suppressed or zero-weighted in incident scoring, while genuine client IPs are elevated.
+  - **Selective Integration**:
+    - Overview: Card 8 `Source IPs` with dashed border and `Secondary Attribution Context` pill.
+    - Activity: Source IP filter dropdown with role pills (`Client` vs `Load Balancer`).
+    - Topology: Pure behavioral path default; optional `[ ] Show network path (IPs / Proxies)` toggle to reveal intermediate network hops.
+    - Changes: High-value novelties (`NEW_CALLER`, `NEW_TARGET`, `NEW_OPERATION`, `NEW_RELATIONSHIP`) prioritized over supporting network novelties.
+    - Patterns: Known IPs baseline card as secondary attribution context.
+    - Investigations: IP included as corroborating evidence with explicit role labels.
+- **Validation**:
+  - TypeScript & Vite build: 100% clean (`tsc -b && vite build`).
+  - Curl & JS Safety Test Suite (`sh backend/scripts/curl_test_all_pages.sh`): All 48/48 tests passed (0 JS crash risks).
+  - Playwright Chromium Real Browser Test Suite (`python3 backend/scripts/test_pages_playwright.py`): All 17/17 pages passed with 0 unhandled JS exceptions.
+  - Pytest Suite: All 17 unit and behavioral normalization tests passed cleanly.
+
+---
+
+## 13. Deployment Artifacts & Multi-Platform Readiness (Helm, K8s, Docker) (2026-09-17)
+
+- **Helm Chart (`deploy/helm/tracescope`)**:
+  - Chart SemVer bumped to `0.3.0` (`Chart.yaml`).
+  - Configured `llm:` block in `values.yaml` with `enabled`, `singleOwnerAck`, `baseUrl`, `model`, `responseMode`, `allowLoopbackHttp`, `contextTokens`.
+  - Configured `secrets.llmApiKey` in `values.yaml` and `values-secrets.yaml`.
+  - ConfigMap template (`templates/configmap.yaml`) and Secret template (`templates/secret.yaml`) cleanly map `OTEL_LLM_*` and `OTEL_LLM_API_KEY`.
+  - Verified with `helm lint deploy/helm/tracescope/ -f deploy/helm/tracescope/values-secrets.yaml` (0 chart errors) and `helm template`.
+- **Plain Kubernetes Manifests (`deploy/k8s/`)**:
+  - `deploy/k8s/10-configmap.yaml`: Configured with `OTEL_LLM_*` environment variables and documentation.
+  - `deploy/k8s/11-secret.example.yaml`: Configured with `OTEL_LLM_API_KEY` placeholder.
+- **Docker & Docker Compose**:
+  - `docker-compose.yml`: Parameterized `api` container with `OTEL_LLM_*` and `OTEL_API_KEY`, and `frontend` container with `VITE_API_KEY`.
+  - `Dockerfile` & `deploy/docker/Dockerfile`: Standardized multi-stage container build supporting optional build-time frontend environment arguments (`VITE_API_KEY`, `VITE_API_URL`).
+
+---
+
+## 14. Investigation Route Auth Decoupling (2026-09-17)
+
+- In `backend/app/api/investigations.py`, decoupled `investigation_auth` from mandatory `settings.api_key`.
+- If `OTEL_API_KEY` is not set on the backend, `/api/v1/investigations/*` routes operate in open mode (matching the rest of the TraceScope telemetry endpoints), eliminating the `503 auth_unconfigured` barrier when deploying with public/edge-authenticated dashboards.
+- If `OTEL_API_KEY` is configured, strict `X-API-Key` comparison via `hmac.compare_digest` is enforced as before (HTTP 401 on invalid/missing key).
+
+---
+
+## 15. Unified Global Helm Image Tag Resolution (`0.3.3`)
+
+- **Helm Chart Bump**: `deploy/helm/tracescope/Chart.yaml` bumped to `version: 0.3.3` and `appVersion: "0.3.3"`.
+- **Global Helper**: `deploy/helm/tracescope/templates/_helpers.tpl` added `tracescope.globalImageTag` helper.
+- **Templates**: All component workloads (`storage-statefulset.yaml`, `ingest-deployment.yaml`, `agent-stats-deployment.yaml`, `ui-deployment.yaml`) default to the global image tag (`global.image.tag: "0.3.3"`).
+- **Interchangeability**: Added explicit `command: ["uvicorn", "backend.ingest_main:app", "--host", "0.0.0.0", "--port", "8000"]` to `ingest-deployment.yaml` so the unified container runs any component role.
+
+---
+
+## 16. Build and Push Script Unified Image Tag Support (`scripts/build_and_push.sh`)
+
+- **Root Cause Fix**: `scripts/build_and_push.sh` previously hardcoded `app-${VERSION}` and `ingest-${VERSION}` as tag suffixes, preventing creation of the base version tag `xhatsu101/tracescope:0.3.3` that Helm expects under `global.image.tag: "0.3.3"`.
+- **Unified Build Target**: Main App build target (`--target api`) now tags both `xhatsu101/tracescope:0.3.3` and `xhatsu101/tracescope:app-0.3.3` (`-t $GLOBAL_IMAGE -t $APP_IMAGE`) and pushes both.
+- **Flags Added**:
+  - `--unified-only` (`-u`): Builds and pushes only the unified application image (`:0.3.3` and `:app-0.3.3`).
+  - `--ingest-only`: Builds and pushes only the standalone ingest image (`:ingest-0.3.3`).
+- **POSIX Compliant**: 100% standard POSIX `/bin/sh` syntax.
+- **Verification**: Verified via `--dry-run` across all flag permutations and automated regression tests in `tests/test_deployment_topology.py` (27/27 passed).
+
+---
+
+## 17. Investigation Model UUID Parsing & Anomaly API Endpoints
+
+- **Pydantic Strict Mode Fix**: Added `_coerce_uuid` validator to `InvestigationCreate.retry_of` (`backend/app/models/investigation.py`) so string UUIDs sent in HTTP JSON payloads are cleanly converted to `uuid.UUID` objects without raising strict model `ValidationError`.
+- **Deduplication Behavior**: Without `retry_of`, `POST /api/v1/investigations` returns the existing cached run (`reused: true`). Supplying `retry_of: "<prev-run-id>"` initiates a new execution attempt with `retry_index = 1`.
+- **Endpoints**:
+  - Snapshot: `GET /api/v1/investigations/source?kind=anomaly_event&id=<id>`
+  - Create/Retry: `POST /api/v1/investigations`
+  - Get Status: `GET /api/v1/investigations/<run_id>`
+  - History: `GET /api/v1/investigations?kind=anomaly_event&id=<id>`
+- **Verification**: 14/14 LLM investigation unit tests passed; full test suite (168 tests) passed.
+
 

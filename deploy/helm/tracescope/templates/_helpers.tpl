@@ -78,6 +78,7 @@ Secret Name resolution
 Ingress path routing rules
 */}}
 {{- define "tracescope.ingressPaths" -}}
+{{- if .Values.ingest.enabled }}
 - path: /api/v1/ingest
   pathType: Prefix
   backend:
@@ -92,13 +93,21 @@ Ingress path routing rules
       name: {{ include "tracescope.fullname" . }}-ingest
       port:
         number: 30103
+{{- end }}
 - path: /api/v1/ingestion/status
   pathType: Prefix
   backend:
     service:
+      {{- if .Values.ingest.enabled }}
       name: {{ include "tracescope.fullname" . }}-ingest
       port:
         number: 30103
+      {{- else }}
+      name: {{ include "tracescope.fullname" . }}-api
+      port:
+        number: 30102
+      {{- end }}
+{{- if .Values.ingest.enabled }}
 - path: /v1/traces
   pathType: Prefix
   backend:
@@ -120,6 +129,7 @@ Ingress path routing rules
       name: {{ include "tracescope.fullname" . }}-ingest
       port:
         number: 30103
+{{- end }}
 - path: /api/agent/stats
   pathType: Prefix
   backend:
@@ -173,4 +183,23 @@ Ingress path routing rules
 {{- if $es.url -}}
 {{- $es.url -}}
 {{- end -}}
+{{- end -}}
+
+{{/*
+Resolve global image tag for TraceScope components.
+Precedence:
+1. .Values.global.image.tag
+2. .Values.global.imageTag
+3. .Chart.AppVersion
+*/}}
+{{- define "tracescope.globalImageTag" -}}
+{{- $tag := "" -}}
+{{- if .Values.global -}}
+  {{- if .Values.global.imageTag -}}
+    {{- $tag = .Values.global.imageTag -}}
+  {{- else if and .Values.global.image .Values.global.image.tag -}}
+    {{- $tag = .Values.global.image.tag -}}
+  {{- end -}}
+{{- end -}}
+{{- default .Chart.AppVersion $tag -}}
 {{- end -}}

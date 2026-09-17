@@ -17,3 +17,6 @@ benchmark-output/
 .hermes/
 values-secrets.yaml
 deploy/helm/tracescope/values-secrets.yaml
+TASK_*.md
+*.pid
+

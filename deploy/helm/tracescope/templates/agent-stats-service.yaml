@@ -1,4 +1,5 @@
 {{- if .Values.agentStats.enabled }}
+{{- $svc := default dict .Values.agentStats.service -}}
 apiVersion: v1
 kind: Service
 metadata:
@@ -7,16 +8,16 @@ metadata:
     {{- include "tracescope.labels" . | nindent 4 }}
     app.kubernetes.io/component: agent-stats
 spec:
-  type: {{ .Values.agentStats.service.type | default "ClusterIP" }}
+  type: {{ default "ClusterIP" $svc.type }}
   selector:
     {{- include "tracescope.selectorLabels" . | nindent 4 }}
     app.kubernetes.io/component: agent-stats
   ports:
     - name: http
-      port: {{ .Values.agentStats.service.port | default 30104 }}
+      port: {{ default 30104 $svc.port }}
       targetPort: http
       protocol: TCP
-      {{- if and (eq (.Values.agentStats.service.type | default "ClusterIP") "NodePort") .Values.agentStats.service.nodePort }}
-      nodePort: {{ .Values.agentStats.service.nodePort }}
+      {{- if and (eq (default "ClusterIP" $svc.type) "NodePort") $svc.nodePort }}
+      nodePort: {{ $svc.nodePort }}
       {{- end }}
 {{- end }}

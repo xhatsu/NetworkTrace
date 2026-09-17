@@ -224,3 +224,42 @@ async def anomaly_users(anomaly_id: int):
     result=UserRepository().anomaly_users(anomaly_id)
     if not result: raise HTTPException(404,"Anomaly not found")
     return result
+
+
+@router.get("/users/{principal}/performance")
+async def user_performance(
+    principal: str,
+    from_time: Optional[str] = Query(None, alias="from"),
+    to_time: Optional[str] = Query(None, alias="to"),
+    start: Optional[str] = None,
+    end: Optional[str] = None,
+    bucket: int = Query(300, ge=60, le=3600),
+    source_ip: Optional[str] = Query(None),
+):
+    start_ms, end_ms = _window(from_time, to_time, start, end)
+    return UserRepository().performance(principal, start_ms=start_ms, end_ms=end_ms, bucket_size=bucket, source_ip=source_ip)
+
+
+@router.get("/users/{principal}/investigations")
+async def user_investigations(
+    principal: str,
+    from_time: Optional[str] = Query(None, alias="from"),
+    to_time: Optional[str] = Query(None, alias="to"),
+    start: Optional[str] = None,
+    end: Optional[str] = None,
+):
+    start_ms, end_ms = _window(from_time, to_time, start, end)
+    return {"principal_name": principal, "items": UserRepository().investigations(principal, start_ms=start_ms, end_ms=end_ms)}
+
+
+@router.get("/users/{principal}/topology")
+async def user_topology_endpoint(
+    principal: str,
+    from_time: Optional[str] = Query(None, alias="from"),
+    to_time: Optional[str] = Query(None, alias="to"),
+    start: Optional[str] = None,
+    end: Optional[str] = None,
+):
+    start_ms, end_ms = _window(from_time, to_time, start, end)
+    return UserRepository().user_topology(principal, start_ms=start_ms, end_ms=end_ms)
+

@@ -1,3 +1,4 @@
+{{- if .Values.ingest.enabled }}
 apiVersion: v1
 kind: Service
 metadata:
@@ -18,3 +19,4 @@ spec:
       {{- if and (eq (.Values.ingest.service.type | default "ClusterIP") "NodePort") .Values.ingest.service.nodePort }}
       nodePort: {{ .Values.ingest.service.nodePort }}
       {{- end }}
+{{- end }}

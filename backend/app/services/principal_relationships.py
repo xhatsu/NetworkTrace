@@ -695,8 +695,25 @@ def _process_incremental_row(db, row, batch: _BatchState | None = None) -> int:
     if source and not (batch.dimension_known(principal, "source", source) if batch else _dimension_known(db, principal, "source", source)):
         ready, _ = readiness(principal_id, "NEW_SOURCE_IP", timestamp_ms)
         if ready:
+            from backend.app.services.normalization import classify_source_ip_role
+            role, role_label, conf = classify_source_ip_role(source)
+            summary_desc = f"Observed from source address {source} ({role_label}, attribution confidence: {conf})."
             emit(principal=principal, principal_id=principal_id, change_type="NEW_SOURCE_IP", observed=timestamp_ms,
-                  caller=caller, source=source, target=target, operation=operation, new=source)
+                  caller=caller, source=source, target=target, operation=operation, new=source,
+                  reason={"summary": summary_desc, "source_ip_role": role, "role_label": role_label, "attribution_confidence": conf})
+
+    if source and caller:
+        ip_caller_dim = f"{source}→{caller}"
+        if not (batch.dimension_known(principal, "ip_caller", ip_caller_dim) if batch else _dimension_known(db, principal, "ip_caller", ip_caller_dim)):
+            ready, _ = readiness(principal_id, "NEW_IP_CALLER_PAIR", timestamp_ms)
+            if ready:
+                from backend.app.services.normalization import classify_source_ip_role
+                role, role_label, conf = classify_source_ip_role(source)
+                emit(principal=principal, principal_id=principal_id, change_type="NEW_IP_CALLER_PAIR", observed=timestamp_ms,
+                      caller=caller, source=source, target=target, operation=operation, new=ip_caller_dim,
+                      reason={"summary": f"Novel ingress route: {source} ({role_label}) to caller {caller}.",
+                              "source_ip_role": role, "role_label": role_label, "attribution_confidence": conf})
+
 
     if target and not (batch.dimension_known(principal, "target", target) if batch else _dimension_known(db, principal, "target", target)):
         ready, _ = readiness(principal_id, "NEW_TARGET", timestamp_ms)
@@ -835,27 +852,76 @@ def _process_incremental_row(db, row, batch: _BatchState | None = None) -> int:
     return 1
 
 
+def _save_principal_checkpoint(db, checkpoint: dict[str, Any]) -> None:
+    db.execute(
+        "INSERT INTO checkpoints(source,cursor_json,updated_at_ms) VALUES('principal_intelligence',?,?)",
+        (json.dumps(checkpoint), int(time.time() * 1000)),
+    )
+
+
 def process_principal_intelligence(db_path: Optional[str] = None) -> dict[str, int]:
     stage_started = time.monotonic()
     with db_transaction(db_path) as db:
         checkpoint_row = db.execute(
             "SELECT cursor_json FROM checkpoints FINAL WHERE source='principal_intelligence'"
         ).fetchone()
-        if not checkpoint_row:
-            return _bootstrap(db, settings.principal_bootstrap_ratio)
-        checkpoint = json.loads(checkpoint_row[0])
-        cursor_order = int(checkpoint.get("ingest_order", 0))
-        cursor_uid = str(checkpoint.get("row_uid", "00000000-0000-0000-0000-000000000000"))
+        start_time_ms = getattr(settings, "worker_start_time_ms", None)
+        base_count = db.execute("SELECT count() FROM principal_baselines").fetchone()[0]
+        trace_count = db.execute("SELECT count() FROM traces WHERE principal_name<>'unknown'").fetchone()[0]
+        needs_bootstrap = (not checkpoint_row) or (base_count <= 5 and trace_count > 100)
+        if needs_bootstrap:
+            if start_time_ms is not None:
+                high_water = db.execute(
+                    "SELECT ingest_order, toString(row_uid) FROM traces WHERE timestamp_ms < ? "
+                    "ORDER BY ingest_order DESC, row_uid DESC LIMIT 1",
+                    (start_time_ms,),
+                ).fetchone()
+                cursor_order = int(high_water[0]) if high_water else 0
+                cursor_uid = str(high_water[1]) if high_water else "00000000-0000-0000-0000-000000000000"
+                checkpoint = {
+                    "ingest_order": cursor_order,
+                    "row_uid": cursor_uid,
+                    "bootstrap_cutoff_ms": start_time_ms,
+                    "ratio": 1.0,
+                }
+                _save_principal_checkpoint(db, checkpoint)
+            else:
+                return _bootstrap(db, settings.principal_bootstrap_ratio)
+        else:
+            checkpoint = json.loads(checkpoint_row[0])
+            cursor_order = int(checkpoint.get("ingest_order", 0))
+            cursor_uid = str(checkpoint.get("row_uid", "00000000-0000-0000-0000-000000000000"))
+            if start_time_ms is not None and start_time_ms > int(checkpoint.get("bootstrap_cutoff_ms", 0)):
+                high_water = db.execute(
+                    "SELECT ingest_order, toString(row_uid) FROM traces WHERE timestamp_ms < ? "
+                    "ORDER BY ingest_order DESC, row_uid DESC LIMIT 1",
+                    (start_time_ms,),
+                ).fetchone()
+                if high_water:
+                    cursor_order = max(cursor_order, int(high_water[0]))
+                    cursor_uid = str(high_water[1])
+                checkpoint["ingest_order"] = cursor_order
+                checkpoint["row_uid"] = cursor_uid
+                checkpoint["bootstrap_cutoff_ms"] = start_time_ms
+                _save_principal_checkpoint(db, checkpoint)
+
         processed = 0
         readiness_cache: dict[str, Any] = {}
         while True:
+            where_sql = "WHERE (ingest_order,row_uid)>(?,toUUID(?))"
+            params: list[Any] = [cursor_order, cursor_uid]
+            if start_time_ms is not None:
+                where_sql += " AND timestamp_ms >= ?"
+                params.append(start_time_ms)
+            params.append(PRINCIPAL_BATCH_SIZE)
             rows = db.execute(
                 "SELECT ingest_order,row_uid,timestamp_ms,principal_name,"
                 "service_environment,principal_id,operation_key,source_group,caller_service,caller_ip,"
                 "target_service,operation,auth_result,http_status,outcome,caller_instance,target_instance,"
                 "target_ip,target_port,http_method FROM traces "
-                "WHERE (ingest_order,row_uid)>(?,toUUID(?)) "
-                "ORDER BY ingest_order,row_uid LIMIT ?", (cursor_order, cursor_uid, PRINCIPAL_BATCH_SIZE)
+                f"{where_sql} "
+                "ORDER BY ingest_order,row_uid LIMIT ?",
+                params,
             ).fetchall()
             if not rows:
                 break

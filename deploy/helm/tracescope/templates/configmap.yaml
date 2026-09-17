@@ -33,4 +33,12 @@ data:
   OTEL_BASELINE_CADENCE_SECONDS: {{ .Values.config.baselineCadenceSeconds | quote }}
   OTEL_BASELINE_SERIES_BUDGET: {{ .Values.config.baselineSeriesBudget | quote }}
   OTEL_ANOMALY_WINDOW_BUDGET: {{ .Values.config.anomalyWindowBudget | quote }}
-  OTEL_ANALYTICS_STAGE_BUDGET_SECONDS: {{ .Values.config.analyticsStageBudgetSeconds | quote }}
+  OTEL_WORKER_START_TIME: {{ default .Values.config.workerStartTime (dig "worker" "startTime" "" (default dict .Values.app)) | default "" | quote }}
+  OTEL_WORKER_IGNORE_PAST_DATA: {{ default .Values.config.workerIgnorePastData (dig "worker" "ignorePastData" false (default dict .Values.app)) | default false | quote }}
+  OTEL_LLM_INVESTIGATION_ENABLED: {{ default false (default dict .Values.llm).enabled | quote }}
+  OTEL_LLM_SINGLE_OWNER_ACK: {{ default false (default dict .Values.llm).singleOwnerAck | quote }}
+  OTEL_LLM_BASE_URL: {{ default "" (default dict .Values.llm).baseUrl | quote }}
+  OTEL_LLM_MODEL: {{ default "" (default dict .Values.llm).model | quote }}
+  OTEL_LLM_RESPONSE_MODE: {{ default "json_object" (default dict .Values.llm).responseMode | quote }}
+  OTEL_LLM_ALLOW_LOOPBACK_HTTP: {{ default false (default dict .Values.llm).allowLoopbackHttp | quote }}
+  OTEL_LLM_CONTEXT_TOKENS: {{ default 32768 (default dict .Values.llm).contextTokens | quote }}

@@ -122,6 +122,43 @@ class TrafficSpikeScenario(BaseScenario):
         return False
 
 
+class UserRateSurgeScenario(BaseScenario):
+    """Sudden surge in transaction volume for a specific authenticated principal (PRINCIPAL_RATE_SURGE)."""
+    def __init__(
+        self,
+        principal_name: str = "sale",
+        multiplier: float = 3.2,
+        start_hour: float = 19.0,
+        end_hour: float = 20.2,
+        enabled: bool = True,
+        windows: Optional[List[Tuple[float, float]]] = None
+    ):
+        super().__init__(
+            name=f"user_rate_surge_{principal_name}",
+            category="user_intelligence",
+            description=f"Transaction rate surge ({multiplier}x) for principal {principal_name}",
+            start_hour=start_hour,
+            end_hour=end_hour,
+            enabled=enabled,
+            windows=windows
+        )
+        self.principal_name = principal_name
+        self.multiplier = multiplier
+
+    def is_principal_boosted(self, p_name: str, ctx: AnomalyContext) -> float:
+        if self.is_active(ctx) and p_name == self.principal_name:
+            return self.multiplier
+        return 1.0
+
+    def mutate_transaction(self, tx: Dict[str, Any], ctx: AnomalyContext) -> bool:
+        if not self.is_active(ctx):
+            return False
+        if tx.get("principal_name") == self.principal_name:
+            self.injection_count += 1
+            return True
+        return False
+
+
 class TrafficDropScenario(BaseScenario):
     """Collapse in request volume (Detector 2: traffic_drop)."""
     def __init__(
@@ -689,6 +726,32 @@ class AnomalyManager:
 
             arch_drift = ArchitecturalDriftScenario(start_hour=max(bootstrap_cutoff_hour, total_hours - 24.0), end_hour=total_hours)
             novel_op = NovelOperationScenario(start_hour=max(bootstrap_cutoff_hour, total_hours - 20.0), end_hour=total_hours)
+
+            surge_sale_windows = [
+                (total_hours * 0.35, total_hours * 0.35 + 2.0),
+                (total_hours - 10.0, total_hours - 8.5),
+            ]
+            surge_cm2_windows = [
+                (total_hours * 0.55, total_hours * 0.55 + 2.0),
+                (total_hours - 7.0, total_hours - 5.5),
+            ]
+            surge_vtp_windows = [
+                (total_hours - 4.5, total_hours - 3.5),
+            ]
+            user_rate_surge_sale = UserRateSurgeScenario("sale", multiplier=3.2, start_hour=surge_sale_windows[0][0], end_hour=surge_sale_windows[-1][1], windows=surge_sale_windows)
+            user_rate_surge_cm2 = UserRateSurgeScenario("cm2.0", multiplier=2.2, start_hour=surge_cm2_windows[0][0], end_hour=surge_cm2_windows[-1][1], windows=surge_cm2_windows)
+            user_rate_surge_vtp = UserRateSurgeScenario("vtp", multiplier=2.5, start_hour=surge_vtp_windows[0][0], end_hour=surge_vtp_windows[-1][1], windows=surge_vtp_windows)
+        elif total_hours < 24.0:
+            traffic_spike = TrafficSpikeScenario(start_hour=0.40 * total_hours, end_hour=0.48 * total_hours)
+            traffic_drop = TrafficDropScenario(start_hour=0.60 * total_hours, end_hour=0.66 * total_hours)
+            latency_blowout = TailLatencyBlowoutScenario(start_hour=0.52 * total_hours, end_hour=0.58 * total_hours)
+            cascading_failure = CascadingFailureScenario(start_hour=0.76 * total_hours, end_hour=0.84 * total_hours)
+            arch_drift = ArchitecturalDriftScenario(start_hour=max(bootstrap_cutoff_hour, 0.70 * total_hours), end_hour=total_hours)
+            novel_op = NovelOperationScenario(start_hour=max(bootstrap_cutoff_hour, 0.72 * total_hours), end_hour=total_hours)
+
+            user_rate_surge_sale = UserRateSurgeScenario("sale", multiplier=3.2, start_hour=max(bootstrap_cutoff_hour, 0.78 * total_hours), end_hour=min(total_hours, 0.85 * total_hours))
+            user_rate_surge_cm2 = UserRateSurgeScenario("cm2.0", multiplier=2.2, start_hour=max(bootstrap_cutoff_hour, 0.86 * total_hours), end_hour=min(total_hours, 0.92 * total_hours))
+            user_rate_surge_vtp = UserRateSurgeScenario("vtp", multiplier=2.5, start_hour=max(bootstrap_cutoff_hour, 0.92 * total_hours), end_hour=min(total_hours, 0.98 * total_hours))
         else:
             traffic_spike = TrafficSpikeScenario(start_hour=10.0, end_hour=11.5)
             traffic_drop = TrafficDropScenario(start_hour=15.5, end_hour=16.5)
@@ -696,6 +759,10 @@ class AnomalyManager:
             cascading_failure = CascadingFailureScenario(start_hour=19.0, end_hour=20.5)
             arch_drift = ArchitecturalDriftScenario(start_hour=15.0, end_hour=total_hours)
             novel_op = NovelOperationScenario(start_hour=16.0, end_hour=total_hours)
+
+            user_rate_surge_sale = UserRateSurgeScenario("sale", multiplier=3.2, start_hour=19.0, end_hour=20.2)
+            user_rate_surge_cm2 = UserRateSurgeScenario("cm2.0", multiplier=2.2, start_hour=20.5, end_hour=21.8)
+            user_rate_surge_vtp = UserRateSurgeScenario("vtp", multiplier=2.5, start_hour=22.0, end_hour=23.0)
 
         # User Intelligence Behavioral Changes
         # All start after bootstrap cutoff and remain active through total_hours
@@ -740,6 +807,9 @@ class AnomalyManager:
             cascading_failure,
             arch_drift,
             novel_op,
+            user_rate_surge_sale,
+            user_rate_surge_cm2,
+            user_rate_surge_vtp,
             user_first_seen,
             user_new_caller,
             user_new_source_ip,
@@ -764,6 +834,15 @@ class AnomalyManager:
                 if mult > 1.0:
                     return mult
         return 1.0
+
+    def get_principal_traffic_multiplier(self, principal_name: str, ctx: AnomalyContext) -> float:
+        mult = 1.0
+        for s in self.scenarios:
+            if isinstance(s, UserRateSurgeScenario):
+                m = s.is_principal_boosted(principal_name, ctx)
+                if m > mult:
+                    mult = m
+        return mult
 
     def should_drop_transaction(self, service_name: str, ctx: AnomalyContext) -> bool:
         for s in self.scenarios:

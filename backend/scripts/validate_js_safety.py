@@ -43,9 +43,15 @@ def check_payload(endpoint, data):
     elif endpoint.startswith("/api/v1/users/"):
         if not isinstance(data, dict):
             errors.append("Expected dict for user profile response")
-        elif endpoint.endswith(("/timeline", "/changes", "/callers", "/sources", "/targets", "/operations")):
+        elif endpoint.endswith(("/timeline", "/changes", "/callers", "/sources", "/targets", "/operations", "/investigations")):
             if not isinstance(data.get("items"), list):
                 errors.append("Expected 'items' array for user detail collection")
+        elif endpoint.endswith("/performance"):
+            if not isinstance(data.get("series"), list):
+                errors.append("Expected 'series' array for user performance")
+        elif endpoint.endswith("/topology"):
+            if not isinstance(data.get("edges"), list):
+                errors.append("Expected 'edges' array for user topology")
         elif not data.get("principal_name"):
             errors.append("User profile missing principal_name")
 

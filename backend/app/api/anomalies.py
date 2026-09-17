@@ -1,5 +1,6 @@
 """Expose explainable anomaly lifecycle views without coupling clients to storage details."""
 from __future__ import annotations
+import time
 from datetime import datetime, timezone
 from typing import Any, Dict, Literal, Optional
 from pydantic import BaseModel
@@ -86,7 +87,7 @@ def format_anomaly(r: Dict[str, Any]) -> Dict[str, Any]:
     b_val = r.get("baseline_value")
     c_val = r.get("current_value") if r.get("current_value") is not None else 0.0
     anom_type = r.get("anomaly_type") or "anomaly"
-    unit = "ms" if "latency" in anom_type.lower() else ("%" if "error" in anom_type.lower() else "req/s")
+    unit = "ms" if "latency" in anom_type.lower() else ("%" if "error" in anom_type.lower() else "tps")
     abs_diff = round(abs(c_val - b_val), 2) if b_val is not None else round(float(c_val), 2)
     pct_change = r.get("delta_percentage")
     if pct_change is None and b_val and b_val > 0:
@@ -104,10 +105,12 @@ def format_anomaly(r: Dict[str, Any]) -> Dict[str, Any]:
     r.pop("instance", None)
     r.pop("contributors", None)
     r["trace_ids"] = r.get("trace_ids") or []
-    r["limitations"] = r.get("limitations") or []
     r["percent_change"] = pct_change
     r["absolute_difference"] = abs_diff
     r["unit"] = unit
+    meta = r.get("metadata") or {}
+    r["occurrences"] = int(meta.get("occurrences", 1)) if isinstance(meta, dict) else 1
+    r["duration_mins"] = float(meta.get("duration_mins", 0)) if isinstance(meta, dict) else 0.0
     _enrich_evidence(r)
     r["explanation"] = r["reasons"][0]["text"] if r.get("reasons") and len(r["reasons"]) > 0 and isinstance(r["reasons"][0], dict) and "text" in r["reasons"][0] else anom_type
     return r
@@ -183,7 +186,7 @@ async def get_anomaly_detail(anomaly_id: int) -> Dict[str, Any]:
     b_val = item.get("baseline_value")
     c_val = item.get("current_value") if item.get("current_value") is not None else 0.0
     anom_type = item.get("anomaly_type") or "anomaly"
-    unit = "ms" if "latency" in anom_type.lower() else ("%" if "error" in anom_type.lower() else "req/s")
+    unit = "ms" if "latency" in anom_type.lower() else ("%" if "error" in anom_type.lower() else "tps")
     abs_diff = round(abs(c_val - b_val), 2) if b_val is not None else round(float(c_val), 2)
     pct_change = item.get("delta_percentage")
     if pct_change is None and b_val and b_val > 0:
