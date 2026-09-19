@@ -128,6 +128,63 @@ export function UserOverviewTab() {
         </div>
       </div>
 
+      {/* Changes and relationship evidence stay above the charts so the page answers what changed first. */}
+      <div className="grid gap-4 lg:grid-cols-2">
+        <div className="rounded-xl border border-rose-500/25 bg-[#171329] p-4 shadow-sm">
+          <div className="mb-3 flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <GitCompareArrows size={15} className="text-rose-300" />
+              <h3 className="text-xs font-bold uppercase tracking-wider text-white">{t("Important Changes")}</h3>
+            </div>
+            <button onClick={() => nav(`/users/${encodeURIComponent(principal)}/changes`)} className="text-[11px] font-semibold text-cyan-300 hover:underline">
+              {t("View all changes")}
+            </button>
+          </div>
+          {recentChanges.length ? (
+            <div className="space-y-2">
+              {recentChanges.slice(0, 3).map((change, index) => (
+                <div key={`${change.id || change.change_type}-${index}`} className="flex items-start justify-between gap-3 rounded-lg border border-white/10 bg-white/[0.03] px-3 py-2">
+                  <div className="min-w-0">
+                    <div className="flex items-center gap-2">
+                      <span className={`rounded px-1.5 py-0.5 text-[9px] font-bold uppercase ${change.severity === "high" ? "bg-rose-500/20 text-rose-200" : change.severity === "medium" ? "bg-amber-500/20 text-amber-200" : "bg-cyan-500/20 text-cyan-200"}`}>
+                        {change.change_type || t("Changed")}
+                      </span>
+                      <span className="truncate font-mono text-[11px] font-semibold text-white">{change.new_value || change.target_service || change.caller_service || t("Shift observed")}</span>
+                    </div>
+                    <p className="mt-1 truncate text-[11px] text-[#cbd5e1]">{change.reason?.what_changed || change.reason?.compared_with || t("Deviates from established historical behavior")}</p>
+                  </div>
+                  <span className="shrink-0 font-mono text-[10px] text-[#94a3b8]">{change.detected_at ? new Date(change.detected_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : "—"}</span>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <div className="py-4 text-center text-xs text-emerald-300">{t("No behavioral deviations detected. User operating strictly within baseline.")}</div>
+          )}
+        </div>
+
+        <div className="rounded-xl border border-violet-500/25 bg-[#171329] p-4 shadow-sm">
+          <div className="mb-3 flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <Network size={15} className="text-violet-300" />
+              <h3 className="text-xs font-bold uppercase tracking-wider text-white">{t("New Relationships")}</h3>
+            </div>
+            <button onClick={() => nav(`/users/${encodeURIComponent(principal)}/topology`)} className="text-[11px] font-semibold text-violet-300 hover:underline">{t("Explore topology")}</button>
+          </div>
+          <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
+            {[
+              [t("Callers"), newCallers.length, "text-violet-300"],
+              [t("Targets"), newTargets.length, "text-cyan-300"],
+              [t("Operations"), newOperations.length, "text-emerald-300"],
+            ].map(([label, value, color]) => (
+              <div key={String(label)} className="rounded-lg border border-white/10 bg-white/[0.03] px-3 py-2">
+                <div className="text-[10px] uppercase tracking-wider text-[#94a3b8]">{label}</div>
+                <div className={`mt-1 font-mono text-lg font-bold ${color}`}>{value}</div>
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+
       {/* 8 Lightweight KPI Cards */}
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-4 lg:grid-cols-4">
         {/* 1. Requests */}
@@ -536,8 +593,8 @@ export function UserOverviewTab() {
         </div>
       </div>
 
-      {/* Mini change timeline & Tiny new relationships summary */}
-      <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+      {/* Detailed change markup is retained for compatibility but the compact summary above is the primary view. */}
+      <div className="hidden">
         {/* Left: Mini Change Timeline */}
         <div className="rounded-xl border border-[rgba(255,255,255,0.18)] bg-[#171329] p-4 shadow-md">
           <div className="mb-3 flex items-center justify-between">

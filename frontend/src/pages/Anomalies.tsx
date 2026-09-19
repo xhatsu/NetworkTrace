@@ -92,7 +92,7 @@ function isUserAnomaly(a: Anomaly): boolean {
   return false;
 }
 
-export function AnomaliesPage() {
+function LegacyAnomaliesPage() {
   const { filters } = useFilters();
   const { t } = useI18n();
   const nav = useNavigate();
@@ -952,6 +952,142 @@ export function AnomaliesPage() {
           </div>
         </Panel>
       )}
+    </Page>
+  );
+}
+
+type IncidentEpisode = {
+  groupKey: string;
+  master: Anomaly;
+  items: Anomaly[];
+  occurrences: number;
+  earliest: number;
+  latest: number;
+  maxSeverity: string;
+  maxScore: number;
+};
+
+function anomalyTime(value: unknown) {
+  const raw = Number(value || 0);
+  if (!raw) return 0;
+  return raw > 10_000_000_000 ? raw : raw * 1000;
+}
+
+function anomalyLabel(a: Anomaly) {
+  return a.operation || a.anomaly_type?.replaceAll("_", " ") || "Anomaly";
+}
+
+function anomalySubject(a: Anomaly) {
+  return a.target_service || a.caller_service || a.entity_id || "Service";
+}
+
+function anomalySeverityClass(severity?: string) {
+  if (severity === "critical") return "border-rose-500/40 bg-rose-500/15 text-rose-300";
+  if (severity === "high") return "border-amber-500/40 bg-amber-500/15 text-amber-300";
+  if (severity === "medium") return "border-violet-500/40 bg-violet-500/15 text-violet-300";
+  return "border-cyan-500/40 bg-cyan-500/15 text-cyan-300";
+}
+
+function AnomalyValue({ anomaly, latestValue }: { anomaly: Anomaly; latestValue?: number }) {
+  const current = Number(latestValue ?? anomaly.current_value ?? 0);
+  const baseline = anomaly.baseline_value;
+  const pct = anomaly.percent_change ?? anomaly.delta_percentage;
+  return (
+    <div className="font-mono text-[11px] tabular-nums">
+      <div className="font-semibold text-[#f5f3fa]">{n(current)} {anomaly.unit || ""}</div>
+      <div className="text-[10px] text-[#94a3b8]">{baseline == null ? "—" : `${n(baseline)} ${anomaly.unit || ""} baseline`}</div>
+      {pct != null && <div className={Number(pct) > 0 ? "text-rose-300" : "text-emerald-300"}>{Number(pct) > 0 ? "+" : ""}{Number(pct).toFixed(0)}%</div>}
+    </div>
+  );
+}
+
+export function AnomaliesPage() {
+  const { filters } = useFilters();
+  const { t } = useI18n();
+  const nav = useNavigate();
+  const [status, setStatus] = useState("");
+  const [perspective, setPerspective] = useState<"all" | "user" | "service">("all");
+  const [search, setSearch] = useState("");
+  const [grouped, setGrouped] = useState(true);
+  const [expandedGroupKeys, setExpandedGroupKeys] = useState<Set<string>>(new Set());
+  const qs = queryString(filters, status ? { status } : {});
+  const q = useQuery({ queryKey: ["anomalies", qs], queryFn: () => api<{ items: Anomaly[] }>(`/api/v1/anomalies?${qs}`) });
+  const rawItems = q.data?.items || [];
+
+  const filteredItems = useMemo(() => rawItems.filter((item) => {
+    if (perspective === "user" && !isUserAnomaly(item)) return false;
+    if (perspective === "service" && isUserAnomaly(item)) return false;
+    if (!search.trim()) return true;
+    const query = search.toLowerCase().trim();
+    return [item.principal_name, item.source_ip, item.entity_id, item.target_service, item.caller_service, item.operation, item.anomaly_type]
+      .filter(Boolean).some((value) => String(value).toLowerCase().includes(query))
+      || (item.blast_radius?.affected_principals || []).some((principal) => getEntityName(principal).toLowerCase().includes(query));
+  }), [rawItems, perspective, search]);
+
+  const groupedEpisodes = useMemo<IncidentEpisode[]>(() => {
+    if (!grouped) return [];
+    const map = new Map<string, IncidentEpisode>();
+    const rank: Record<string, number> = { critical: 4, high: 3, medium: 2, low: 1 };
+    filteredItems.forEach((item) => {
+      const key = `${anomalySubject(item)}::${item.operation || "all"}::${item.anomaly_type || "anomaly"}::${item.principal_name || ""}`;
+      const first = anomalyTime(item.first_detected_ms || item.first_seen || item.detected_at);
+      const last = anomalyTime(item.last_detected_ms || item.last_seen || item.detected_at || first);
+      const existing = map.get(key);
+      if (!existing) {
+        map.set(key, { groupKey: key, master: item, items: [item], occurrences: Number(item.occurrences) || 1, earliest: first, latest: last, maxSeverity: item.severity || "medium", maxScore: Number(item.score || 0) });
+        return;
+      }
+      existing.items.push(item);
+      existing.occurrences += Number(item.occurrences) || 1;
+      existing.earliest = Math.min(existing.earliest || first, first || existing.earliest);
+      existing.latest = Math.max(existing.latest, last);
+      if ((rank[item.severity || "medium"] || 2) > (rank[existing.maxSeverity] || 2) || Number(item.score || 0) > existing.maxScore) {
+        existing.master = item;
+        existing.maxSeverity = item.severity || existing.maxSeverity;
+        existing.maxScore = Math.max(existing.maxScore, Number(item.score || 0));
+      }
+    });
+    return Array.from(map.values()).sort((a, b) => ((rank[b.maxSeverity] || 2) - (rank[a.maxSeverity] || 2)) || b.latest - a.latest);
+  }, [filteredItems, grouped]);
+
+  const userCount = filteredItems.filter(isUserAnomaly).length;
+  const severityCount = filteredItems.filter((item) => item.severity === "critical" || item.severity === "high").length;
+  const toggleGroupExpand = (key: string) => setExpandedGroupKeys((previous) => {
+    const next = new Set(previous);
+    if (next.has(key)) next.delete(key); else next.add(key);
+    return next;
+  });
+  const statusFilters = [
+    { label: t("All"), value: "", active: "bg-violet-600 text-white" },
+    { label: t("Open"), value: "open", active: "bg-rose-600 text-white" },
+    { label: t("Acknowledge"), value: "acknowledged", active: "bg-amber-600 text-white" },
+    { label: t("Resolved"), value: "resolved", active: "bg-emerald-600 text-white" },
+    { label: t("Suppressed"), value: "suppressed", active: "bg-purple-600 text-white" },
+  ];
+
+  return (
+    <Page eyebrow={t("Changes")} title={t("Anomalies & Investigations")} description={t("What changed, where it happened, and the identity or service context supporting the finding.")} actions={<div className="flex items-center rounded-lg border border-[rgba(255,255,255,0.14)] bg-white/[0.04] p-0.5">{statusFilters.map((item) => <button key={item.value} onClick={() => setStatus(item.value)} className={`rounded-md px-2.5 py-1 text-xs font-medium transition ${status === item.value ? `${item.active} font-semibold shadow-sm` : "text-[#c4bdd9] hover:text-white"}`}>{item.label}</button>)}</div>}>
+      <div className="mb-4 grid grid-cols-2 gap-3 md:grid-cols-4">
+        <MetricCard label={t("Findings")} value={String(filteredItems.length)} detail={grouped ? `${groupedEpisodes.length} ${t("incident episodes")}` : t("Raw findings mode")} accent="purple" />
+        <MetricCard label={t("High impact")} value={String(severityCount)} detail={t("High and critical findings")} tone={severityCount ? "bad" : "good"} accent="rose" />
+        <MetricCard label={t("Identity context")} value={String(userCount)} detail={t("Findings with user or IP attribution")} accent="cyan" />
+        <MetricCard label={t("Status") } value={status ? t(status) : t("All")} detail={t("Use filters to focus triage")} accent="amber" />
+      </div>
+
+      <div className="mb-4 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-[rgba(255,255,255,0.08)] bg-[#161424] p-3">
+        <div className="flex flex-wrap items-center gap-2">
+          <div className="flex items-center gap-1.5 rounded-lg border border-[rgba(255,255,255,0.1)] bg-white/[0.02] p-1"><button onClick={() => setPerspective("all")} className={`rounded-md px-3 py-1.5 text-xs font-semibold ${perspective === "all" ? "bg-violet-600 text-white" : "text-[#c4bdd9] hover:text-white"}`}>{t("All Findings")} <span className="ml-1 rounded-full bg-white/20 px-1.5 text-[10px]">{rawItems.length}</span></button><button onClick={() => setPerspective("user")} className={`rounded-md px-3 py-1.5 text-xs font-semibold ${perspective === "user" ? "bg-cyan-500 text-slate-950" : "text-cyan-300 hover:text-white"}`}>{t("User & Identity Centric")} <span className="ml-1 rounded-full bg-cyan-500/20 px-1.5 text-[10px]">{userCount}</span></button><button onClick={() => setPerspective("service")} className={`rounded-md px-3 py-1.5 text-xs font-semibold ${perspective === "service" ? "bg-indigo-600 text-white" : "text-[#c4bdd9] hover:text-white"}`}>{t("Service & Fleet")} <span className="ml-1 rounded-full bg-white/20 px-1.5 text-[10px]">{rawItems.length - userCount}</span></button></div>
+          <div className="flex items-center rounded-lg border border-[rgba(255,255,255,0.14)] bg-white/[0.04] p-0.5 text-xs"><button type="button" onClick={() => setGrouped(true)} className={`inline-flex items-center gap-1.5 rounded-md px-2.5 py-1 font-medium ${grouped ? "bg-cyan-500/20 text-cyan-200 border border-cyan-500/40 font-bold" : "text-[#c4bdd9] hover:text-white"}`}><Layers size={12} />{t("Group Incidents", "Gom nhóm Sự cố")} {grouped && <span className="rounded-full bg-cyan-500/30 px-1.5 text-[10px]">{groupedEpisodes.length}</span>}</button><button type="button" onClick={() => setGrouped(false)} className={`inline-flex items-center gap-1.5 rounded-md px-2.5 py-1 font-medium ${!grouped ? "bg-violet-600 text-white font-bold" : "text-[#c4bdd9] hover:text-white"}`}><SlidersHorizontal size={12} />{t("Raw Findings", "Tất cả Bản ghi")} <span className="rounded-full bg-white/20 px-1.5 text-[10px]">{filteredItems.length}</span></button></div>
+        </div>
+        <div className="relative min-w-[240px] max-w-md flex-1"><Search size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-[#8b949e]" /><input type="text" value={search} onChange={(event) => setSearch(event.target.value)} placeholder={t("Search user, service, or trace ID...")} className="w-full rounded-lg border border-[rgba(255,255,255,0.12)] bg-black/40 py-1.5 pl-8 pr-3 text-xs text-white placeholder-[#8b949e] outline-none focus:border-cyan-500" /></div>
+      </div>
+
+      {q.isLoading ? <Loading /> : q.error ? <ErrorState message={q.error.message} /> : <Panel title={grouped ? `${groupedEpisodes.length} ${t("Incident Episodes", "Sự cố Bất thường")}` : `${filteredItems.length} ${t("Detected Findings")}`} subtitle={grouped ? t("Grouped incidents emphasize what changed and when; expand a row for its time slices.") : t("Raw findings preserve each detector result for detailed investigation.")}>
+        <div className="overflow-auto scrollbar"><table className="w-full min-w-[980px]"><thead><tr className="border-b border-[rgba(255,255,255,0.06)] bg-white/[0.01]">{[t("Severity"), t("What changed"), t("Identity"), t("Service / API"), t("Current vs baseline"), t("Since / duration"), t("Status"), t("Actions")].map((heading) => <th key={heading} className="table-head px-4 py-2.5 text-left">{heading}</th>)}</tr></thead><tbody>
+          {grouped ? groupedEpisodes.map((episode) => { const a = episode.master; const expanded = expandedGroupKeys.has(episode.groupKey); const start = new Date(episode.earliest || anomalyTime(a.detected_at) || Date.now()); const end = new Date(episode.latest || anomalyTime(a.detected_at) || Date.now()); const duration = Math.max(0, Math.round((episode.latest - episode.earliest) / 60000)); return <Fragment key={episode.groupKey}><tr onClick={() => nav(`/anomalies/${a.id}?${queryString(filters)}`)} className="cursor-pointer border-b border-[rgba(255,255,255,0.08)] transition hover:bg-white/[0.05]"><td className="px-4 py-3"><span className={`rounded border px-2 py-0.5 text-[10px] font-semibold uppercase ${anomalySeverityClass(episode.maxSeverity)}`}>{t(episode.maxSeverity, episode.maxSeverity)}</span></td><td className="px-4 py-3"><div className="text-xs font-semibold text-[#f5f3fa]">{anomalyLabel(a)}</div><div className="mt-1 text-[10px] text-[#94a3b8]">{episode.occurrences > 1 ? `${episode.occurrences}x ${t("recurring")}` : t("Detected change")}</div></td><td className="px-4 py-3 font-mono">{a.principal_name && a.principal_name !== "unknown" ? <button type="button" onClick={(event) => { event.stopPropagation(); nav(`/users/${encodeURIComponent(a.principal_name!)}`); }} className="inline-flex items-center gap-1 text-xs font-semibold text-cyan-300 hover:text-white"><User size={12} />{a.principal_name}</button> : a.source_ip ? <span className="text-xs text-cyan-300">{a.source_ip}</span> : <span className="text-[11px] italic text-[#766e92]">{t("Unattributed")}</span>}</td><td className="px-4 py-3 font-mono"><div className="text-xs font-semibold text-[#f5f3fa]">{anomalySubject(a)}</div>{a.operation && <div className="mt-1 max-w-[190px] truncate text-[10px] text-violet-300">{a.operation}</div>}</td><td className="px-4 py-3"><AnomalyValue anomaly={a} latestValue={a.current_value} /></td><td className="px-4 py-3 font-mono text-[10px] text-[#c4bdd9]"><div>{start.toLocaleDateString()}</div><div>{start.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}{duration > 0 && ` → ${end.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}`}</div>{duration > 0 && <span className="text-cyan-300">{duration >= 60 ? `${(duration / 60).toFixed(1)}h` : `${duration}m`}</span>}</td><td className="px-4 py-3"><span className="rounded border border-white/10 bg-white/[0.04] px-2 py-0.5 text-[10px] font-semibold uppercase text-[#c4bdd9]">{t(a.status || "open")}</span></td><td className="px-4 py-3 text-right"><div className="inline-flex items-center gap-1.5">{episode.items.length > 1 && <button type="button" onClick={(event) => { event.stopPropagation(); toggleGroupExpand(episode.groupKey); }} className="inline-flex items-center gap-1 rounded border border-cyan-500/40 bg-cyan-500/10 px-2 py-1 text-[10px] font-semibold text-cyan-200">{expanded ? <ChevronDown size={11} /> : <ChevronRight size={11} />}{episode.items.length} {t("slices")}</button>}<button type="button" onClick={(event) => { event.stopPropagation(); nav(`/anomalies/${a.id}?${queryString(filters)}`); }} className="inline-flex items-center gap-1 rounded border border-white/10 bg-white/[0.03] px-2 py-1 text-[11px] text-[#c4bdd9] hover:text-white">{t("Inspect")} <ArrowRight size={11} /></button></div></td></tr>{expanded && <tr className="border-b border-white/[0.04] bg-cyan-500/[0.03]"><td colSpan={8} className="px-5 py-3"><div className="grid gap-2 md:grid-cols-2">{episode.items.map((slice, index) => <button key={`${slice.id}-${index}`} onClick={() => nav(`/anomalies/${slice.id}?${queryString(filters)}`)} className="flex items-center justify-between rounded border border-cyan-500/20 px-3 py-2 text-left text-[11px] hover:bg-cyan-500/[0.07]"><span className="font-mono text-[#c4bdd9]">#{index + 1} · {new Date(anomalyTime(slice.last_detected_ms || slice.detected_at) || Date.now()).toLocaleString()}</span><span className="text-cyan-300">{t("Inspect Slice")} <ArrowRight size={10} className="inline" /></span></button>)}</div></td></tr>}</Fragment>; }) : filteredItems.map((a) => { const when = new Date(anomalyTime(a.last_detected_ms || a.detected_at) || Date.now()); return <tr key={a.id} onClick={() => nav(`/anomalies/${a.id}?${queryString(filters)}`)} className="cursor-pointer border-b border-[rgba(255,255,255,0.08)] transition hover:bg-white/[0.05]"><td className="px-4 py-3"><span className={`rounded border px-2 py-0.5 text-[10px] font-semibold uppercase ${anomalySeverityClass(a.severity)}`}>{t(a.severity, a.severity)}</span></td><td className="px-4 py-3"><div className="text-xs font-semibold text-[#f5f3fa]">{anomalyLabel(a)}</div><div className="mt-1 text-[10px] text-[#94a3b8]">{a.explanation || t("Detected change")}</div></td><td className="px-4 py-3 font-mono">{a.principal_name && a.principal_name !== "unknown" ? <button type="button" onClick={(event) => { event.stopPropagation(); nav(`/users/${encodeURIComponent(a.principal_name!)}`); }} className="inline-flex items-center gap-1 text-xs font-semibold text-cyan-300 hover:text-white"><User size={12} />{a.principal_name}</button> : a.source_ip ? <span className="text-xs text-cyan-300">{a.source_ip}</span> : <span className="text-[11px] italic text-[#766e92]">{t("Unattributed")}</span>}</td><td className="px-4 py-3 font-mono"><div className="text-xs font-semibold text-[#f5f3fa]">{anomalySubject(a)}</div>{a.operation && <div className="mt-1 max-w-[190px] truncate text-[10px] text-violet-300">{a.operation}</div>}</td><td className="px-4 py-3"><AnomalyValue anomaly={a} /></td><td className="px-4 py-3 font-mono text-[10px] text-[#c4bdd9]">{when.toLocaleDateString()}<span className="block">{when.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</span></td><td className="px-4 py-3"><span className="rounded border border-white/10 bg-white/[0.04] px-2 py-0.5 text-[10px] font-semibold uppercase text-[#c4bdd9]">{t(a.status || "open")}</span></td><td className="px-4 py-3 text-right"><button type="button" onClick={(event) => { event.stopPropagation(); nav(`/anomalies/${a.id}?${queryString(filters)}`); }} className="inline-flex items-center gap-1 rounded border border-white/10 bg-white/[0.03] px-2 py-1 text-[11px] text-[#c4bdd9] hover:text-white">{t("Inspect")} <ArrowRight size={11} /></button></td></tr>; })}
+          {!filteredItems.length && <tr><td colSpan={8} className="p-12 text-center text-xs text-[#c4bdd9]">{t("No anomalies detected matching this perspective and search filter.")}</td></tr>}
+        </tbody></table></div>
+      </Panel>}
     </Page>
   );
 }

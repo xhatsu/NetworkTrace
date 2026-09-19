@@ -26,13 +26,13 @@ import {
   Sparkles,
   Sun,
   Users,
-  UserX,
   X,
 } from "lucide-react";
 import type { Filters } from "./types";
 import { useI18n, LanguageSwitcher } from "./i18n";
 import { OverviewPage } from "./pages/Overview";
 import { ServicesPage, ServiceDetailPage } from "./pages/Services";
+import { ApiDetailPage } from "./pages/ApiDetail";
 import { AnomaliesPage, AnomalyDetailPage } from "./pages/Anomalies";
 import { TracesPage, TraceDetailPage } from "./pages/Traces";
 import { AgentStatsPage, AgentNodeDetailPage } from "./pages/AgentStats";
@@ -93,7 +93,7 @@ function SideNav() {
   const location = useLocation();
   const groups = [
     {
-      label: "Operational Views",
+      label: "Overview",
       accent: "cyan" as const,
       headerClass: "text-cyan-400 font-bold",
       dotClass: "bg-cyan-400",
@@ -104,13 +104,10 @@ function SideNav() {
       hoverClass: "hover:bg-cyan-500/10 hover:text-white",
       links: [
         [LayoutDashboard, "Dashboard", "/dashboard"],
-        [Users, "Users Hub", "/users"],
-        [UserX, "Unknown Users", "/unknown-users"],
-        [AlertOctagon, "Anomalies", "/anomalies"],
       ],
     },
     {
-      label: "Observability",
+      label: "Monitor",
       accent: "violet" as const,
       headerClass: "text-violet-400 font-bold",
       dotClass: "bg-violet-400",
@@ -121,12 +118,27 @@ function SideNav() {
       hoverClass: "hover:bg-violet-500/10 hover:text-white",
       links: [
         [Boxes, "Services", "/services"],
-        [Network, "Service Topology", "/topology"],
+        [Users, "Users", "/users"],
+        [Network, "Topology", "/topology"],
+        [AlertOctagon, "Changes", "/anomalies"],
+      ],
+    },
+    {
+      label: "Investigate",
+      accent: "sky" as const,
+      headerClass: "text-sky-400 font-bold",
+      dotClass: "bg-sky-400",
+      activeClass: "bg-sky-500/20 border border-sky-400/60 text-white font-bold",
+      pillClass: "bg-sky-400",
+      iconActiveClass: "text-sky-300",
+      focusRing: "focus-visible:ring-sky-400",
+      hoverClass: "hover:bg-sky-500/10 hover:text-white",
+      links: [
         [Activity, "Traces", "/traces"],
       ],
     },
     {
-      label: "Infrastructure",
+      label: "System",
       accent: "amber" as const,
       headerClass: "text-amber-400 font-bold",
       dotClass: "bg-amber-400",
@@ -251,10 +263,6 @@ function FilterBar() {
         <div className="flex items-center gap-3">
           <div className="flex items-center gap-2">
             <span className="text-sm font-bold tracking-tight text-white">TraceScope</span>
-            <span className="inline-flex items-center gap-1.5 rounded-full border border-emerald-500/50 bg-emerald-500/15 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider text-emerald-300">
-              <span className="h-1.5 w-1.5 rounded-full bg-emerald-400" />
-              {t("Live Estate")}
-            </span>
           </div>
 
           {/* Quick Global Search */}
@@ -262,7 +270,7 @@ function FilterBar() {
             <Search className="absolute left-2.5 top-2 text-[#94a3b8]" size={13} />
             <input
               type="text"
-              placeholder={t("Search user, service, or trace ID...")}
+              placeholder={t("Search service, API, user, or trace ID...")}
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
               className="h-7 w-64 rounded-lg border border-[#262838] bg-[#141622] pl-8 pr-3 text-xs text-white placeholder:text-[#94a3b8] focus:border-cyan-400 focus:outline-none"
@@ -270,10 +278,10 @@ function FilterBar() {
           </form>
         </div>
 
-        {/* Fixed operational window: five-minute buckets over seven days. */}
+        {/* Fixed operational window: current five-minute bucket with seven-day history. */}
         <div className="flex items-center gap-2 rounded-lg border border-cyan-500/35 bg-cyan-500/10 px-3 py-1.5 text-xs font-semibold text-cyan-300">
           <Clock size={13} />
-          <span>{t("5m buckets · 7d window", "Bucket 5 phút · cửa sổ 7 ngày")}</span>
+          <span>{t("Current: 5m · History: 7d", "Hiện tại: 5 phút · Lịch sử: 7 ngày")}</span>
         </div>
 
         {/* Right: Dimension filters & controls */}
@@ -318,7 +326,7 @@ function FilterBar() {
 
           <div className="chip font-mono text-[10px] font-bold text-emerald-300 border-emerald-500/40 bg-emerald-500/15">
             <Radio size={11} className="text-emerald-400" />
-            <span>{t("Live · 5m rollup", "Trực tiếp · rollup 5 phút")}</span>
+            <span>{t("Live", "Trực tiếp")}</span>
           </div>
         </div>
       </div>
@@ -374,7 +382,7 @@ function Layout() {
         </header>
         <div key={location.pathname} className={location.pathname === "/topology" ? "h-[calc(100dvh-94px)]" : "min-h-[calc(100vh-60px)] pb-12"}>
           <Routes>
-            <Route path="/" element={<Navigate to="/users" replace />} />
+            <Route path="/" element={<Navigate to="/dashboard" replace />} />
             <Route path="/overview" element={<OverviewPage />} />
             <Route path="/dashboard" element={<OverviewPage />} />
 
@@ -390,7 +398,7 @@ function Layout() {
               <Route path="investigations" element={<UserInvestigationsTab />} />
             </Route>
 
-            {/* Unknown & Unauthenticated Users Traffic Monitor */}
+            {/* Unattributed Traffic Monitor; kept as a secondary Users-area route */}
             <Route path="/unknown-users" element={<UnknownUsersPage />} />
             <Route path="/users/-anonymous-" element={<Navigate to="/unknown-users" replace />} />
             <Route path="/users/unknown" element={<Navigate to="/unknown-users" replace />} />
@@ -401,6 +409,7 @@ function Layout() {
             <Route path="/topology" element={<InteractiveTopologyPage />} />
             <Route path="/services" element={<ServicesPage />} />
             <Route path="/services/:name" element={<ServiceDetailPage />} />
+            <Route path="/services/:name/apis/:api" element={<ApiDetailPage />} />
             <Route path="/traces" element={<TracesPage />} />
             <Route path="/traces/:id" element={<TraceDetailPage />} />
             <Route path="/agent-stats" element={<AgentStatsPage />} />

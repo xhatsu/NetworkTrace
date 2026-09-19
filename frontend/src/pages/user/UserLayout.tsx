@@ -85,28 +85,28 @@ export function UserLayout() {
   const tabs = [
     {
       id: "overview",
-      label: t("1. User Overview"),
+      label: t("Overview"),
       question: t("Is this user behaving normally right now?"),
       path: `/users/${encodeURIComponent(principal)}/overview`,
       icon: Radio,
     },
     {
       id: "activity",
-      label: t("2. Activity & Performance"),
+      label: t("Activity"),
       question: t("How has traffic & performance changed?"),
       path: `/users/${encodeURIComponent(principal)}/activity`,
       icon: Activity,
     },
     {
       id: "topology",
-      label: t("3. Access & Topology"),
+      label: t("Access"),
       question: t("What systems is this user touching?"),
       path: `/users/${encodeURIComponent(principal)}/topology`,
       icon: Network,
     },
     {
       id: "changes",
-      label: t("4. Behavior Changes"),
+      label: t("Changes"),
       question: t("What is different from normal behavior?"),
       path: `/users/${encodeURIComponent(principal)}/changes`,
       icon: GitCompareArrows,
@@ -114,14 +114,14 @@ export function UserLayout() {
     },
     {
       id: "patterns",
-      label: t("5. Usage Patterns"),
+      label: t("Patterns"),
       question: t("When and how does this user normally operate?"),
       path: `/users/${encodeURIComponent(principal)}/patterns`,
       icon: Layers,
     },
     {
       id: "investigations",
-      label: t("6. Anomalies & Investigations"),
+      label: t("Investigations"),
       question: t("What needs investigation?"),
       path: `/users/${encodeURIComponent(principal)}/investigations`,
       icon: AlertOctagon,
@@ -217,11 +217,11 @@ export function UserLayout() {
       </div>
 
       {/* User Identity Banner */}
-      <div className="mb-6 rounded-2xl border border-[#262838] bg-[#141622] p-5 shadow-sm">
+      <div className="mb-5 rounded-xl border border-[#262838] bg-[#141622] p-4 shadow-sm">
         <div className="flex flex-wrap items-center justify-between gap-4">
           <div className="flex items-center gap-4">
-            <div className="relative grid h-14 w-14 place-items-center rounded-2xl bg-indigo-600 border border-indigo-400/40 text-white">
-              <User size={28} strokeWidth={2.2} />
+            <div className="relative grid h-11 w-11 place-items-center rounded-xl bg-indigo-600 border border-indigo-400/40 text-white">
+              <User size={22} strokeWidth={2.2} />
               <span
                 className={`absolute -bottom-1 -right-1 h-4 w-4 rounded-full border-2 border-[#141622] ${
                   profile?.status === "Active"
@@ -234,15 +234,15 @@ export function UserLayout() {
             <div>
               <div className="flex flex-wrap items-center gap-2.5">
                 <span className="text-[11px] font-bold uppercase tracking-[0.15em] text-cyan-400">
-                  Account Entity
+                  User identity
                 </span>
                 <span className="text-white/30">•</span>
                 <span className="text-xs font-semibold text-[#cbd5e1]">
                   Environment: <strong className="text-white">{profile?.environment || "production"}</strong>
                 </span>
               </div>
-              <h1 className="mt-0.5 text-2xl md:text-3xl font-bold tracking-tight text-white font-mono">
-                USER: <span className="text-cyan-300">{principal}</span>
+              <h1 className="mt-0.5 text-xl md:text-2xl font-bold tracking-tight text-white font-mono">
+                <span className="text-cyan-300">{principal}</span>
               </h1>
             </div>
           </div>
@@ -344,8 +344,8 @@ export function UserLayout() {
         </div>
       </div>
 
-      {/* 6 User-Centric Navigation Tabs */}
-      <div className="mb-6 flex flex-wrap items-stretch gap-2 border-b border-[rgba(255,255,255,0.16)] pb-2">
+      {/* Compact user investigation navigation */}
+      <div className="mb-5 flex flex-wrap gap-1.5 border-b border-[rgba(255,255,255,0.16)] pb-2">
         {tabs.map((tab) => {
           const Icon = tab.icon;
           const isActive = currentTab === tab.id;
@@ -353,7 +353,7 @@ export function UserLayout() {
             <NavLink
               key={tab.id}
               to={tab.path}
-              className={`group flex flex-1 min-w-[200px] flex-col justify-between rounded-xl border p-3 transition-colors duration-150 ${
+              className={`group flex min-w-[118px] flex-1 items-center justify-center gap-2 rounded-lg border px-3 py-2 transition-colors duration-150 ${
                 isActive
                   ? "border-cyan-500 bg-[#191c2b] text-white"
                   : "border-[#262838] bg-[#141622] text-[#cbd5e1] hover:border-[#383b52] hover:bg-[#181a28] hover:text-white"
@@ -362,7 +362,7 @@ export function UserLayout() {
               <div className="flex items-center justify-between gap-2">
                 <div className="flex items-center gap-2">
                   <div
-                    className={`grid h-7 w-7 place-items-center rounded-lg ${
+                    className={`grid h-6 w-6 shrink-0 place-items-center rounded-md ${
                       isActive
                         ? "bg-cyan-500 text-black font-bold"
                         : "bg-white/10 text-cyan-300 group-hover:bg-white/20"
@@ -370,7 +370,7 @@ export function UserLayout() {
                   >
                     <Icon size={16} strokeWidth={2.4} />
                   </div>
-                  <span className="text-xs font-bold tracking-tight">{tab.label}</span>
+                  <span className="text-[11px] font-bold tracking-tight">{tab.label}</span>
                 </div>
 
                 {tab.badge !== undefined && tab.badge > 0 && (
@@ -382,9 +382,6 @@ export function UserLayout() {
                   <span className="flex h-2 w-2 rounded-full bg-rose-400 animate-ping" />
                 )}
               </div>
-              <p className="mt-2 text-[11px] font-medium text-[#94a3b8] group-hover:text-[#cbd5e1] line-clamp-1">
-                “{tab.question}”
-              </p>
             </NavLink>
           );
         })}

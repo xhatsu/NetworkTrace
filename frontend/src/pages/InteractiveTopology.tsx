@@ -3,6 +3,7 @@ import { useQueries, useQuery } from "@tanstack/react-query";
 import {
   ChevronDown,
   ChevronRight,
+  Clock,
   GitBranch,
   Maximize2,
   Network,
@@ -200,9 +201,25 @@ function NodeIcon({ type }: { type: TopologyNode["type"] }) {
 }
 
 function MetricStrip({ metrics, vertical = false }: { metrics: Metrics; vertical?: boolean }) {
-  const metricClass = vertical ? "flex items-center justify-between gap-3 border-t border-[#292d3e] py-1 first:border-t-0" : "";
+  if (vertical) {
+    const status = metrics.error_rate > 0.05
+      ? `${pct(metrics.error_rate)} errors`
+      : metrics.change?.status || "normal";
+    return (
+      <div className="flex items-center justify-between gap-3 pt-1">
+        <div>
+          <div className="label">TPS</div>
+          <div className="font-mono text-sm text-sky-300">{n(metrics.tps, 2)}</div>
+        </div>
+        <span className={`rounded border px-1.5 py-0.5 text-[9px] font-bold uppercase ${metrics.error_rate > 0.05 ? "border-rose-400/50 text-rose-300" : statusTone(metrics.change?.status)}`}>
+          {status}
+        </span>
+      </div>
+    );
+  }
+  const metricClass = "";
   return (
-    <div className={vertical ? "flex flex-col" : "grid grid-cols-2 gap-2 sm:grid-cols-4"}>
+    <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
       <div className={metricClass}><div className="label">TPS</div><div className="font-mono text-sm text-sky-300">{n(metrics.tps, 2)}</div></div>
       <div className={metricClass}><div className="label">p95</div><div className="font-mono text-sm text-violet-300">{n(metrics.p95_latency_ms, 1)} ms</div></div>
       <div className={metricClass}><div className="label">Errors</div><div className={`font-mono text-sm ${metrics.error_rate > 0.05 ? "text-rose-300" : "text-emerald-300"}`}>{pct(metrics.error_rate)}</div></div>
@@ -550,6 +567,7 @@ export function InteractiveTopologyPage() {
   const [searchTerm, setSearchTerm] = useState("");
   const [debouncedSearch, setDebouncedSearch] = useState("");
   const [searchOpen, setSearchOpen] = useState(false);
+  const [timelineOpen, setTimelineOpen] = useState(false);
   const [pendingTravel, setPendingTravel] = useState<TopologyNode | null>(null);
   const [focusRequest, setFocusRequest] = useState<{ nodeId: string; token: number }>();
   const sliderEndMs = useMemo(() => Math.floor(Date.now() / FIVE_MINUTE_MS) * FIVE_MINUTE_MS, []);
@@ -752,7 +770,10 @@ export function InteractiveTopologyPage() {
         </div>
 
         <div className="pointer-events-auto flex flex-wrap items-start justify-end gap-2">
-          <div className="w-[min(520px,46vw)] rounded-lg border border-[#303449] bg-[#141622] px-3 py-2" data-testid="topology-time-slider-panel">
+          <button type="button" className="btn bg-[#141622]" onClick={() => setTimelineOpen((open) => !open)}>
+            <Clock size={13} /> {timelineOpen ? t("Hide history") : t("History")}
+          </button>
+          <div className={timelineOpen ? "w-[min(520px,46vw)] rounded-lg border border-[#303449] bg-[#141622] px-3 py-2" : "hidden"} data-testid="topology-time-slider-panel">
             <div className="mb-1.5 flex items-center justify-between gap-3 text-[10px] uppercase tracking-wider text-[#94a3b8]">
               <span>{t("Seven-day timeline")}</span>
               <strong className="normal-case tracking-normal text-cyan-300" data-testid="topology-selected-window">{sliderTimeFormatter.format(previewStartMs)} – {sliderTimeFormatter.format(previewEndMs)}</strong>

@@ -90,7 +90,7 @@ export function UserDirectory() {
               className="flex items-center gap-1.5 rounded-full border border-amber-500/40 bg-amber-500/15 px-3 py-1 text-xs font-mono font-bold text-amber-300 hover:bg-amber-500/25 hover:text-white transition-all"
             >
               <UserX size={13} />
-              <span>{t("Unknown Users & Public Traffic", "Lưu Lượng Chưa Định Danh")}</span>
+              <span>{t("Unattributed Traffic", "Lưu Lượng Chưa Định Danh")}</span>
             </Link>
             <span className="rounded-full border border-emerald-500/40 bg-emerald-500/15 px-3 py-1 text-xs font-mono font-bold text-emerald-300">
               ● {t("Active Behavioral Engine", "Động Cơ Hành Vi Đang Hoạt Động")}

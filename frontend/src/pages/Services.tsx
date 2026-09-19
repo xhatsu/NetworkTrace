@@ -12,14 +12,8 @@ import {
 } from "recharts";
 import {
   ArrowLeft,
-  ArrowRight,
   Box,
-  CheckCircle2,
-  Clock,
-  Layers,
   Search,
-  Server,
-  Workflow,
 } from "lucide-react";
 import { api, queryString } from "../api";
 import {
@@ -43,6 +37,14 @@ type Service = {
   service_module: string;
   first_seen_ms: number;
   last_seen_ms: number;
+  total_requests?: number;
+  total_errors?: number;
+  error_rate?: number;
+  p95_latency?: number;
+  operations_count?: number;
+  principal_count?: number;
+  rps?: number;
+  anomaly_status?: string;
 };
 
 export function ServicesPage() {
@@ -56,7 +58,7 @@ export function ServicesPage() {
     queryKey: ["services", qs],
     queryFn: () => api<{ items: Service[] }>(`/api/v1/services?${qs}&limit=500`),
   });
-  const filteredItems = (query.data?.items || []).filter((s) => {
+  const filteredItems = [...(query.data?.items || [])].filter((s) => {
     if (!filterQuery) return true;
     const q = filterQuery.toLowerCase();
     return (
@@ -65,6 +67,11 @@ export function ServicesPage() {
       (s.service_module || "").toLowerCase().includes(q) ||
       (s.environment || "").toLowerCase().includes(q)
     );
+  }).sort((a, b) => {
+    const aNeedsAttention = a.anomaly_status === "abnormal" || Number(a.error_rate || 0) >= 0.05;
+    const bNeedsAttention = b.anomaly_status === "abnormal" || Number(b.error_rate || 0) >= 0.05;
+    if (aNeedsAttention !== bNeedsAttention) return aNeedsAttention ? -1 : 1;
+    return Number(b.total_requests || 0) - Number(a.total_requests || 0);
   });
 
   return (
@@ -89,69 +96,53 @@ export function ServicesPage() {
       ) : (
         <Panel
           title={`${filteredItems.length} ${t("Across")} ${query.data?.items.length || 0} ${t("Registered Services")}`}
-          subtitle={t("Click any service to inspect latency tails, operation breakdown, and callers")}
+          subtitle={t("Operational health and observed traffic by service")}
         >
-          <div className="grid gap-2.5 p-4 sm:grid-cols-2 lg:grid-cols-2">
-            {filteredItems.map((s, idx) => {
-              const iconColors = [
-                "border-sky-500/35 bg-sky-500/15 text-sky-300",
-                "border-violet-500/35 bg-violet-500/15 text-violet-300",
-                "border-emerald-500/35 bg-emerald-500/15 text-emerald-300",
-                "border-amber-500/35 bg-amber-500/15 text-amber-300",
-                "border-rose-500/35 bg-rose-500/15 text-rose-300",
-                "border-cyan-500/35 bg-cyan-500/15 text-cyan-300",
-                "border-indigo-500/35 bg-indigo-500/15 text-indigo-300",
-              ];
-              const iconStyle = iconColors[idx % iconColors.length];
-              const envStyle = s.environment === "production"
-                ? "border-emerald-500/35 bg-emerald-500/15 text-emerald-300"
-                : "border-amber-500/35 bg-amber-500/15 text-amber-300";
-
-              return (
-                <button
-                  key={s.name}
-                  onClick={() =>
-                    nav(
-                      `/services/${encodeURIComponent(s.name)}?${queryString(filters)}`,
-                    )
-                  }
-                  className="group relative flex flex-col justify-between rounded-lg border border-[rgba(255,255,255,0.12)] bg-[#1a172a] p-4 text-left transition hover:border-violet-500/50 hover:bg-[#221e38] hover:shadow-panel"
-                >
-                  <div>
-                    <div className="flex items-start justify-between gap-2">
-                      <div className="flex items-center gap-2.5 min-w-0">
-                        <div className={`grid h-8 w-8 shrink-0 place-items-center rounded-lg border ${iconStyle}`}>
-                          <Box size={16} />
-                        </div>
-                        <div className="min-w-0">
-                          <div className="truncate text-xs font-semibold text-[#f5f3fa] group-hover:text-cyan-300 transition">
-                            {s.name}
-                          </div>
-                          <div className="truncate text-[10px] text-violet-300/80">
-                            {s.service_group} · {s.service_module}
-                          </div>
-                        </div>
-                      </div>
-                      <ArrowRight size={13} className="text-[#9e96b8] group-hover:text-white transition group-hover:translate-x-0.5" />
-                    </div>
-                  </div>
-
-                  <div className="mt-4 flex items-center justify-between border-t border-[rgba(255,255,255,0.08)] pt-3 text-[10px]">
-                    <span className={`rounded border px-1.5 py-0.5 font-mono ${envStyle}`}>
-                      {t(s.environment, s.environment)}
-                    </span>
-                    <span className="text-[#c4bdd9]">
-                      {t("Active")} {new Date(s.last_seen_ms).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                    </span>
-                  </div>
-                </button>
-              );
-            })}
-            {filteredItems.length === 0 && (
-              <div className="col-span-full py-12 text-center text-xs text-[#c4bdd9]">
-                {t("No services match")} "{filterQuery}".
-              </div>
-            )}
+          <div className="overflow-x-auto scrollbar">
+            <table className="w-full min-w-[980px] text-left text-xs">
+              <thead>
+                <tr>
+                  {[t("Service"), t("Environment"), t("Group / Module"), t("TPS"), t("P95"), t("Error"), t("APIs"), t("Users"), t("Health"), t("Last Seen")].map((heading) => (
+                    <th className="table-head px-4 py-3" key={heading}>{heading}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {filteredItems.map((s) => {
+                  const abnormal = s.anomaly_status === "abnormal" || Number(s.error_rate || 0) >= 0.05;
+                  return (
+                    <tr
+                      key={s.name}
+                      onClick={() => nav(`/services/${encodeURIComponent(s.name)}?${queryString(filters)}`)}
+                      className="cursor-pointer border-t border-[rgba(255,255,255,0.08)] transition hover:bg-white/[0.04]"
+                    >
+                      <td className="px-4 py-3">
+                        <span className="inline-flex items-center gap-2 font-semibold text-[#f5f3fa] hover:text-cyan-300">
+                          <Box size={14} className="text-violet-300" />
+                          {s.name}
+                        </span>
+                      </td>
+                      <td className="px-4 text-[#c4bdd9]">{t(s.environment, s.environment)}</td>
+                      <td className="px-4 text-[#c4bdd9]">{s.service_group} · {s.service_module}</td>
+                      <td className="px-4 font-mono tabular-nums text-sky-300">{n(Number(s.rps || 0), 2)}</td>
+                      <td className="px-4 font-mono tabular-nums text-violet-300">{n(Number(s.p95_latency || 0), 1)} ms</td>
+                      <td className={`px-4 font-mono tabular-nums ${Number(s.error_rate || 0) >= 0.05 ? "text-rose-300" : "text-emerald-300"}`}>{pct(Number(s.error_rate || 0))}</td>
+                      <td className="px-4 font-mono tabular-nums text-[#c4bdd9]">{n(Number(s.operations_count || 0), 0)}</td>
+                      <td className="px-4 font-mono tabular-nums text-[#c4bdd9]">{n(Number(s.principal_count || 0), 0)}</td>
+                      <td className="px-4">
+                        <span className={`rounded border px-2 py-1 text-[10px] font-semibold uppercase ${abnormal ? "border-rose-500/40 bg-rose-500/10 text-rose-300" : "border-emerald-500/40 bg-emerald-500/10 text-emerald-300"}`}>
+                          {abnormal ? t("Needs attention") : t("Healthy")}
+                        </span>
+                      </td>
+                      <td className="px-4 text-[#c4bdd9]">{s.last_seen_ms ? new Date(s.last_seen_ms).toLocaleString() : "—"}</td>
+                    </tr>
+                  );
+                })}
+                {filteredItems.length === 0 && (
+                  <tr><td colSpan={10} className="px-4 py-12 text-center text-xs text-[#c4bdd9]">{t("No services match")} "{filterQuery}".</td></tr>
+                )}
+              </tbody>
+            </table>
           </div>
         </Panel>
       )}
@@ -288,6 +279,15 @@ export function ServiceDetailPage() {
   const accounts = d.accounts || ((d as any).principals || []).map((p: any) => ({ username: p.name, requests: p.requests }));
   const instances = d.instances || [];
   const series = normalizeServiceSeries(d.series);
+  const attentionOperations = [...operations]
+    .sort((a, b) => {
+      const failureDelta = (b.failure_rate || 0) - (a.failure_rate || 0);
+      if (Math.abs(failureDelta) > 0.0001) return failureDelta;
+      const latencyDelta = (b.p95_ms || 0) - (a.p95_ms || 0);
+      if (Math.abs(latencyDelta) > 0.1) return latencyDelta;
+      return (b.requests || 0) - (a.requests || 0);
+    })
+    .slice(0, 5);
 
   const durationSec = Math.max(
     1,
@@ -333,6 +333,34 @@ export function ServiceDetailPage() {
           tone={fail > 0.02 ? "bad" : "normal"}
         />
       </div>
+
+      <Panel
+        title={t("Needs attention")}
+        subtitle={t("Operations prioritized by failure rate, latency tail, and observed volume")}
+        className="mt-4"
+      >
+        {attentionOperations.length ? (
+          <div className="divide-y divide-[rgba(255,255,255,0.06)]">
+            {attentionOperations.map((operation) => (
+              <button
+                type="button"
+                key={`attention-${operation.name}`}
+                onClick={() => nav(`/services/${encodeURIComponent(name)}/apis/${encodeURIComponent(operation.name)}?${qs}`)}
+                className="flex w-full items-center justify-between gap-4 px-4 py-3 text-left transition hover:bg-white/[0.04]"
+              >
+                <span className="min-w-0 truncate font-medium text-[#f5f3fa]">{operation.name}</span>
+                <span className="flex shrink-0 items-center gap-4 font-mono text-[11px] tabular-nums">
+                  <span className={operation.failure_rate > 0.02 ? "text-rose-300" : "text-emerald-300"}>{pct(operation.failure_rate || 0)} {t("error")}</span>
+                  <span className={operation.p95_ms > 500 ? "text-amber-300" : "text-violet-300"}>{n(operation.p95_ms || 0, 1)} ms p95</span>
+                  <span className="text-[#c4bdd9]">{n(operation.requests || 0, 0)} {t("requests")}</span>
+                </span>
+              </button>
+            ))}
+          </div>
+        ) : (
+          <div className="p-6 text-center text-xs text-[#c4bdd9]">{t("No operations observed in this window")}</div>
+        )}
+      </Panel>
 
       <div className="mt-4 grid gap-4 lg:grid-cols-2">
         <Panel
@@ -400,9 +428,10 @@ export function ServiceDetailPage() {
               {operations.map((o) => (
                 <tr
                   key={o.name}
-                  className="border-b border-[rgba(255,255,255,0.04)] transition hover:bg-white/[0.03]"
+                  onClick={() => nav(`/services/${encodeURIComponent(name)}/apis/${encodeURIComponent(o.name)}?${qs}`)}
+                  className="cursor-pointer border-b border-[rgba(255,255,255,0.04)] transition hover:bg-white/[0.03]"
                 >
-                  <td className="px-4 py-3 text-xs font-medium text-[#f0f3f6]">{o.name}</td>
+                  <td className="px-4 py-3 text-xs font-medium text-cyan-300">{o.name}</td>
                   <td className="px-4 font-mono text-xs tabular-nums text-[#c9d1d9]">{n(o.requests)}</td>
                   <td className="px-4 font-mono text-xs tabular-nums text-[#8b949e]">{n(o.p50_ms || 0)} ms</td>
                   <td className="px-4 font-mono text-xs tabular-nums text-[#818cf8]">{n(o.p95_ms || 0)} ms</td>

@@ -97,16 +97,16 @@ export function UnknownUsersPage() {
             <div>
               <div className="flex items-center gap-2">
                 <h1 className="text-xl font-extrabold tracking-tight text-white">
-                  {t("Unauthenticated Traffic Monitor", "Lưu Lượng Chưa Định Danh (-anonymous- / Unknown)")}
+                  {t("Unattributed Request Monitor", "Giám Sát Lưu Lượng Chưa Định Danh")}
                 </h1>
                 <span className="rounded-md border border-amber-500/40 bg-amber-500/15 px-2 py-0.5 text-[10px] font-mono font-bold uppercase text-amber-300">
-                  {t("Public / Anonymous", "Lưu Lượng Công Cộng")}
+                  {t("Identity Attribution", "Định Danh Nguồn Gọi")}
                 </span>
               </div>
               <p className="text-xs text-[#94a3b8] mt-1 max-w-3xl leading-relaxed">
                 {t(
-                  "Comprehensive analytics for unauthenticated transactions, public traffic, IP probing, and authorization violations.",
-                  "Phân tích toàn diện các giao dịch không có chứng thực, lưu lượng công cộng, quét thăm dò IP và các vi phạm xác thực (401/403)."
+                  "Analytics for requests without a resolved caller identity, including public traffic and authentication failures (401/403).",
+                  "Phân tích các giao dịch chưa xác định được danh tính nguồn gọi, gồm lưu lượng công cộng và lỗi xác thực (401/403)."
                 )}
               </p>
             </div>
@@ -129,7 +129,7 @@ export function UnknownUsersPage() {
         {/* Card 1: Traffic Volume */}
         <div className="rounded-xl border border-[#262838] bg-[#141624] p-4 shadow-sm flex flex-col justify-between">
           <div className="flex items-center justify-between text-xs text-[#94a3b8] mb-2 font-mono uppercase">
-            <span>{t("Unauthenticated Volume", "Tổng Lưu Lượng Chưa Xác Thực")}</span>
+            <span>{t("Unattributed Volume", "Tổng Lưu Lượng Chưa Định Danh")}</span>
             <Radio size={16} className="text-cyan-400" />
           </div>
           <div className="flex items-baseline justify-between">
@@ -214,7 +214,7 @@ export function UnknownUsersPage() {
           <div>
             <h2 className="text-sm font-bold uppercase tracking-wider text-white flex items-center gap-2">
               <Activity size={16} className="text-cyan-400" />
-              <span>{t("Unauthenticated Traffic & Error Dynamics", "Biến Động Lưu Lượng Chưa Xác Thực & Tỷ Lệ Lỗi")}</span>
+              <span>{t("Unattributed Traffic & Error Dynamics", "Biến Động Lưu Lượng Chưa Định Danh & Tỷ Lệ Lỗi")}</span>
             </h2>
             <p className="text-xs text-[#cbd5e1] mt-0.5">
               {t("Transaction throughput (RPS) correlated with authentication failures (401/403) and 5xx server errors", "Thông lượng giao dịch (RPS) tương quan với lỗi xác thực (401/403) và lỗi máy chủ 5xx")}
@@ -426,10 +426,10 @@ export function UnknownUsersPage() {
           <div>
             <h2 className="text-sm font-bold uppercase tracking-wider text-white flex items-center gap-2">
               <Lock size={16} className="text-amber-400" />
-              <span>{t("Recent Unauthenticated Traces", "Danh Sách Giao Dịch Gần Nhất")}</span>
+              <span>{t("Recent Unattributed Traces", "Danh Sách Giao Dịch Chưa Định Danh Gần Nhất")}</span>
             </h2>
             <p className="text-xs text-[#cbd5e1] mt-0.5">
-              {t("Inspect raw unauthenticated transactions, verify response statuses, and jump directly to trace waterfall", "Xem chi tiết các giao dịch không chứng thực, kiểm tra mã phản hồi và xem waterfall span")}
+              {t("Inspect raw unattributed requests, verify response statuses, and jump directly to trace waterfall", "Xem chi tiết các giao dịch chưa định danh, kiểm tra mã phản hồi và xem waterfall span")}
             </p>
           </div>
 
@@ -494,7 +494,7 @@ export function UnknownUsersPage() {
               {filteredTraces.length === 0 ? (
                 <tr>
                   <td colSpan={7} className="py-10 text-center text-xs text-[#94a3b8]">
-                    {t("No matching unauthenticated traces found", "Không tìm thấy giao dịch chưa xác thực phù hợp")}
+                    {t("No matching unattributed traces found", "Không tìm thấy giao dịch chưa định danh phù hợp")}
                   </td>
                 </tr>
               ) : (

@@ -229,7 +229,7 @@ html[data-theme="light"] .scrollbar::-webkit-scrollbar-thumb:hover { background:
   }
   
   .label {
-    @apply text-[11px] font-bold uppercase tracking-[.1em] text-[#94a3b8];
+    @apply text-xs font-bold uppercase tracking-[.1em] text-[#94a3b8];
   }
   
   .btn {
@@ -273,6 +273,6 @@ html[data-theme="light"] .scrollbar::-webkit-scrollbar-thumb:hover { background:
   }
   
   .table-head {
-    @apply text-left text-[11px] font-bold uppercase tracking-[.1em] text-[#94a3b8];
+    @apply text-left text-xs font-bold uppercase tracking-[.1em] text-[#94a3b8];
   }
 }
