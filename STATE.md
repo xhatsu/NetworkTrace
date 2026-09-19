@@ -25,10 +25,11 @@
   - Cluster IP: `10.105.101.253:8123` (auto-detected by `backend/config.py:_detect_clickhouse_host`)
   - Status: Healthy, open, serving ClickHouse 24.8.14.39.
     - `tracescope` (Application database): **2,000,000 traces, 43,616 1m buckets, 14,538 5m buckets, 1,304 baselines, 915 anomaly events, 399 principal behavioral change events, 11 enterprise system accounts + unauthenticated traffic** (Populated via `backend/scripts/generate_2m_enterprise_dataset.py` with authentic telecom/enterprise system accounts: `telecom_sync_svc`, `vtp_express_dispatch`, `pos_checkout_terminal`, `billing_reconcile_job`, `interbank_settlement_gw`, `partner_sales_broker`, `enterprise_b2b_gateway`, `secops_monitor_agent`, `sysadmin_deploy_agent`, `mobile_miniapp_gateway`, `audit_compliance_worker`, and `unknown` / unauthenticated public traffic across `apex-*` microservices).
-    - **2,000,000 Trace Storage Benchmark**:
-      - ClickHouse `tracescope.traces`: **427.14 MiB compressed** (1,485.33 MiB uncompressed, **3.48x compression ratio**).
-      - Elasticsearch `apm-7.17.24-transaction`: **542.79 MiB**, 2,000,334 documents (~284.5 bytes/doc).
-      - Combined Storage: **969.93 MiB** total telemetry footprint across both systems. Linux root filesystem has 33.3 GiB free (23.7%).
+    - **2,000,000 Trace Storage Benchmark & ClickHouse Trace Cleanup**:
+      - ClickHouse `tracescope.traces`: **Truncated & cleaned to 0 rows / 0 bytes** (Freed ~388 MiB of redundant disk storage; active application database size dropped from 413.5 MiB to **25.8 MiB**).
+      - Derived Aggregates Retained: All 1m & 5m `metric_buckets` (488k rows), `topology_*` (274k rows), `principals`, `baseline_metrics`, `anomaly_events`, and `incidents` remain 100% intact and serving all dashboards.
+      - Elasticsearch Datastore (`tmp-elk-svc` on `:32073`): **542.79 MiB**, 2,014,679 transaction documents retained permanently as the primary system of record for distributed waterfall traces and deep audits.
+      - Storage Invariant: ClickHouse only needs raw trace data during the worker aggregation stage to produce compact rollups, topology edges, and baselines; once processed, ClickHouse does not require past raw traces, as trace search and span waterfall queries resolve transparently against Elasticsearch via `ElasticsearchTraceRepository`.
     - **TPS Surge Detection & Anomalies Page Visibility**:
       - Detected and verified all 3 principal-level TPS surge cases requested:
         1. `pos_checkout_terminal` on `apex-order-service`: baseline 0.15 -> current 0.59 TPS (+293.3%, Anomaly ID `879726895952825`).
@@ -1142,3 +1143,47 @@ Exposes standard Prometheus 0.0.4 text exposition format at `GET /metrics` on po
 - Search covers the full seven-day slider horizon through `GET /api/v1/topology/search?q=...&window=7d`.
 - Selecting a result jumps to its latest observed five-minute slice, expands the required service/API path, centers the result card, and opens its floating detail inspector.
 - Selected cards use the highest node z-layer, and selected relationship wires are rendered last within the SVG relationship layer.
+
+## Canonical Service/API/User/IP paths (2026-09-19)
+
+- The operational hierarchy is now explicitly `Service -> API -> User -> IP`, with the symmetric identity investigation path `User -> Service -> API -> IP`; there is no System entity layer.
+- Added principal-first topology APIs:
+  - `GET /api/v1/topology/principals/{principal}/services`
+  - `GET /api/v1/topology/principals/{principal}/services/{service}/apis`
+  - Existing `GET /api/v1/topology/principals/{principal}/ips?service=...&api=...` supplies the final IP evidence step.
+- The User topology page now reads these shared five-minute relationship facts directly. IPs are progressive detail and are not rendered as default topology nodes.
+- No duplicate `user_service`/`service_user` tables were added. Both directions query the existing `topology_principal_edges_5m` and `topology_principal_ip_5m` rollups.
+- The sidebar taxonomy no longer labels the primary group as a System level; it is presented as Operational Views.
+- Focused topology repository/API contract tests pass **5/5**, and frontend TypeScript validation passes.
+
+## Persistent light theme (2026-09-19)
+
+- Added a global light/dark toggle to the header. Dark remains the default for existing installations.
+- Preference persists in browser `localStorage` as `tracescope-theme`; switching updates the document theme, browser color-scheme, and theme-color metadata.
+- Existing pages inherit a light palette through root CSS remapping, including surfaces, typography, controls, borders, tables, scrollbars, and chart grid/axis styling.
+
+## Operational dashboard refresh (2026-09-19)
+
+- Rebuilt `/` and `/dashboard` as a four-card operational dashboard: Total TPS, Total Users, Total Services plus unhealthy count, and Abnormal Changes.
+- Added three chart regions: five-minute TPS line, five-minute HTTP 5xx percentage line, and horizontal stacked abnormal-score groups.
+- Bandwidth is a visible placeholder because the existing `/api/v1/dashboard/series` payload has no byte fields. Backend/API changes were intentionally skipped per request.
+- Removed global 1h/3h/6h/24h/7d/30d selectors; the frontend defaults to a seven-day window represented in five-minute buckets. Anomaly detail and user topology selectors were fixed to the same seven-day view.
+
+## Service detail chart fix (2026-09-19)
+
+- Fixed `/services/:name` trend charts, including `/services/apex-edge-gateway`, by adapting the existing rollup response fields (`bucket_start`, `requests`, `errors`, `latency_p95`) to the frontend chart series fields.
+- Added numeric timestamp handling, TPS/error fallbacks, and a visible empty-window state. No backend/API changes were required.
+- Frontend production build passed after the fix.
+
+## Separate service trend charts (2026-09-19)
+
+- `/services/:name` now shows two independent line charts: service TPS and p95 latency. Independent charts prevent the latency scale from flattening the TPS signal.
+- The existing normalized series and API contract remain unchanged; this is a frontend-only presentation change.
+- Frontend lint and production build passed.
+
+## Card row layout (2026-09-19)
+
+- Standardized larger panel/card grids across frontend pages to display at most two cards per row, with additional cards wrapping below.
+- Compact KPI/info cards use four cards per desktop row, including the dashboard's Total TPS card and its three companion cards.
+- Updated service inventory, unknown-user attribution, topology IP cards, user intelligence summaries, agent stats, traces, anomalies, and user workspace metric ribbons; functional topology/table layouts remain intact.
+- Frontend lint and production build passed.

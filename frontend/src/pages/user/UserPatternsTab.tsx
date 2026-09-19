@@ -596,7 +596,7 @@ export function UserPatternsTab() {
               </ResponsiveContainer>
             </div>
 
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-2.5 pt-2 border-t border-white/5">
+            <div className="grid grid-cols-2 md:grid-cols-2 gap-2.5 pt-2 border-t border-white/5">
               {barData.map((d) => (
                 <div
                   key={d.name}
@@ -716,7 +716,7 @@ export function UserPatternsTab() {
             {t("No persistent source IP baseline established yet.", "Chưa có baseline địa chỉ IP nguồn cố định.")}
           </div>
         ) : (
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-2 gap-3">
             {(profile?.normal?.sources || []).map((src: any) => (
               <div
                 key={src.value}

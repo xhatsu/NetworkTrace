@@ -969,7 +969,7 @@ export function AnomalyDetailPage() {
   const client = useQueryClient();
 
   const { filters } = useFilters();
-  const [timeHorizon, setTimeHorizon] = useState<"1h" | "6h" | "24h" | "7d">("24h");
+  const [timeHorizon] = useState<"7d">("7d");
 
   const q = useQuery({
     queryKey: ["anomaly", id, timeHorizon],
@@ -1256,7 +1256,7 @@ export function AnomalyDetailPage() {
         />
       </div>
 
-      <div className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-5">
+      <div className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-4">
         <MetricCard
           label={t("Current Value")}
           value={`${n(a.current_value || 0)} ${a.unit || ""}`}
@@ -1297,24 +1297,7 @@ export function AnomalyDetailPage() {
         title={t("Incident Time Horizon: Actual vs Expected Baseline")}
         subtitle={`${t("Shaded region highlights the anomaly window")} (${a.unit || "metrics"})`}
         className="mt-4"
-        action={
-          <div className="flex items-center gap-1 bg-[#0c0d14] p-1 rounded-lg border border-[#262838]">
-            {(["1h", "6h", "24h", "7d"] as const).map((h) => (
-              <button
-                key={h}
-                type="button"
-                onClick={() => setTimeHorizon(h)}
-                className={`px-2.5 py-1 text-xs font-medium rounded transition-colors ${
-                  timeHorizon === h
-                    ? "bg-[#6366f1] text-white shadow-sm"
-                    : "text-[#9e97b3] hover:text-[#f5f3fa] hover:bg-white/[0.04]"
-                }`}
-              >
-                {h}
-              </button>
-            ))}
-          </div>
-        }
+        action={<span className="rounded-lg border border-[#262838] bg-[#0c0d14] px-3 py-1.5 text-[11px] font-semibold text-[#94a3b8]">{t("5-minute buckets · 7-day history")}</span>}
       >
         <div className="h-[340px] p-4">
           <ResponsiveContainer>
@@ -1324,13 +1307,7 @@ export function AnomalyDetailPage() {
                 dataKey="timestamp_ms"
                 tickFormatter={(v) => {
                   const d = new Date(v);
-                  if (timeHorizon === "24h" || timeHorizon === "7d") {
-                    return `${d.getMonth() + 1}/${d.getDate()} ${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
-                  }
-                  return d.toLocaleTimeString([], {
-                    hour: "2-digit",
-                    minute: "2-digit",
-                  });
+                  return `${d.getMonth() + 1}/${d.getDate()} ${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
                 }}
                 stroke="#766e92"
               />

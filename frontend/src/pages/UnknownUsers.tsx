@@ -290,7 +290,7 @@ export function UnknownUsersPage() {
       </div>
 
       {/* SECTION 3: THREE-COLUMN ATTRIBUTION BREAKDOWN */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
         {/* Column 1: Top Target Services */}
         <div className="rounded-2xl border border-[#262838] bg-[#141624] p-4 shadow-sm flex flex-col justify-between">
           <div>

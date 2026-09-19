@@ -520,7 +520,7 @@ function DetailPanel({
               <div className="grid h-24 place-items-center rounded border border-dashed border-[#303449] bg-[#10121c] px-4 text-center text-xs text-[#64748b]" data-testid="topology-tps-empty">{t("No TPS samples are available for this object and time window.")}</div>
             )}
           </section>
-          <div className="grid grid-cols-2 gap-2">
+          <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
             <MetricCard label="Requests" value={n(metrics.request_count, 0)} detail="Observed in window" accent="sky" />
             <MetricCard label="p99 latency" value={`${n(metrics.p99_latency_ms, 1)} ms`} detail={`p50 ${n(metrics.p50_latency_ms, 1)} ms`} accent="violet" />
             <MetricCard label="Request bytes" value={n(metrics.request_bytes, 0)} detail={`${n(metrics.average_request_bytes, 0)} avg/request`} accent="cyan" />

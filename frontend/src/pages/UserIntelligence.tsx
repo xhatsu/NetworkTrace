@@ -101,7 +101,7 @@ export function UsersPage() {
   const chartRows = (users.data?.items || []).slice(0, 12).map((u, i) => ({ label: u.principal_name.length > 13 ? `${u.principal_name.slice(0, 12)}…` : u.principal_name, requests: u.total_requests, rank: i + 1 }));
   const behaviorMix = Object.entries((users.data?.items || []).reduce<Record<string, number>>((acc, u) => { const key = u.behavior_level || "Unknown"; acc[key] = (acc[key] || 0) + 1; return acc; }, {})).map(([name, value]) => ({ name, value }));
   return <Page eyebrow="User Intelligence" title="Observed Principals" description="TraceScope monitors observed application principals extracted from WSSE across callers, source addresses, target services, and operations. Authentication success is recorded when explicit evidence is available. Behavioral Change Events describe deviations from established observations; they do not independently establish credential compromise.">
-    <div className="grid grid-cols-2 gap-3 lg:grid-cols-7">
+    <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
       {[["Observed",summary.data?.observed_principals,"all known principals","cyan"],["Active",summary.data?.active_principals,"latest 15 minutes","emerald"],["New today",summary.data?.new_principals_today,"first observed","sky"],["With changes",summary.data?.principals_with_changes,"selected window","amber"],["Reactivated",summary.data?.dormant_reactivated,"after dormancy","rose"],["New targets",summary.data?.new_service_relationships,"relationship changes","violet"],["New callers",summary.data?.new_caller_relationships,"credential origins","indigo"]].map(([k,v,d,a])=><MetricCard key={String(k)} label={String(k)} value={n(Number(v||0),0)} detail={String(d)} accent={a as any}/>)}
     </div>
     <div className="my-4 grid gap-4 lg:grid-cols-[1.35fr_.65fr]"><UserLinePanel title="Principal activity" subtitle="Request volume for the most active observed identities" data={chartRows} dataKey="requests"/><DonutPanel title="Behavior mix" subtitle="Current identity posture across the estate" data={behaviorMix.length ? behaviorMix : [{ name: "No observations", value: 1 }]} /></div>
@@ -145,7 +145,7 @@ export function UserDetailPage() {
   ].filter(x => x.value > 0);
   return <Page eyebrow="Principal Investigation" title={principal} description="Credential origin, expected behavior, current activity, and explainable changes." actions={<div className="flex flex-wrap gap-2"><button className="btn" onClick={()=>nav(-1)}><ArrowLeft size={13}/>Back</button><button className="btn" onClick={()=>nav(`/traces?principal=${encodeURIComponent(principal)}&${qs}`)}><ExternalLink size={13}/>View traces</button><button className="btn" onClick={()=>nav(`/anomalies?principal=${encodeURIComponent(principal)}`)}>Related anomalies</button></div>}>
     <div className="card mb-4 flex flex-wrap items-center justify-between gap-4 p-4"><div><div className="flex items-center gap-2"><span className={p.status==="Active"?"text-emerald-300 font-medium":"text-[#c4bdd9]"}>● {p.status} at window end</span><span className="chip">{p.principal_type}</span><span className="chip">Baseline: {p.learning_status||"learning"}</span></div><div className="mt-2 text-xs text-[#9e96b8]">First seen {formatDate(p.first_seen)} · Last seen {formatDate(p.last_seen)}</div></div><div className={`rounded-lg border px-4 py-2 ${tone(p.behavior_level.toLowerCase())}`}><div className="text-[10px] uppercase tracking-wider">Behavior change by distinct evidence type</div><div className="font-mono text-xl font-semibold">{p.behavior_score} / 100 · {p.behavior_level}</div></div></div>
-    <div className="grid grid-cols-2 gap-3 lg:grid-cols-6">{[["Requests",p.total_requests,"observed","sky"],["Callers",p.unique_callers,"credential origins","cyan"],["Source IPs",p.unique_sources,"network origins","emerald"],["Targets",p.unique_targets,"services used","violet"],["Operations",p.unique_operations,"APIs invoked","indigo"],["Changes",p.changes.length,"selected period","amber"]].map(([k,v,d,a])=><MetricCard key={String(k)} label={String(k)} value={n(Number(v),0)} detail={String(d)} accent={a as any}/>)}</div>
+    <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">{[["Requests",p.total_requests,"observed","sky"],["Callers",p.unique_callers,"credential origins","cyan"],["Source IPs",p.unique_sources,"network origins","emerald"],["Targets",p.unique_targets,"services used","violet"],["Operations",p.unique_operations,"APIs invoked","indigo"],["Changes",p.changes.length,"selected period","amber"]].map(([k,v,d,a])=><MetricCard key={String(k)} label={String(k)} value={n(Number(v),0)} detail={String(d)} accent={a as any}/>)}</div>
     <div className="my-4 grid gap-4 lg:grid-cols-[1.35fr_.65fr]"><UserLinePanel title="Selected user activity" subtitle="Observed requests across the selected time range" data={dailyActivity} dataKey="requests" color="#8b5cf6"/><DonutPanel title="Relationship footprint" subtitle="Breadth of this identity's usage" data={relationshipMix.length ? relationshipMix : [{ name: "No observations", value: 1 }]} /></div>
     <div className="my-4 grid gap-4 lg:grid-cols-2"><DistributionPanel title="Caller Services" current={p.current.callers||[]} normal={p.normal.callers||[]} accent="cyan"/><DistributionPanel title="Source IPs" current={p.current.sources||[]} normal={p.normal.sources||[]} accent="emerald"/><DistributionPanel title="Target Services" current={p.current.targets||[]} normal={p.normal.targets||[]} accent="violet"/><DistributionPanel title="Operations" current={p.current.operations||[]} normal={p.normal.operations||[]} accent="amber"/></div>
     <Panel title="Normal Activity Pattern" subtitle={`Typical active window: ${p.typical_active_window}`}><div className="grid gap-1 p-4" style={{gridTemplateColumns:"repeat(24,minmax(0,1fr))"}}>{Array.from({length:168},(_,i)=>{const day=Math.floor(i/24),hour=i%24,value=p.hourly_activity.find(x=>x.day_of_week===day&&x.hour_of_day===hour)?.observation_count||0;const max=Math.max(1,...p.hourly_activity.map(x=>x.observation_count));return <div key={i} title={`Day ${day}, ${hour}:00 · ${value} requests`} className="h-5 rounded-sm" style={{backgroundColor:`rgba(139,92,246,${.1+.9*value/max})`}}/>})}</div><div className="px-4 pb-3 text-[10px] text-[#9e96b8]">7 rows × 24 hours · intensity represents historical request volume</div></Panel>
@@ -401,7 +401,7 @@ export function UserChangesPage() {
       )}
 
       {/* KPI Summary Cards (Fleet Style) */}
-      <div className="mb-6 grid grid-cols-2 gap-3 sm:grid-cols-5">
+      <div className="mb-6 grid grid-cols-2 gap-3 sm:grid-cols-4">
         <MetricCard
           label="Total Anomalies"
           value={String(items.length)}
@@ -725,7 +725,7 @@ export function UserChangesPage() {
             {topFlaggedPrincipals.length === 0 ? (
               <div className="p-6 text-center text-xs text-[#6e7681]">No flagged identities</div>
             ) : (
-              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3 p-4">
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-2 p-4">
                 {topFlaggedPrincipals.map((p, idx) => (
                   <div
                     key={p.name}
@@ -1124,7 +1124,7 @@ export function UserGraphPage() {
       }
     >
       {/* KPI Summary Cards (Fleet Style) */}
-      <div className="mb-6 grid grid-cols-2 gap-3 sm:grid-cols-5">
+      <div className="mb-6 grid grid-cols-2 gap-3 sm:grid-cols-4">
         <MetricCard
           label="Tracked Principals"
           value={String(totalPrincipals)}

@@ -1,4 +1,4 @@
-import { createContext, useContext, useMemo, useState } from "react";
+import { createContext, useContext, useEffect, useMemo, useState } from "react";
 import {
   NavLink,
   Navigate,
@@ -19,10 +19,12 @@ import {
   GitCompareArrows,
   LayoutDashboard,
   Network,
+  Moon,
   Radio,
   Search,
   SlidersHorizontal,
   Sparkles,
+  Sun,
   Users,
   UserX,
   X,
@@ -49,7 +51,7 @@ import { UserInvestigationsTab } from "./pages/user/UserInvestigationsTab";
 
 const now = new Date();
 const defaultEnd = new Date(now.getTime() + 60_000).toISOString();
-const defaultStart = new Date(now.getTime() - 3 * 3600_000).toISOString();
+const defaultStart = new Date(now.getTime() - 7 * 86400_000).toISOString();
 
 const FilterContext = createContext<{
   filters: Filters;
@@ -66,12 +68,32 @@ const FilterContext = createContext<{
 
 export const useFilters = () => useContext(FilterContext);
 
+type ThemeMode = "dark" | "light";
+
+const ThemeContext = createContext<{
+  theme: ThemeMode;
+  toggleTheme: () => void;
+}>({
+  theme: "dark",
+  toggleTheme: () => {},
+});
+
+export const useTheme = () => useContext(ThemeContext);
+
+function initialTheme(): ThemeMode {
+  try {
+    return window.localStorage.getItem("tracescope-theme") === "light" ? "light" : "dark";
+  } catch {
+    return "dark";
+  }
+}
+
 function SideNav() {
   const { t } = useI18n();
   const location = useLocation();
   const groups = [
     {
-      label: "System Level",
+      label: "Operational Views",
       accent: "cyan" as const,
       headerClass: "text-cyan-400 font-bold",
       dotClass: "bg-cyan-400",
@@ -201,6 +223,7 @@ function SideNav() {
 
 function FilterBar() {
   const { filters, setFilter } = useFilters();
+  const { theme, toggleTheme } = useTheme();
   const { t } = useI18n();
   const [showFilters, setShowFilters] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
@@ -216,15 +239,6 @@ function FilterBar() {
       nav(`/users/${encodeURIComponent(q)}/overview`);
     }
   };
-
-  const rangeHours = Math.round(
-    (new Date(filters.end).getTime() - new Date(filters.start).getTime()) / 3600_000,
-  );
-
-  function setRange(hours: number) {
-    setFilter("end", new Date(Date.now() + 60_000).toISOString());
-    setFilter("start", new Date(Date.now() - hours * 3600_000).toISOString());
-  }
 
   const activeFilterKeys = (["environment", "group", "module", "service", "operation", "account"] as const).filter(
     (k) => !!filters[k],
@@ -256,29 +270,10 @@ function FilterBar() {
           </form>
         </div>
 
-        {/* Center: Range preset segmented control */}
-        <div className="flex items-center rounded-lg border border-[#262838] bg-[#141622] p-0.5">
-          {[
-            { label: "1h", hours: 1, title: t("Last 1h") },
-            { label: "3h", hours: 3, title: t("Last 3h") },
-            { label: "6h", hours: 6, title: t("Last 6h") },
-            { label: "24h", hours: 24, title: t("Last 24h") },
-            { label: "7d", hours: 168, title: t("Last 7d") },
-            { label: "30d", hours: 720, title: t("Last 30d") },
-          ].map(({ label, hours, title }) => (
-            <button
-              key={label}
-              onClick={() => setRange(hours)}
-              title={title}
-              className={`rounded-md px-2 py-1 text-xs font-bold transition ${
-                Math.abs(rangeHours - hours) <= 1
-                  ? "bg-cyan-500 text-black font-bold shadow-sm"
-                  : "text-[#cbd5e1] hover:text-white"
-              }`}
-            >
-              {label}
-            </button>
-          ))}
+        {/* Fixed operational window: five-minute buckets over seven days. */}
+        <div className="flex items-center gap-2 rounded-lg border border-cyan-500/35 bg-cyan-500/10 px-3 py-1.5 text-xs font-semibold text-cyan-300">
+          <Clock size={13} />
+          <span>{t("5m buckets · 7d window", "Bucket 5 phút · cửa sổ 7 ngày")}</span>
         </div>
 
         {/* Right: Dimension filters & controls */}
@@ -298,6 +293,18 @@ function FilterBar() {
 
           <LanguageSwitcher />
 
+          <button
+            type="button"
+            aria-label={theme === "dark" ? t("Switch to light mode", "Chuyển sang chế độ sáng") : t("Switch to dark mode", "Chuyển sang chế độ tối")}
+            aria-pressed={theme === "light"}
+            title={theme === "dark" ? t("Switch to light mode", "Chuyển sang chế độ sáng") : t("Switch to dark mode", "Chuyển sang chế độ tối")}
+            onClick={toggleTheme}
+            className="flex items-center gap-1.5 rounded-lg border border-[#262838] bg-[#141622] px-2.5 py-1 text-xs font-bold text-white transition hover:border-amber-400/70 hover:bg-[#1a1d2e] focus:outline-none focus-visible:ring-2 focus-visible:ring-amber-400"
+          >
+            {theme === "dark" ? <Sun size={13} className="text-amber-300" /> : <Moon size={13} className="text-indigo-500" />}
+            <span className="hidden xl:inline">{theme === "dark" ? t("Light", "Sáng") : t("Dark", "Tối")}</span>
+          </button>
+
           <select
             aria-label="Timezone"
             value={filters.timezone}
@@ -311,9 +318,7 @@ function FilterBar() {
 
           <div className="chip font-mono text-[10px] font-bold text-emerald-300 border-emerald-500/40 bg-emerald-500/15">
             <Radio size={11} className="text-emerald-400" />
-            <span>
-              {rangeHours > 192 ? t("1h rollup") : rangeHours > 36 ? t("5m rollup") : t("60s rollup")}
-            </span>
+            <span>{t("Live · 5m rollup", "Trực tiếp · rollup 5 phút")}</span>
           </div>
         </div>
       </div>
@@ -417,6 +422,7 @@ function Layout() {
 
 export default function App() {
   const [params, setParams] = useSearchParams();
+  const [theme, setTheme] = useState<ThemeMode>(initialTheme);
   const filters = useMemo<Filters>(
     () => ({
       start: params.get("start") || defaultStart,
@@ -445,9 +451,23 @@ export default function App() {
     );
   }
 
+  useEffect(() => {
+    document.documentElement.dataset.theme = theme;
+    document.documentElement.style.colorScheme = theme;
+    const themeColor = document.querySelector('meta[name="theme-color"]');
+    if (themeColor) themeColor.setAttribute("content", theme === "light" ? "#f5f7fb" : "#08090a");
+    try {
+      window.localStorage.setItem("tracescope-theme", theme);
+    } catch {
+      // Some embedded/browser privacy modes disable localStorage; the current session still works.
+    }
+  }, [theme]);
+
   return (
-    <FilterContext.Provider value={{ filters, setFilter }}>
-      <Layout />
-    </FilterContext.Provider>
+    <ThemeContext.Provider value={{ theme, toggleTheme: () => setTheme((current) => current === "dark" ? "light" : "dark") }}>
+      <FilterContext.Provider value={{ filters, setFilter }}>
+        <Layout />
+      </FilterContext.Provider>
+    </ThemeContext.Provider>
   );
 }

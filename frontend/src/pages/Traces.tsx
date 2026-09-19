@@ -296,9 +296,9 @@ export function TraceDetailPage() {
         />
       </div>
 
-      <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
+      <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
         {/* Waterfall diagram */}
-        <div className={selectedSpan ? "lg:col-span-2" : "lg:col-span-3"}>
+        <div className={selectedSpan ? "lg:col-span-1" : "lg:col-span-2"}>
           <Panel
             title={t("Execution Timeline Waterfall")}
             subtitle={t("Click a span row to inspect runtime attributes, thread info, and request metadata.")}

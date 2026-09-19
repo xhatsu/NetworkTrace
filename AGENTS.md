@@ -804,3 +804,44 @@
 - The topology route owns exactly the available height below the global header. Its isolated stacking context remains below the persistent sidebar, so sidebar navigation stays clickable even while the topology inspector is open.
 - Added Vietnamese strings for topology canvas actions and accessible labels.
 - Verification: frontend TypeScript lint and production build passed; live `/topology` and `/api/v1/topology/services?window=24h` returned HTTP 200; the Playwright suite passed **18/18** pages with zero browser exceptions and now asserts zoom/reset, hidden-until-selection inspector behavior, and `/topology` to `/services` sidebar navigation.
+
+## 30. Canonical Service/API/User/IP Investigation Model (2026-09-19)
+
+- `Service` remains the highest-level operational entity; no additional System entity, resolver, rollup, or anomaly layer is introduced.
+- The shared topology facts support both investigation directions without inverse duplicate tables: `Service -> API -> User -> IP` and `User -> Service -> API -> IP`.
+- Principal-first interactive endpoints are `GET /api/v1/topology/principals/{principal}/services` and `GET /api/v1/topology/principals/{principal}/services/{service}/apis`; source-IP evidence continues through the existing bounded, cursor-paginated principal IP endpoint with service/API filters.
+- The User Access & Topology tab uses progressive disclosure. It initially renders User and Service relationships, reveals APIs after service selection, and keeps IPs outside the default topology until an API is selected.
+- Existing topology tables, legacy user topology APIs, service edges, principal profiles, baselines, and anomalies remain compatible; the inverse queries reuse `topology_principal_edges_5m` and `topology_principal_ip_5m`.
+
+## 31. Persistent Light Theme (2026-09-19)
+
+- The frontend keeps dark mode as the default and exposes a persistent light/dark toggle in the global header.
+- Theme preference is stored in browser `localStorage` under `tracescope-theme`; the root `data-theme` and browser `color-scheme` are updated at runtime.
+- Light mode remaps the established matte palette globally across the app shell, shared cards, controls, tables, text, borders, scrollbars, and Recharts axes/grids without duplicating page implementations.
+
+## 32. Operational Dashboard Refresh (2026-09-19)
+
+- The dashboard now presents four top cards: Total TPS, Total Users, Total Services with unhealthy-service count, and Abnormal Changes.
+- The main charts are Total TPS, Error %, and a horizontal stacked abnormal-score distribution. Existing dashboard series and service/user endpoints are reused without backend changes.
+- Bandwidth is intentionally shown as a frontend placeholder because the existing dashboard API does not expose request/response byte series. No API or backend schema was changed.
+- Global range controls were replaced by a fixed five-minute-bucket / seven-day history view. Specialized anomaly and user-topology pages no longer expose alternate time-range selectors.
+
+## 33. Service Detail Chart Contract Fix (2026-09-19)
+
+- `/services/:name` now normalizes the existing service detail rollup response (`bucket_start`, `requests`, `errors`, `latency_p95`) into the frontend chart contract (`timestamp_ms`, `tps`, `p95_ms`, and error-rate fields).
+- The service trend chart uses numeric time axes and displays a clear no-telemetry state instead of rendering an empty Recharts surface.
+- This was implemented entirely in `frontend/src/pages/Services.tsx`; no backend or API response changes were made.
+- Verification: `npm run build` passed and `git diff --check` passed.
+
+## 34. Separate Service Trend Charts (2026-09-19)
+
+- The service detail view now renders TPS and p95 latency as separate line charts with independent Y-axis scales; the combined dual-metric area chart was removed.
+- Both charts reuse the normalized frontend series from the existing service endpoint. No backend/API changes were made.
+- Verification: frontend TypeScript lint and production build passed.
+
+## 35. Card Row Layout (2026-09-19)
+
+- Larger panel/card sections now cap at two cards per row across the dashboard, service, account, anomaly, trace, agent, principal, user, topology, and unknown-user views.
+- Compact KPI/info cards (for example Total TPS, Total Users, Total Services, and Abnormal Changes) use four cards per desktop row; larger cards and charts still wrap after two.
+- Data tables and topology canvases retain their functional layouts.
+- This is a frontend-only responsive layout change. Verification: TypeScript lint and production build passed.

@@ -304,7 +304,7 @@ export function UserLayout() {
         </div>
 
         {/* Mini stats ribbon */}
-        <div className="mt-4 grid grid-cols-2 gap-2 border-t border-[rgba(255,255,255,0.12)] pt-3 text-xs sm:grid-cols-4 md:grid-cols-6">
+        <div className="mt-4 grid grid-cols-2 gap-2 border-t border-[rgba(255,255,255,0.12)] pt-3 text-xs sm:grid-cols-4 md:grid-cols-4">
           <div>
             <span className="text-[10px] font-bold uppercase tracking-wider text-[#94a3b8]">Total Requests</span>
             <div className="font-mono text-sm font-bold text-white">

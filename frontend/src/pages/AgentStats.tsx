@@ -1123,7 +1123,7 @@ export function AgentNodeDetailPage() {
 
         {/* 5. Agent Constraints & Process Isolation Specs */}
         <Panel title={t("Process Safety & Hardware Constraints")} subtitle={t("Enforced host-protection limits reported by agent")}>
-          <div className="grid grid-cols-2 gap-4 p-5 sm:grid-cols-3 lg:grid-cols-6 text-xs">
+          <div className="grid grid-cols-2 gap-4 p-5 sm:grid-cols-3 lg:grid-cols-4 text-xs">
             <div className="flex flex-col gap-1 border-r border-[rgba(255,255,255,0.06)] pr-3">
               <span className="text-[10px] uppercase font-semibold text-[#6e7681]">{t("CPU Core Pin")}</span>
               <span className="font-mono text-[#f0f3f6] text-sm">Core #{String(limits.cpu_core ?? latest?.lim_cpu_core ?? "2")}</span>

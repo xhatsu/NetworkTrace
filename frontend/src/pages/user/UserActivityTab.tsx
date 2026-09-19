@@ -192,7 +192,7 @@ export function UserActivityTab() {
             </button>
           </div>
 
-          <div className="mt-3 grid grid-cols-2 gap-2 text-xs sm:grid-cols-4 lg:grid-cols-8">
+          <div className="mt-3 grid grid-cols-2 gap-2 text-xs sm:grid-cols-4 lg:grid-cols-4">
             <div className="rounded-lg bg-[#0e1019] p-2 border border-[#242738]">
               <span className="text-[10px] font-bold text-[#94a3b8] uppercase">{t("Requests")}</span>
               <div className="font-mono text-base font-bold text-white">{selectedSlice.requests}</div>

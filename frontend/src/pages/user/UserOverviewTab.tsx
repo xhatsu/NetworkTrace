@@ -129,7 +129,7 @@ export function UserOverviewTab() {
       </div>
 
       {/* 8 Lightweight KPI Cards */}
-      <div className="grid grid-cols-2 gap-3 sm:grid-cols-4 lg:grid-cols-8">
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-4 lg:grid-cols-4">
         {/* 1. Requests */}
         <div className="rounded-xl border border-[rgba(255,255,255,0.16)] bg-[#171329] p-3.5 shadow-sm transition hover:border-cyan-400/50">
           <div className="text-[11px] font-bold uppercase tracking-wider text-[#94a3b8]">{t("Requests")}</div>

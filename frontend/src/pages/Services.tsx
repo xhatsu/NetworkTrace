@@ -2,10 +2,9 @@ import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useNavigate, useParams } from "react-router-dom";
 import {
-  Area,
-  AreaChart,
   CartesianGrid,
-  Legend,
+  Line,
+  LineChart,
   ResponsiveContainer,
   Tooltip,
   XAxis,
@@ -92,7 +91,7 @@ export function ServicesPage() {
           title={`${filteredItems.length} ${t("Across")} ${query.data?.items.length || 0} ${t("Registered Services")}`}
           subtitle={t("Click any service to inspect latency tails, operation breakdown, and callers")}
         >
-          <div className="grid gap-2.5 p-4 sm:grid-cols-2 lg:grid-cols-3">
+          <div className="grid gap-2.5 p-4 sm:grid-cols-2 lg:grid-cols-2">
             {filteredItems.map((s, idx) => {
               const iconColors = [
                 "border-sky-500/35 bg-sky-500/15 text-sky-300",
@@ -162,7 +161,11 @@ export function ServicesPage() {
 
 type Detail = {
   service: Service;
-  series: SeriesPoint[];
+  // The service detail endpoint is backed by the rollup repository, whose
+  // native series shape uses `bucket_start`, `requests`, `errors`, and
+  // `latency_p95`. Keep the response permissive here and normalize it before
+  // handing data to Recharts (which expects the dashboard SeriesPoint shape).
+  series?: unknown[];
   operations: {
     name: string;
     requests: number;
@@ -180,6 +183,55 @@ type Detail = {
   incoming: { name: string; requests: number; evidence: string }[];
   outgoing: { name: string; requests: number; evidence: string }[];
 };
+
+function normalizeServiceSeries(rows: unknown): SeriesPoint[] {
+  if (!Array.isArray(rows)) return [];
+
+  return rows
+    .map((value): SeriesPoint | null => {
+      if (!value || typeof value !== "object") return null;
+      const row = value as Record<string, unknown>;
+      const bucketStart = Number(row.bucket_start ?? 0);
+      const rawTimestamp = Number(row.timestamp_ms ?? 0);
+      const timestampMs = Number.isFinite(rawTimestamp) && rawTimestamp > 0
+        ? rawTimestamp
+        : bucketStart > 0
+          ? bucketStart * 1000
+          : 0;
+      if (!timestampMs) return null;
+
+      const requests = Number(row.requests ?? row.request_count ?? 0);
+      const errors = Number(row.errors ?? row.error_count ?? 0);
+      const bucketSeconds = Math.max(1, Number(row.bucket_size ?? 60));
+      const measuredRate = Number(row.tps ?? row.rps ?? NaN);
+      const tps = Number.isFinite(measuredRate)
+        ? measuredRate
+        : requests / bucketSeconds;
+      const errorRate = Number(row.http_5xx_rate ?? row.error_rate ?? NaN);
+      const failureRate = Number.isFinite(errorRate)
+        ? errorRate
+        : requests > 0
+          ? errors / requests
+          : 0;
+
+      return {
+        timestamp_ms: timestampMs,
+        rps: tps,
+        tps,
+        baseline_rps: Number(row.baseline_rps ?? 0),
+        p50_ms: Number(row.p50_ms ?? row.latency_p50 ?? row.latency_avg ?? 0),
+        p95_ms: Number(row.p95_ms ?? row.latency_p95 ?? 0),
+        p99_ms: Number(row.p99_ms ?? row.latency_p99 ?? 0),
+        http_4xx_rate: Number(row.http_4xx_rate ?? 0),
+        http_5xx_rate: failureRate,
+        success_rate: Number(row.success_rate ?? 1 - failureRate),
+        failure_rate: Number(row.failure_rate ?? failureRate),
+        sample_count: Number(row.sample_count ?? requests),
+      };
+    })
+    .filter((point): point is SeriesPoint => point !== null)
+    .sort((a, b) => a.timestamp_ms - b.timestamp_ms);
+}
 
 export function ServiceDetailPage() {
   const { name = "" } = useParams();
@@ -235,7 +287,7 @@ export function ServiceDetailPage() {
   const outgoing = d.outgoing || (d as any).dependencies || [];
   const accounts = d.accounts || ((d as any).principals || []).map((p: any) => ({ username: p.name, requests: p.requests }));
   const instances = d.instances || [];
-  const series = d.series || [];
+  const series = normalizeServiceSeries(d.series);
 
   const durationSec = Math.max(
     1,
@@ -282,54 +334,36 @@ export function ServiceDetailPage() {
         />
       </div>
 
-      <div className="mt-4 grid gap-4 lg:grid-cols-12">
+      <div className="mt-4 grid gap-4 lg:grid-cols-2">
         <Panel
-          title={t("Throughput & p95 Latency Trend")}
-          subtitle={t("Observed TPS and merged histogram p95 values")}
-          className="lg:col-span-8"
+          title={t("Observed Throughput (TPS)")}
+          subtitle={t("Service TPS over time")}
         >
-          <div className="h-72 p-3">
-            <ResponsiveContainer>
-              <AreaChart data={series}>
-                <CartesianGrid stroke="rgba(255,255,255,0.05)" vertical={false} />
-                <XAxis
-                  dataKey="timestamp_ms"
-                  tickFormatter={(v) =>
-                    new Date(v).toLocaleTimeString([], {
-                      hour: "2-digit",
-                      minute: "2-digit",
-                    })
-                  }
-                  stroke="#484f58"
-                />
-                <YAxis stroke="#484f58" />
-                <Tooltip {...chartTooltip} />
-                <Legend wrapperStyle={{ fontSize: 11, paddingTop: 4 }} />
-                <Area
-                  dataKey="p95_ms"
-                  name={`${t("P95 Latency")} (ms)`}
-                  stroke="#f43f5e"
-                  fill="#f43f5e"
-                  fillOpacity={0.1}
-                  strokeWidth={1.5}
-                />
-                <Area
-                  dataKey="rps"
-                  name={t("Observed Throughput (TPS)")}
-                  stroke="#818cf8"
-                  fill="#818cf8"
-                  fillOpacity={0.15}
-                  strokeWidth={1.5}
-                />
-              </AreaChart>
-            </ResponsiveContainer>
-          </div>
+          <ServiceTrendChart
+            data={series}
+            dataKey="tps"
+            color="#818cf8"
+            unit="TPS"
+            label={t("Observed Throughput (TPS)")}
+          />
+        </Panel>
+
+        <Panel
+          title={t("P95 Latency")}
+          subtitle={t("Service latency over time")}
+        >
+          <ServiceTrendChart
+            data={series}
+            dataKey="p95_ms"
+            color="#f43f5e"
+            unit="ms"
+            label={t("P95 Latency")}
+          />
         </Panel>
 
         <Panel
           title={t("Dependency Relationships")}
           subtitle={t("Confirmed & inferred directional trace links")}
-          className="lg:col-span-4"
         >
           <div className="p-4 space-y-4">
             <Relation title={t("Incoming Callers")} items={incoming} />
@@ -435,6 +469,71 @@ export function ServiceDetailPage() {
         </div>
       </Panel>
     </Page>
+  );
+}
+
+function ServiceTrendChart({
+  data,
+  dataKey,
+  color,
+  unit,
+  label,
+}: {
+  data: SeriesPoint[];
+  dataKey: "tps" | "p95_ms";
+  color: string;
+  unit: string;
+  label: string;
+}) {
+  const { t } = useI18n();
+
+  if (!data.length) {
+    return (
+      <div className="grid h-72 place-items-center p-3">
+        <div className="grid h-full w-full place-items-center rounded-lg border border-dashed border-[rgba(255,255,255,0.12)] text-xs text-[#8b949e]">
+          {t("No telemetry points in the selected window")}
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="h-72 p-3">
+      <ResponsiveContainer>
+        <LineChart data={data} margin={{ top: 8, right: 8, bottom: 0, left: 0 }}>
+          <CartesianGrid stroke="rgba(255,255,255,0.05)" vertical={false} />
+          <XAxis
+            dataKey="timestamp_ms"
+            type="number"
+            domain={["dataMin", "dataMax"]}
+            minTickGap={36}
+            tickFormatter={(value) =>
+              new Date(Number(value)).toLocaleTimeString([], {
+                hour: "2-digit",
+                minute: "2-digit",
+              })
+            }
+            stroke="#484f58"
+          />
+          <YAxis stroke="#484f58" />
+          <Tooltip
+            {...chartTooltip}
+            labelFormatter={(value) => new Date(Number(value)).toLocaleString()}
+            formatter={(value: unknown) => [`${n(Number(value), 2)} ${unit}`, label]}
+          />
+          <Line
+            type="monotone"
+            dataKey={dataKey}
+            name={label}
+            stroke={color}
+            strokeWidth={2}
+            dot={false}
+            activeDot={{ r: 4, fill: color }}
+            connectNulls
+          />
+        </LineChart>
+      </ResponsiveContainer>
+    </div>
   );
 }
 
