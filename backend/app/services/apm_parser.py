@@ -26,11 +26,22 @@ log = logging.getLogger("tracescope-hub")
 
 
 def _dig(value: Any, path: str) -> Any:
+    if not isinstance(value, dict):
+        return None
+    if path in value:
+        return value[path]
     current = value
-    for part in path.split("."):
-        if not isinstance(current, dict) or part not in current:
+    parts = path.split(".")
+    for i, part in enumerate(parts):
+        if not isinstance(current, dict):
             return None
-        current = current[part]
+        if part in current:
+            current = current[part]
+        else:
+            remaining = ".".join(parts[i:])
+            if remaining in current:
+                return current[remaining]
+            return None
     return current
 
 
@@ -38,8 +49,8 @@ def _scalar(value: Any) -> Any:
     if isinstance(value, list):
         return _scalar(value[0]) if value else None
     if isinstance(value, dict):
-        for key in ("value", "stringValue", "string_value"):
-            if key in value:
+        for key in ("value", "stringValue", "string_value", "id", "name", "username"):
+            if key in value and value[key] not in (None, ""):
                 return _scalar(value[key])
         return None
     return value
@@ -157,9 +168,28 @@ def apm_document_to_normalized_trace(document: Dict[str, Any]) -> Optional[Norma
     # Identity extraction
     principal_name = "unknown"
     auth_scheme = None
-    explicit_user = _first(source, fields, "user.id", "user.name", "user.username", "user.email", "context.user.username", "context.user.id", "context.user.name", "enduser.id", "labels.principal", "account.username")
-    if explicit_user:
+    explicit_user = _first(
+        source,
+        fields,
+        "enduser.id",
+        "enduser_id",
+        "labels.enduser.id",
+        "labels.enduser_id",
+        "labels.enduser",
+        "enduser",
+        "user.id",
+        "user.name",
+        "user.username",
+        "user.email",
+        "context.user.username",
+        "context.user.id",
+        "context.user.name",
+        "labels.principal",
+        "account.username",
+    )
+    if explicit_user and str(explicit_user).strip().lower() not in ("unknown", "-", "null", "none"):
         principal_name = str(explicit_user).strip()[:200]
+        auth_scheme = "enduser"
     else:
         auth_header = _first(source, fields, "http.request.headers.authorization", "http.request.header.authorization", "context.request.headers.authorization", "context.request.headers.Authorization", "labels.authorization")
         if auth_header:
@@ -261,5 +291,9 @@ def apm_document_to_normalized_trace(document: Dict[str, Any]) -> Optional[Norma
         protocol="http",
         span_kind="server",
         attributes_json=attributes_json,
-        created_at=int(time.time() * 1000)
+        created_at=int(time.time() * 1000),
+        environment=environment,
+        principal_id=f"{environment}:{principal_name}",
+        identity_source="enduser_id" if auth_scheme == "enduser" else ("basic_auth" if auth_scheme == "basic" else ("anonymous" if principal_name in ("unknown", "-anonymous-") else "authenticated_user")),
+        operation_key=f"{target_service}/{operation}",
     )

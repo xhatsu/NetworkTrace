@@ -337,7 +337,11 @@ def test_helm_global_image_tag_and_component_overrides():
     chart = REPO_ROOT / "deploy" / "helm" / "tracescope"
     token = "0123456789abcdef0123456789abcdef"
 
-    # 1. Default uses global.image.tag ("0.3.3") across all workloads
+    # 1. Default uses global.image.tag across all workloads
+    values_text = (chart / "values.yaml").read_text()
+    match = re.search(r'tag:\s*"([^"]+)"', values_text)
+    default_tag = match.group(1) if match else "0.3.9"
+
     rendered = subprocess.run([
         helm, "template", "test", str(chart),
         "--set", f"secrets.internalApiToken={token}",
@@ -346,14 +350,14 @@ def test_helm_global_image_tag_and_component_overrides():
         "--set", "ui.enabled=true",
     ], text=True, capture_output=True, check=True).stdout
     images = [line.strip().split(": ", 1)[1].strip('"') for line in rendered.splitlines() if line.strip().startswith("image:")]
-    assert "xhatsu101/tracescope:0.3.3" in images
+    assert f"xhatsu101/tracescope:{default_tag}" in images
     assert "clickhouse/clickhouse-server:24.8" in images
     # No old hardcoded tags
     assert not any("app-0.3.2" in img or "ingest-0.3.2" in img for img in images)
-    # Exactly 6 tracescope containers with 0.3.3
+    # Exactly 6 tracescope containers with default tag
     tracescope_imgs = [img for img in images if "tracescope" in img and "clickhouse" not in img]
     assert len(tracescope_imgs) == 6
-    assert all(img.endswith(":0.3.3") for img in tracescope_imgs)
+    assert all(img.endswith(f":{default_tag}") for img in tracescope_imgs)
 
     # 2. Dynamic override via global.image.tag
     rendered_dyn = subprocess.run([

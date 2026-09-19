@@ -56,12 +56,13 @@ async def users(from_time: Optional[str] = Query(None, alias="from"), to_time: O
                 target: Optional[str] = None, source_ip: Optional[str] = None, behavior_level: Optional[str] = None,
                 has_recent_changes: Optional[bool] = None, first_from: Optional[int] = None,
                 first_to: Optional[int] = None, last_from: Optional[int] = None, last_to: Optional[int] = None,
-                sort: str = "most_active", limit: int = Query(100, ge=1, le=500), offset: int = Query(0, ge=0)):
+                sort: str = "most_active", limit: int = Query(100, ge=1, le=500), offset: int = Query(0, ge=0),
+                include_anonymous: bool = Query(False)):
     start_ms, end_ms = _window(from_time,to_time,start,end)
     return UserRepository().list_users(start_ms=start_ms,end_ms=end_ms,search=q,active=active,caller=caller,
         target=target,source_ip=source_ip,behavior_level=behavior_level,has_changes=has_recent_changes,
         first_from=first_from,first_to=first_to,last_from=last_from,last_to=last_to,sort=sort,
-        environment=environment,limit=limit,offset=offset)
+        environment=environment,limit=limit,offset=offset,include_anonymous=include_anonymous)
 
 
 @router.get("/users/summary")
@@ -69,6 +70,14 @@ async def users_summary(from_time: Optional[str] = Query(None, alias="from"), to
                         start: Optional[str] = None, end: Optional[str] = None):
     start_ms,end_ms = _window(from_time,to_time,start,end)
     return UserRepository().summary(start_ms,end_ms)
+
+
+@router.get("/unknown-users")
+@router.get("/users/unknown-traffic")
+async def unknown_users(from_time: Optional[str] = Query(None, alias="from"), to_time: Optional[str] = Query(None, alias="to"),
+                        start: Optional[str] = None, end: Optional[str] = None, limit: int = Query(50, ge=1, le=200)):
+    start_ms, end_ms = _window(from_time, to_time, start, end)
+    return UserRepository().unknown_users_analytics(start_ms=start_ms, end_ms=end_ms, limit=limit)
 
 
 @router.get("/users/{principal}")
@@ -220,14 +229,14 @@ async def service_users(service: str, from_time: Optional[str] = Query(None,alia
 
 
 @router.get("/anomalies/{anomaly_id}/users")
-async def anomaly_users(anomaly_id: int):
+def anomaly_users(anomaly_id: int):
     result=UserRepository().anomaly_users(anomaly_id)
     if not result: raise HTTPException(404,"Anomaly not found")
     return result
 
 
 @router.get("/users/{principal}/performance")
-async def user_performance(
+def user_performance(
     principal: str,
     from_time: Optional[str] = Query(None, alias="from"),
     to_time: Optional[str] = Query(None, alias="to"),
@@ -241,7 +250,7 @@ async def user_performance(
 
 
 @router.get("/users/{principal}/investigations")
-async def user_investigations(
+def user_investigations(
     principal: str,
     from_time: Optional[str] = Query(None, alias="from"),
     to_time: Optional[str] = Query(None, alias="to"),
@@ -253,7 +262,7 @@ async def user_investigations(
 
 
 @router.get("/users/{principal}/topology")
-async def user_topology_endpoint(
+def user_topology_endpoint(
     principal: str,
     from_time: Optional[str] = Query(None, alias="from"),
     to_time: Optional[str] = Query(None, alias="to"),

@@ -75,6 +75,7 @@ class ElasticsearchTraceRepository:
                         {"term": {"trace.id": trace_id}},
                         {"term": {"trace_id": trace_id}},
                         {"term": {"traceId": trace_id}},
+                        {"term": {"_id": trace_id}},
                     ],
                     "minimum_should_match": 1,
                 }
@@ -137,7 +138,22 @@ class ElasticsearchTraceRepository:
         if not self.url:
             return None
 
-        filters: List[Dict[str, Any]] = []
+        filters: List[Dict[str, Any]] = [
+            {
+                "bool": {
+                    "should": [
+                        {"terms": {"processor.event": ["transaction", "span"]}},
+                        {"exists": {"field": "trace.id"}},
+                        {"exists": {"field": "trace_id"}},
+                    ],
+                    "minimum_should_match": 1,
+                    "must_not": [
+                        {"term": {"processor.event": "metric"}},
+                        {"term": {"processor.name": "metric"}},
+                    ],
+                }
+            }
+        ]
 
         if start_ms is not None or end_ms is not None:
             time_range: Dict[str, Any] = {}
@@ -223,6 +239,7 @@ class ElasticsearchTraceRepository:
                         {"term": {"client.ip": source_ip}},
                         {"term": {"caller_ip": source_ip}},
                         {"term": {"source_ip": source_ip}},
+                        {"term": {"labels.client_address": source_ip}},
                     ],
                     "minimum_should_match": 1,
                 }
@@ -234,8 +251,11 @@ class ElasticsearchTraceRepository:
                     "bool": {
                         "should": [
                             {"range": {"http.response.status_code": {"gte": 400}}},
+                            {"range": {"labels.http_response_status_code": {"gte": 400}}},
                             {"range": {"http_status": {"gte": 400}}},
                             {"term": {"outcome": "failure"}},
+                            {"term": {"transaction.result": "HTTP 4xx"}},
+                            {"term": {"transaction.result": "HTTP 5xx"}},
                         ],
                         "minimum_should_match": 1,
                     }
@@ -246,6 +266,8 @@ class ElasticsearchTraceRepository:
                     "bool": {
                         "should": [
                             {"term": {"http.response.status_code": code}},
+                            {"term": {"labels.http_response_status_code": code}},
+                            {"term": {"labels.http_status_code": code}},
                             {"term": {"http_status": code}},
                         ],
                         "minimum_should_match": 1,

@@ -13,6 +13,8 @@ export type Filters = {
 export type Summary = {
   observed_rps: number;
   observed_tps: number;
+  baseline_rps?: number;
+  baseline_tps?: number;
   total_requests: number;
   active_services: number;
   active_accounts: number;

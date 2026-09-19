@@ -101,6 +101,17 @@ def detect_anomalies(
         if r["caller_service"]: s["callers"].add(r["caller_service"])
         if r["operation"]: s["ops"].add(r["operation"])
 
+    # Include expected services from baseline that have 0 traffic in this window (complete outage / traffic drop)
+    with get_connection(db_path) as db:
+        expected_services = db.execute("""
+            SELECT dimension_key FROM baseline_metrics FINAL
+            WHERE dimension_type = 'service' AND hour_of_day = ? AND day_of_week = ? AND rps_median >= 0.03 AND sample_count >= 2
+        """, (hod, dow)).fetchall()
+        for exp_svc in expected_services:
+            svc_name = exp_svc[0] if isinstance(exp_svc, (list, tuple)) else exp_svc["dimension_key"]
+            if svc_name not in service_aggregates:
+                service_aggregates[svc_name] = {"reqs": 0, "errors": 0, "p95": 0.0, "principals": set(), "callers": set(), "ops": set()}
+
     for svc, data in service_aggregates.items():
         base = base_repo.get_baseline("service", svc, hod, dow)
         current_rps = round(data["reqs"] / 300.0, 2)
@@ -116,8 +127,8 @@ def detect_anomalies(
 
         # Detector 1: Traffic Spike
         # Current RPS significantly exceeds baseline median + 3*MAD
-        rps_threshold = max(base_rps * 2.0, base_rps + max(1.0, 3.0 * base["rps_mad"]))
-        if current_rps > rps_threshold and data["reqs"] >= 50:
+        rps_threshold = max(base_rps * 2.0, base_rps + max(0.1, 3.0 * base["rps_mad"]))
+        if current_rps > rps_threshold and data["reqs"] >= 20:
             delta_pct = round(((current_rps - base_rps) / max(0.01, base_rps)) * 100, 1)
             score = min(100, int(50 + (delta_pct / 10)))
             severity = "critical" if score >= 85 else "high" if score >= 70 else "medium"
@@ -142,8 +153,8 @@ def detect_anomalies(
             ))
 
         # Detector 2: Traffic Drop
-        # Current RPS dropped < 25% of baseline when expected > 5 RPS
-        if base_rps > 5.0 and current_rps < (base_rps * 0.25):
+        # Current RPS dropped < 25% of baseline when expected >= 0.03 RPS
+        if base_rps >= 0.03 and current_rps < (base_rps * 0.25):
             delta_pct = round(((current_rps - base_rps) / base_rps) * 100, 1)
             score = min(100, int(60 + abs(delta_pct) / 2.5))
             anomalies.append(AnomalyEvent(
@@ -219,14 +230,120 @@ def detect_anomalies(
                 metadata={"total_errors": data["errors"], "total_requests": data["reqs"]}
             ))
 
+    # 1b. Aggregate per (principal_name, target_service) to detect user-level traffic spikes
+    principal_aggregates: Dict[tuple[str, str], Dict[str, Any]] = {}
+    for r in current_rows:
+        p_name = r.get("principal_name")
+        tgt_svc = r.get("target_service")
+        if not p_name or not tgt_svc:
+            continue
+        pk = (p_name, tgt_svc)
+        if pk not in principal_aggregates:
+            principal_aggregates[pk] = {"reqs": 0, "errors": 0, "p95": 0.0, "ops": set(), "callers": set()}
+        pa = principal_aggregates[pk]
+        pa["reqs"] += r["request_count"] or 0
+        pa["errors"] += r["error_count"] or 0
+        pa["p95"] = max(pa["p95"], r["latency_p95"] or 0.0)
+        if r.get("operation"): pa["ops"].add(r["operation"])
+        if r.get("caller_service"): pa["callers"].add(r["caller_service"])
+
+    for (p_name, tgt_svc), pdata in principal_aggregates.items():
+        dim_key = f"{p_name}->{tgt_svc}"
+        pbase = base_repo.get_baseline("principal_target", dim_key, hod, dow)
+        if not pbase or pbase.get("sample_count", 0) < 10:
+            with get_connection(db_path) as db:
+                row_all = db.execute(
+                    "SELECT median(rps_median), median(rps_mad) FROM baseline_metrics WHERE dimension_type='principal_target' AND dimension_key=?",
+                    (dim_key,)
+                ).fetchone()
+                if row_all and row_all[0] is not None and float(row_all[0]) > 0:
+                    pbase = {"rps_median": float(row_all[0]), "rps_mad": float(row_all[1] or 0.0), "sample_count": 20}
+        if not pbase or pbase.get("sample_count", 0) < 2:
+            continue
+        p_base_rps = pbase["rps_median"]
+        p_cur_rps = round(pdata["reqs"] / 300.0, 2)
+        p_mad = min(0.10, float(pbase.get("rps_mad") or 0.0))
+        p_rps_thresh = max(p_base_rps * 1.4, p_base_rps + max(0.08, 2.0 * p_mad))
+        if p_cur_rps > p_rps_thresh and pdata["reqs"] >= 15:
+            p_delta_pct = round(((p_cur_rps - p_base_rps) / max(0.01, p_base_rps)) * 100, 1)
+            p_score = min(100, int(55 + (p_delta_pct / 10)))
+            p_sev = "critical" if p_score >= 85 else "high" if p_score >= 70 else "medium"
+            first_caller = next(iter(pdata["callers"]), None)
+            first_op = next(iter(pdata["ops"]), None)
+            anomalies.append(AnomalyEvent(
+                detected_at=detected_at,
+                anomaly_type="traffic_spike",
+                severity=p_sev,
+                score=p_score,
+                confidence=0.95,
+                principal_name=p_name,
+                target_service=tgt_svc,
+                caller_service=first_caller,
+                operation=first_op,
+                baseline_value=round(p_base_rps, 2),
+                current_value=p_cur_rps,
+                delta_percentage=p_delta_pct,
+                reasons=[AnomalyReason(
+                    type="traffic",
+                    contribution=p_score,
+                    baseline=round(p_base_rps, 2),
+                    current=p_cur_rps,
+                    text=f"Principal '{p_name}' traffic to {tgt_svc} surged from {round(p_base_rps, 2)} TPS to {p_cur_rps} TPS (+{p_delta_pct}%)"
+                )],
+                metadata={"operations": list(pdata["ops"]), "callers": list(pdata["callers"]), "principals": [p_name]}
+            ))
+
     # Relationship and identity detectors
     with get_connection(db_path) as db:
         historical_caller_targets = {f"{row[0]}->{row[1]}" for row in db.execute("SELECT caller_service, target_service FROM service_edges FINAL WHERE first_seen < ?", (window_start_sec,)).fetchall()}
-        historical_principal_targets = {f"{row[0]}->{row[1]}" for row in db.execute("SELECT principal_name, target_service FROM principal_service_edges FINAL WHERE first_seen < ?", (window_start_sec,)).fetchall()}
+        historical_principal_targets = {f"{row[0]}->{row[1]}" for row in db.execute("SELECT principal_name, target_service FROM principal_service_edges FINAL WHERE first_seen < ? AND principal_name NOT IN ('unknown', '-anonymous-', 'anonymous', '')", (window_start_sec,)).fetchall()}
         try:
-            established_principals = {row[0] for row in db.execute("SELECT principal_name FROM principal_baselines FINAL WHERE sample_count >= 10").fetchall()}
+            established_principals = {row[0] for row in db.execute("SELECT principal_name FROM principal_baselines FINAL WHERE sample_count >= 10 AND principal_name NOT IN ('unknown', '-anonymous-', 'anonymous', '')").fetchall()}
         except Exception:
             established_principals = set()
+
+        # Historical learned endpoints for users (no hardcoded keywords)
+        historical_user_endpoints_rows = db.execute(
+            "SELECT DISTINCT principal_name, target_service, operation FROM principal_operations WHERE first_seen < ? AND principal_name NOT IN ('unknown', '-anonymous-', 'anonymous', '')",
+            (window_start_sec * 1000,)
+        ).fetchall()
+        historical_user_endpoints = {
+            f"{row[0]}->{row[1]}:{row[2]}" for row in historical_user_endpoints_rows
+        }
+        learned_users = {row[0] for row in historical_user_endpoints_rows}
+        learned_users.update(established_principals)
+        try:
+            learned_users.update({
+                row[0] for row in db.execute(
+                    "SELECT DISTINCT principal_name FROM principals WHERE first_seen < ? AND principal_name NOT IN ('unknown', '-anonymous-', 'anonymous', '')",
+                    (window_start_sec * 1000,)
+                ).fetchall()
+            })
+        except Exception:
+            pass
+        try:
+            mb_rows = db.execute(
+                "SELECT DISTINCT principal_name, target_service, operation FROM metric_buckets WHERE bucket_start < ? AND principal_name IS NOT NULL AND principal_name NOT IN ('', 'unknown', '-anonymous-', 'anonymous')",
+                (window_start_sec,)
+            ).fetchall()
+            for r_mb in mb_rows:
+                historical_user_endpoints.add(f"{r_mb[0]}->{r_mb[1]}:{r_mb[2]}")
+                learned_users.add(r_mb[0])
+        except Exception:
+            pass
+
+        historical_anonymous_endpoints = set()
+        try:
+            anon_ep_rows = db.execute(
+                """SELECT DISTINCT target_service, operation FROM metric_buckets 
+                   WHERE bucket_start < ? 
+                     AND (principal_name IS NULL OR principal_name IN ('', 'unknown', '-anonymous-', 'anonymous'))""",
+                (window_start_sec,)
+            ).fetchall()
+            for r_anon in anon_ep_rows:
+                historical_anonymous_endpoints.add(f"{r_anon[0]}:{r_anon[1]}")
+        except Exception:
+            pass
 
     for r in current_rows:
         c = r["caller_service"]
@@ -245,7 +362,7 @@ def detect_anomalies(
                 confidence=0.85,
                 caller_service=c,
                 target_service=t,
-                principal_name=p,
+                principal_name=p if p and p not in ("unknown", "-anonymous-", "anonymous") else None,
                 operation=op,
                 baseline_value=0.0,
                 current_value=float(reqs),
@@ -258,8 +375,8 @@ def detect_anomalies(
                 )]
             ))
 
-        # Detector 6: New Principal Relationship
-        if p and p != "unknown" and t and historical_principal_targets and f"{p}->{t}" not in historical_principal_targets and reqs >= 5:
+        # Detector 6: New Principal Relationship (Identified human/service principals only)
+        if p and p not in ("unknown", "-anonymous-", "anonymous", "") and t and historical_principal_targets and f"{p}->{t}" not in historical_principal_targets and reqs >= 5:
             anomalies.append(AnomalyEvent(
                 detected_at=detected_at,
                 anomaly_type="new_principal_edge",
@@ -279,6 +396,79 @@ def detect_anomalies(
                     current=float(reqs),
                     text=f"Principal '{p}' calling target '{t}' for the first time without historical authorization pattern"
                 )]
+            ))
+
+        # Detector 7: Unusual Access (Truy cập Bất thường)
+        # Behavioral anomaly:
+        # Case A: Learned user behavioral shift - accessing a new endpoint never seen in baseline
+        # Case B: 401/403 Authentication / Authorization failure burst
+        # Case C: Anonymous traffic hitting a novel endpoint never previously accessed anonymously
+        errs = r["error_count"] or 0
+        is_unusual_access = False
+        ua_score = 75
+        ua_severity = "medium"
+        ua_reason = ""
+        ua_reason_type = "unusual_access"
+
+        is_anonymous = not p or p in {"", "unknown", "-anonymous-", "anonymous"}
+        is_learned_user = bool(not is_anonymous and (p in learned_users))
+        is_user_new_endpoint = is_learned_user and (f"{p}->{t}:{op}" not in historical_user_endpoints)
+
+        # Case A: Learned user behavioral shift
+        if is_user_new_endpoint and reqs >= 1:
+            is_unusual_access = True
+            ua_score = 80 if errs > 0 else 75
+            ua_severity = "high" if errs > 0 else "medium"
+            ua_reason_type = "user_new_endpoint"
+            ua_reason = f"Learned user '{p}' exhibited behavioral shift by accessing new endpoint '{op}' on target '{t}' for the first time"
+
+        # Case B: 401/403 Authentication / Authorization failure burst
+        elif errs >= 3 and (errs / max(1, reqs)) >= 0.4:
+            is_unusual_access = True
+            ua_score = 85
+            ua_severity = "high"
+            ua_reason_type = "auth_failure_burst"
+            ua_reason = f"Access failure burst detected on target '{t}' operation '{op}' by '{p if not is_anonymous else 'anonymous'}' ({errs}/{reqs} failures)"
+
+        # Case C: Anonymous traffic on an endpoint never previously accessed anonymously
+        elif is_anonymous and historical_anonymous_endpoints and f"{t}:{op}" not in historical_anonymous_endpoints and reqs >= 10:
+            is_unusual_access = True
+            ua_score = 80 if errs > 0 else 70
+            ua_severity = "high" if errs > 0 else "medium"
+            ua_reason_type = "anonymous_new_endpoint"
+            ua_reason = f"Anonymous traffic observed on endpoint '{op}' of target '{t}' for the first time ({reqs} requests, {errs} errors)"
+
+        if is_unusual_access:
+            anomalies.append(AnomalyEvent(
+                detected_at=detected_at,
+                anomaly_type="unusual_access",
+                severity=ua_severity,
+                score=ua_score,
+                confidence=0.90,
+                caller_service=c,
+                target_service=t,
+                principal_name=None if is_anonymous else p,
+                operation=op,
+                baseline_value=0.0,
+                current_value=float(reqs),
+                delta_percentage=100.0,
+                reasons=[AnomalyReason(
+                    type=ua_reason_type,
+                    contribution=ua_score,
+                    baseline=0.0,
+                    current=float(reqs),
+                    text=ua_reason
+                )],
+                metadata={
+                    "principal": None if is_anonymous else p,
+                    "target_service": t,
+                    "caller_service": c,
+                    "operation": op,
+                    "requests": reqs,
+                    "errors": errs,
+                    "traffic_class": "anonymous" if is_anonymous else "identified",
+                    "reason_type": ua_reason_type
+                }
             ))
 
         # Detector 8: Unusual Execution Time (e.g. 02:00 - 05:00 UTC for established human accounts)
@@ -322,26 +512,37 @@ def detect_anomalies(
               COUNT(*) as request_count
             FROM traces
             WHERE timestamp_ms >= ? AND timestamp_ms < ?
-              AND principal_name IS NOT NULL AND principal_name != '' AND principal_name != 'unknown'
-              AND caller_ip IS NOT NULL AND caller_ip != '' AND caller_ip != 'unknown'
+              AND principal_name IS NOT NULL AND principal_name NOT IN ('', 'unknown', '-anonymous-', 'anonymous')
+              AND caller_ip IS NOT NULL AND caller_ip != '' AND caller_ip NOT IN ('unknown', 'unavailable')
             GROUP BY principal_name, caller_ip, caller_service, target_service, operation
         """, (window_start_sec * 1000, window_end_sec * 1000)).fetchall()
 
         historical_user_ips = {
             (row[0], row[1]) for row in db.execute(
-                "SELECT DISTINCT principal_name, source_ip FROM principal_sources WHERE first_seen < ?",
+                "SELECT DISTINCT principal_name, caller_ip FROM traces WHERE timestamp_ms < ? AND principal_name NOT IN ('unknown', '-anonymous-', 'anonymous', '') AND caller_ip IS NOT NULL AND caller_ip != ''",
                 (window_start_sec * 1000,)
             ).fetchall()
         }
         known_ips = {
             row[0] for row in db.execute(
-                "SELECT DISTINCT source_ip FROM principal_sources WHERE first_seen < ?",
+                "SELECT DISTINCT caller_ip FROM traces WHERE timestamp_ms < ? AND caller_ip IS NOT NULL AND caller_ip != ''",
                 (window_start_sec * 1000,)
             ).fetchall()
         }
+        historical_ip_endpoints = set()
+        try:
+            ip_ep_rows = db.execute(
+                "SELECT DISTINCT caller_ip, target_service, operation FROM traces WHERE timestamp_ms < ? AND caller_ip IS NOT NULL AND caller_ip != '' AND caller_ip NOT IN ('unknown', 'unavailable')",
+                (window_start_sec * 1000,)
+            ).fetchall()
+            for row in ip_ep_rows:
+                historical_ip_endpoints.add(f"{row[0]}->{row[1]}:{row[2]}")
+                known_ips.add(row[0])
+        except Exception:
+            pass
         known_users = {
             row[0] for row in db.execute(
-                "SELECT DISTINCT principal_name FROM principals WHERE first_seen < ?",
+                "SELECT DISTINCT principal_name FROM traces WHERE timestamp_ms < ? AND principal_name NOT IN ('unknown', '-anonymous-', 'anonymous', '')",
                 (window_start_sec * 1000,)
             ).fetchall()
         }
@@ -354,7 +555,12 @@ def detect_anomalies(
         t_svc = uip["target_service"]
         u_op = uip["operation"]
 
-        if not user or user == "unknown" or not ip or ip == "unknown" or u_reqs < 1:
+        if not user or user in {"unknown", "-anonymous-", "anonymous", ""} or not ip or ip in {"unknown", "unavailable", ""} or u_reqs < 1:
+            continue
+
+        # Suppress IP behavioral signals when IP is an unresolved load balancer / F5 proxy
+        from backend.app.services.normalization import is_known_infrastructure_ip
+        if is_known_infrastructure_ip(ip):
             continue
 
         # Case A: Known user from a completely new / unobserved source IP
@@ -405,6 +611,33 @@ def detect_anomalies(
                     baseline=0.0,
                     current=float(u_reqs),
                     text=f"Known IP {ip} was accessed by novel user '{user}' calling '{t_svc}' ({u_reqs} requests)"
+                )],
+                metadata={"user": user, "source_ip": ip, "target_service": t_svc, "operation": u_op, "requests": u_reqs}
+            ))
+
+        # Case C: Established source IP accessing a new endpoint for the first time
+        if ip in known_ips and f"{ip}->{t_svc}:{u_op}" not in historical_ip_endpoints:
+            score = 75
+            anomalies.append(AnomalyEvent(
+                detected_at=detected_at,
+                anomaly_type="unusual_access",
+                severity="medium",
+                score=score,
+                confidence=0.88,
+                caller_service=c_svc,
+                target_service=t_svc,
+                principal_name=user if user and user != "unknown" else None,
+                source_ip=ip,
+                operation=u_op,
+                baseline_value=0.0,
+                current_value=float(u_reqs),
+                delta_percentage=100.0,
+                reasons=[AnomalyReason(
+                    type="ip_new_endpoint",
+                    contribution=score,
+                    baseline=0.0,
+                    current=float(u_reqs),
+                    text=f"Established source IP {ip} exhibited behavioral shift by accessing new endpoint '{u_op}' on target '{t_svc}' for the first time"
                 )],
                 metadata={"user": user, "source_ip": ip, "target_service": t_svc, "operation": u_op, "requests": u_reqs}
             ))

@@ -1,0 +1,51 @@
+# Disable heavy default components
+alertmanager:
+  enabled: false
+
+nodeExporter:
+  enabled: false
+
+kubeStateMetrics:
+  enabled: false
+
+# Minimal Prometheus config
+prometheus:
+  prometheusSpec:
+    retention: 2d
+    scrapeInterval: 30s
+    evaluationInterval: 30s
+    resources:
+      requests:
+        cpu: 100m
+        memory: 256Mi
+      limits:
+        cpu: 500m
+        memory: 512Mi
+    storageSpec:
+      emptyDir: {} # Uses ephemeral memory/disk; replace with PVC if persistence is required
+    additionalScrapeConfigs:
+      - job_name: "tracescope"
+        metrics_path: "/metrics"
+        scheme: "https"
+        tls_config:
+          insecure_skip_verify: false
+          server_name: "trace.n2d.id.vn"
+        static_configs:
+          - targets: ["trace.n2d.id.vn:443"]
+
+# Minimal Grafana config
+grafana:
+  enabled: true
+  adminPassword: "admin" # Change for production
+  service:
+    type: NodePort
+    nodePort: 32080
+  resources:
+    requests:
+      cpu: 50m
+      memory: 128Mi
+    limits:
+      cpu: 200m
+      memory: 256Mi
+  persistence:
+    enabled: false

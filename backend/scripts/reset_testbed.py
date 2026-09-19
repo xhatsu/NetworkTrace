@@ -28,12 +28,13 @@ def wipe_clickhouse():
 
 def wipe_elasticsearch():
     print("Wiping Elasticsearch APM indices...")
-    try:
-        req = urllib.request.Request(f"{ES_URL}/apm-*", method="DELETE")
-        with urllib.request.urlopen(req, timeout=10) as resp:
-            print("  Elasticsearch apm-* indices deleted.")
-    except Exception as e:
-        print(f"  Note on Elasticsearch wipe: {e}")
+    for pattern in ("apm-*", "traces-apm*"):
+        try:
+            req = urllib.request.Request(f"{ES_URL}/{pattern}", method="DELETE")
+            with urllib.request.urlopen(req, timeout=10) as resp:
+                print(f"  Elasticsearch {pattern} indices deleted.")
+        except Exception as e:
+            print(f"  Note on Elasticsearch wipe ({pattern}): {e}")
 
 from backend.app.repositories.clickhouse_migrator import truncate_system_logs
 

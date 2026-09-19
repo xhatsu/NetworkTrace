@@ -56,7 +56,8 @@ CREATE TABLE IF NOT EXISTS traces (
     soap_fault_code Nullable(String),
     outcome_class LowCardinality(String) DEFAULT 'unknown',
     sampling_context Nullable(String),
-    dedup_key Nullable(String)
+    dedup_key Nullable(String),
+    INDEX idx_traces_principal principal_name TYPE set(100) GRANULARITY 1
 ) ENGINE = ReplacingMergeTree(created_at)
 PARTITION BY toYYYYMM(toDateTime(intDiv(timestamp_ms, 1000)))
 ORDER BY (service_name, timestamp_ms, trace_id, span_id);

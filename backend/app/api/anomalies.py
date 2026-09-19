@@ -158,7 +158,14 @@ async def list_anomalies(
     return {"items": items, "count": len(items)}
 
 @router.get("/anomalies/{anomaly_id}")
-async def get_anomaly_detail(anomaly_id: int) -> Dict[str, Any]:
+async def get_anomaly_detail(
+    anomaly_id: int,
+    from_time: Optional[Any] = Query(None, alias="from"),
+    to_time: Optional[Any] = Query(None, alias="to"),
+    start: Optional[Any] = None,
+    end: Optional[Any] = None,
+    window: Optional[str] = None,
+) -> Dict[str, Any]:
     repo = AnomalyRepository()
     top_repo = TopologyRepository()
     item = repo.get_anomaly(anomaly_id)
@@ -167,17 +174,56 @@ async def get_anomaly_detail(anomaly_id: int) -> Dict[str, Any]:
 
     svc = item.get("target_service") or item.get("caller_service")
     observed_start_ms, observed_end_ms, window_known = _observed_bounds(item)
-    observed_start_sec = int(observed_start_ms / 1000)
-    observed_end_sec = max(observed_start_sec + 1, int((observed_end_ms + 999) / 1000))
+
+    # Determine query time range: default to 24h horizon to clearly show baseline & trends
+    horizon_sec = 86400  # Default 24h
+    if window == "1h":
+        horizon_sec = 3600
+    elif window == "6h":
+        horizon_sec = 21600
+    elif window == "24h":
+        horizon_sec = 86400
+    elif window == "7d":
+        horizon_sec = 7 * 86400
+    elif window is None:
+        q_start_ms = _parse_time_ms(from_time) or _parse_time_ms(start)
+        q_end_ms = _parse_time_ms(to_time) or _parse_time_ms(end)
+        if q_start_ms is not None and q_end_ms is not None and (q_end_ms - q_start_ms) >= 86400_000:
+            horizon_sec = max(3600, int((q_end_ms - q_start_ms) / 1000))
+
+    anom_mid_sec = int((observed_start_ms + observed_end_ms) / 2000)
+    start_sec = max(0, anom_mid_sec - horizon_sec)
+    end_sec = max(start_sec + 60, anom_mid_sec + min(7200, max(1800, int(horizon_sec * 0.1))))
+
+    # Select bucket size: 300s for wide horizons (> 12h), 60s for narrower windows
+    chosen_b_size = 300 if (end_sec - start_sec) > 43200 else 60
 
     from backend.app.repositories.aggregate_repository import AggregateRepository
     agg_repo = AggregateRepository()
-    series = agg_repo.query_series(start_sec=max(0, observed_start_sec - 3600), end_sec=observed_end_sec + 1800, bucket_size=60, service=svc) if svc else []
+    raw_series = agg_repo.query_series(
+        start_sec=start_sec,
+        end_sec=end_sec,
+        bucket_size=chosen_b_size,
+        service=svc,
+    ) if svc else []
+
+    if not raw_series and svc:
+        fallback_b_size = 60 if chosen_b_size == 300 else 300
+        raw_series = agg_repo.query_series(
+            start_sec=start_sec,
+            end_sec=end_sec,
+            bucket_size=fallback_b_size,
+            service=svc,
+        )
+        if raw_series:
+            chosen_b_size = fallback_b_size
 
     # Blast-radius and origin calculation
     blast = {}
     origin = {}
     if svc:
+        observed_start_sec = int(observed_start_ms / 1000)
+        observed_end_sec = max(observed_start_sec + 1, int((observed_end_ms + 999) / 1000))
         blast = calculate_blast_radius(svc, start_sec=max(0, observed_start_sec - 1800), end_sec=observed_end_sec + 1800)
         deps = top_repo.get_service_dependencies(svc, start_sec=max(0, observed_start_sec - 1800), end_sec=observed_end_sec + 1800)
         recent_anomalies = repo.list_anomalies(start_ms=(observed_start_sec - 1800)*1000, end_ms=(observed_end_sec + 1800)*1000, limit=20)
@@ -191,6 +237,21 @@ async def get_anomaly_detail(anomaly_id: int) -> Dict[str, Any]:
     pct_change = item.get("delta_percentage")
     if pct_change is None and b_val and b_val > 0:
         pct_change = round(((c_val - b_val) / b_val) * 100, 1)
+
+    series = []
+    for pt in raw_series:
+        b_start = pt.get("bucket_start") or 0
+        ts_ms = b_start * 1000 if b_start < 10_000_000_000 else b_start
+        reqs = pt.get("requests") or 0
+        rps_val = round(reqs / float(chosen_b_size), 3)
+        series.append({
+            **pt,
+            "timestamp_ms": ts_ms,
+            "rps": rps_val,
+            "tps": rps_val,
+            "actual": pt.get("latency_p95") if "latency" in anom_type.lower() else (pt.get("error_rate") * 100 if "error" in anom_type.lower() else rps_val),
+            "expected": b_val if b_val is not None else 0.0,
+        })
 
     item["series"] = series
     item["entity_type"] = "service" if svc else "operation"

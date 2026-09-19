@@ -13,7 +13,7 @@ global:
   # Configure this once (e.g. "0.3.3") so all components share the unified version.
   # Can be overridden per workload below (app.image.tag, ingest.image.tag, etc.).
   image:
-    tag: "0.3.3"
+    tag: "0.3.9"
 
 nameOverride: ""
 fullnameOverride: ""

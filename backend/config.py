@@ -84,6 +84,22 @@ class Settings:
             "http://127.0.0.1:30102,http://localhost:30102,http://localhost:5173",
         ).split(",") if item.strip()
     )
+    # Known infrastructure IP categories
+    known_f5: tuple[str, ...] = tuple(
+        item.strip() for item in os.getenv(
+            "OTEL_KNOWN_F5",
+            "10.240.147.247,10.240.147.249,10.10.1.20,10.20.14.78,10.20.1.15",
+        ).split(",") if item.strip()
+    )
+    known_lb: tuple[str, ...] = tuple(
+        item.strip() for item in os.getenv("OTEL_KNOWN_LB", "").split(",") if item.strip()
+    )
+    known_reverse_proxy: tuple[str, ...] = tuple(
+        item.strip() for item in os.getenv("OTEL_KNOWN_REVERSE_PROXY", "").split(",") if item.strip()
+    )
+    known_nat: tuple[str, ...] = tuple(
+        item.strip() for item in os.getenv("OTEL_KNOWN_NAT", "").split(",") if item.strip()
+    )
     # Known Load Balancer / Ingress IPs treated as supporting attribution context (confidence: low)
     known_load_balancers: tuple[str, ...] = tuple(
         item.strip() for item in os.getenv(

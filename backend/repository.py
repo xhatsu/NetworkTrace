@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import json
 import time
+from datetime import datetime, timezone
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, Iterator, Protocol
@@ -107,9 +108,33 @@ class StorageRepository:
                 latest_row = db.execute("SELECT MAX(created_at) FROM traces").fetchone()
                 latest = int(latest_row[0]) if (latest_row and latest_row[0]) else None
 
+                try:
+                    if filters.get("service"):
+                        b_row = db.execute(
+                            "SELECT AVG(rps_median) FROM baseline_metrics FINAL WHERE dimension_type='service' AND dimension_key=?",
+                            (filters["service"],)
+                        ).fetchone()
+                        b_val = float(b_row[0]) if (b_row and b_row[0]) else 0.0
+                    elif filters.get("account"):
+                        b_rows = db.execute(
+                            "SELECT SUM(rps_median) FROM baseline_metrics FINAL WHERE dimension_type='principal_target' AND dimension_key LIKE ? GROUP BY hour_of_day, day_of_week",
+                            (f"{filters['account']}->%",)
+                        ).fetchall()
+                        b_val = (sum(float(r[0]) for r in b_rows) / len(b_rows)) if b_rows else 0.0
+                    else:
+                        b_rows = db.execute(
+                            "SELECT SUM(rps_median) FROM baseline_metrics FINAL WHERE dimension_type='service' GROUP BY hour_of_day, day_of_week"
+                        ).fetchall()
+                        b_val = (sum(float(r[0]) for r in b_rows) / len(b_rows)) if b_rows else 0.0
+                    baseline_rps = round(b_val, 2)
+                except Exception:
+                    baseline_rps = observed_rps
+
                 return {
                     "observed_rps": observed_rps,
                     "observed_tps": observed_rps,
+                    "baseline_rps": baseline_rps,
+                    "baseline_tps": baseline_rps,
                     "total_requests": total_requests,
                     "active_services": services,
                     "active_accounts": accounts,
@@ -158,6 +183,15 @@ class StorageRepository:
             if use_mb:
                 start_sec = int(start_ms / 1000)
                 end_sec = int(end_ms / 1000)
+                duration_h = (end_sec - start_sec) / 3600.0
+
+                if duration_h <= 36.0:
+                    grain_sec = 60
+                elif duration_h <= 192.0:  # Up to 8 days (7d preset = 168h)
+                    grain_sec = 300
+                else:  # 30d preset = 720h or longer
+                    grain_sec = 3600
+
                 clauses = ["bucket_size = 60", "bucket_start >= ?", "bucket_start < ?"]
                 args: list[Any] = [start_sec, end_sec]
                 if filters.get("service"):
@@ -171,30 +205,104 @@ class StorageRepository:
                     args.append(filters["account"])
                 where = " AND ".join(clauses)
 
-                rows = db.execute(f"""
-                    SELECT
-                        bucket_start * 1000 AS timestamp_ms,
-                        ROUND(SUM(request_count) / 60.0, 2) AS rps,
-                        ROUND(SUM(request_count) / 60.0, 2) AS tps,
-                        ROUND(AVG(latency_avg), 1) AS p50_ms,
-                        ROUND(MAX(latency_p95), 1) AS p95_ms,
-                        ROUND(MAX(latency_p99), 1) AS p99_ms,
-                        ROUND(CASE WHEN SUM(request_count) > 0 THEN SUM(error_count) * 1.0 / SUM(request_count) ELSE 0 END, 4) AS http_5xx_rate,
-                        SUM(request_count) AS sample_count
-                    FROM metric_buckets
-                    WHERE {where}
-                    GROUP BY bucket_start
-                    ORDER BY bucket_start ASC
-                """, args).fetchall()
+                if grain_sec == 60:
+                    rows = db.execute(f"""
+                        SELECT
+                            bucket_start * 1000 AS timestamp_ms,
+                            ROUND(SUM(request_count) / 60.0, 2) AS rps,
+                            ROUND(SUM(request_count) / 60.0, 2) AS tps,
+                            ROUND(AVG(latency_avg), 1) AS p50_ms,
+                            ROUND(MAX(latency_p95), 1) AS p95_ms,
+                            ROUND(MAX(latency_p99), 1) AS p99_ms,
+                            ROUND(CASE WHEN SUM(request_count) > 0 THEN SUM(error_count) * 1.0 / SUM(request_count) ELSE 0 END, 4) AS http_5xx_rate,
+                            SUM(request_count) AS sample_count,
+                            bucket_start
+                        FROM metric_buckets
+                        WHERE {where}
+                        GROUP BY bucket_start
+                        ORDER BY bucket_start ASC
+                    """, args).fetchall()
+                else:
+                    rows = db.execute(f"""
+                        SELECT
+                            (intDiv(bucket_start, {grain_sec}) * {grain_sec}) * 1000 AS timestamp_ms,
+                            ROUND(SUM(request_count) / {float(grain_sec)}, 2) AS rps,
+                            ROUND(SUM(request_count) / {float(grain_sec)}, 2) AS tps,
+                            ROUND(AVG(latency_avg), 1) AS p50_ms,
+                            ROUND(MAX(latency_p95), 1) AS p95_ms,
+                            ROUND(MAX(latency_p99), 1) AS p99_ms,
+                            ROUND(CASE WHEN SUM(request_count) > 0 THEN SUM(error_count) * 1.0 / SUM(request_count) ELSE 0 END, 4) AS http_5xx_rate,
+                            SUM(request_count) AS sample_count,
+                            (intDiv(bucket_start, {grain_sec}) * {grain_sec}) AS bucket_start
+                        FROM metric_buckets
+                        WHERE {where}
+                        GROUP BY timestamp_ms, bucket_start
+                        ORDER BY timestamp_ms ASC
+                    """, args).fetchall()
+
+                baseline_lookup: dict[tuple[int, int], float] = {}
+                try:
+                    if filters.get("service"):
+                        b_rows = db.execute("""
+                            SELECT hour_of_day, day_of_week, rps_median
+                            FROM baseline_metrics FINAL
+                            WHERE dimension_type = 'service' AND dimension_key = ?
+                        """, (filters["service"],)).fetchall()
+                        for br in b_rows:
+                            baseline_lookup[(int(br["hour_of_day"]), int(br["day_of_week"]))] = float(br["rps_median"])
+                    elif filters.get("account"):
+                        b_rows = db.execute("""
+                            SELECT hour_of_day, day_of_week, SUM(rps_median) AS total_rps
+                            FROM baseline_metrics FINAL
+                            WHERE dimension_type = 'principal_target' AND dimension_key LIKE ?
+                            GROUP BY hour_of_day, day_of_week
+                        """, (f"{filters['account']}->%",)).fetchall()
+                        for br in b_rows:
+                            baseline_lookup[(int(br["hour_of_day"]), int(br["day_of_week"]))] = float(br["total_rps"])
+                    elif filters.get("operation"):
+                        b_rows = db.execute("""
+                            SELECT hour_of_day, day_of_week, rps_median
+                            FROM baseline_metrics FINAL
+                            WHERE dimension_type = 'target_operation' AND dimension_key LIKE ?
+                        """, (f"%->{filters['operation']}",)).fetchall()
+                        for br in b_rows:
+                            baseline_lookup[(int(br["hour_of_day"]), int(br["day_of_week"]))] = float(br["rps_median"])
+                    else:
+                        # System-wide: sum baseline across all target services by hour-of-day and day-of-week
+                        b_rows = db.execute("""
+                            SELECT hour_of_day, day_of_week, round(SUM(rps_median), 4) AS total_rps
+                            FROM baseline_metrics FINAL
+                            WHERE dimension_type = 'service'
+                            GROUP BY hour_of_day, day_of_week
+                        """).fetchall()
+                        for br in b_rows:
+                            baseline_lookup[(int(br["hour_of_day"]), int(br["day_of_week"]))] = float(br["total_rps"])
+                except Exception:
+                    baseline_lookup = {}
+
+                if baseline_lookup:
+                    non_zero = [v for v in baseline_lookup.values() if v > 0]
+                    fallback_baseline = (sorted(non_zero)[len(non_zero) // 2]) if non_zero else 0.0
+                else:
+                    rates = [float(r["rps"]) for r in rows]
+                    fallback_baseline = (sorted(rates)[len(rates) // 2]) if rates else 0.0
 
                 output = []
                 for r in rows:
                     rps = float(r["rps"])
+                    tps = float(r["tps"])
+                    b_sec = int(r["bucket_start"])
+                    dt = datetime.fromtimestamp(b_sec, tz=timezone.utc)
+                    point_base = baseline_lookup.get((dt.hour, dt.weekday()), fallback_baseline)
+                    if point_base <= 0 and fallback_baseline > 0:
+                        point_base = fallback_baseline
+
                     output.append({
                         "timestamp_ms": int(r["timestamp_ms"]),
                         "rps": rps,
-                        "tps": float(r["tps"]),
-                        "baseline_rps": rps,
+                        "tps": tps,
+                        "baseline_rps": round(float(point_base), 4),
+                        "baseline_tps": round(float(point_base), 4),
                         "p50_ms": float(r["p50_ms"]),
                         "p95_ms": float(r["p95_ms"]),
                         "p99_ms": float(r["p99_ms"]),

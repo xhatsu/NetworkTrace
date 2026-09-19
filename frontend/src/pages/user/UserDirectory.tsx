@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, Link } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import {
   Activity,
@@ -15,6 +15,7 @@ import {
   Sparkles,
   User,
   Users,
+  UserX,
   Zap,
 } from "lucide-react";
 import { api, queryString } from "../../api";
@@ -84,6 +85,13 @@ export function UserDirectory() {
           </div>
 
           <div className="flex items-center gap-2">
+            <Link
+              to="/unknown-users"
+              className="flex items-center gap-1.5 rounded-full border border-amber-500/40 bg-amber-500/15 px-3 py-1 text-xs font-mono font-bold text-amber-300 hover:bg-amber-500/25 hover:text-white transition-all"
+            >
+              <UserX size={13} />
+              <span>{t("Unknown Users & Public Traffic", "Lưu Lượng Chưa Định Danh")}</span>
+            </Link>
             <span className="rounded-full border border-emerald-500/40 bg-emerald-500/15 px-3 py-1 text-xs font-mono font-bold text-emerald-300">
               ● {t("Active Behavioral Engine", "Động Cơ Hành Vi Đang Hoạt Động")}
             </span>

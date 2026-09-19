@@ -117,7 +117,8 @@ spec:
   ports:
     - name: http
       port: 8200
-      targetPort: http
+      targetPort: 8200
+      nodePort: 30820
 ---
 apiVersion: apps/v1
 kind: Deployment

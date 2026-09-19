@@ -28,6 +28,7 @@ def mad(vals: List[float], med: Optional[float] = None) -> float:
 def rebuild_baselines(
     db_path: Optional[str] = None,
     target_services: Optional[List[str]] = None,
+    max_bucket_start: Optional[int] = None,
 ) -> int:
     base_repo = BaselineRepository(db_path)
 
@@ -39,6 +40,9 @@ def rebuild_baselines(
         placeholders = ",".join("?" for _ in target_services)
         clauses.append(f"target_service IN ({placeholders})")
         args.extend(target_services)
+    if max_bucket_start is not None:
+        clauses.append("bucket_start <= ?")
+        args.append(max_bucket_start)
 
     with get_connection(db_path) as db:
         # We compute baselines over 5-minute buckets (bucket_size = 300)

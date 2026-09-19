@@ -148,6 +148,7 @@ def _run_elasticsearch_sync(db_path=None) -> dict:
 
 def run_jobs(db_path=None) -> dict[str, Any]:
     started = int(time.time() * 1000)
+    started_mono = time.monotonic()
     with db_transaction(db_path) as db:
         db.execute("DELETE FROM jobs WHERE name=?", ("behavioral-observability",))
         db.execute("INSERT INTO jobs(name,status,started_at_ms,detail,processed_count) VALUES(?,?,?,?,0)",
@@ -162,8 +163,16 @@ def run_jobs(db_path=None) -> dict[str, Any]:
         baselines = _run_stage("rebuild_baselines", lambda: _run_changed_baselines(db_path))
         anomalies = _run_stage("detect_anomalies", lambda: _run_revised_anomalies(db_path))
         principals = _run_stage("process_principal_intelligence", lambda: process_principal_intelligence(db_path=db_path))
+
+        from backend.app.services.prometheus_metrics import update_worker_prometheus_metrics
+        prom_snap = _run_stage(
+            "update_prometheus_metrics",
+            lambda: update_worker_prometheus_metrics(db_path=db_path, duration_sec=round(time.monotonic() - started_mono, 3)),
+        )
+
         result = {**aggregates, "baselines": baselines, "anomalies": len(anomalies),
-                  "principal_records": principals["processed"], "principal_changes": principals["changes"]}
+                  "principal_records": principals["processed"], "principal_changes": principals["changes"],
+                  "prometheus_metrics_updated": True}
         if es_sync is not None:
             result["elasticsearch_read"] = es_sync.get("read", 0)
             result["elasticsearch_inserted"] = es_sync.get("inserted", 0)

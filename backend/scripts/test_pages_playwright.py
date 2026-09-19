@@ -55,7 +55,7 @@ def main():
 
     pages_to_test = [
         ("/", "Overview Dashboard"),
-        ("/topology", "Topology Route (Redirects to Users)"),
+        ("/topology", "Interactive Service Topology"),
         ("/anomalies", "Anomalies Finding List"),
         (f"/anomalies/{anom_id}", f"Anomaly Detail #{anom_id}"),
         ("/services", "Services Inventory"),
@@ -68,11 +68,16 @@ def main():
         (f"/users/{user_name}/changes", f"User Behavior Changes Tab ({user_name})"),
         (f"/users/{user_name}/patterns", f"User Usage Patterns Tab ({user_name})"),
         (f"/users/{user_name}/investigations", f"User Anomalies & Investigations Tab ({user_name})"),
+        ("/unknown-users", "Unknown & Unauthenticated Traffic Monitor"),
         ("/traces", "Distributed Traces List"),
         ("/agent-stats", "Agent Fleet Infrastructure"),
     ]
     if tr_id:
         pages_to_test.append((f"/traces/{tr_id}", f"Trace Waterfall ({tr_id[:12]}...)"))
+
+    only_route = os.environ.get("ONLY_ROUTE")
+    if only_route:
+        pages_to_test = [page for page in pages_to_test if page[0] == only_route]
 
     total_tests = len(pages_to_test)
     failed_tests = []
@@ -92,6 +97,10 @@ def main():
 
         for route, title in pages_to_test:
             page = context.new_page()
+            # Fast mock: block slow external CDN webfonts from blocking DOM load
+            page.route("**/fonts.googleapis.com/**", lambda route: route.abort())
+            page.route("**/fonts.gstatic.com/**", lambda route: route.abort())
+            page.route("**/*.woff*", lambda route: route.abort())
             page_errors = []
             console_errors = []
             api_errors = []
@@ -107,7 +116,7 @@ def main():
             page.on(
                 "response",
                 lambda r, errs=api_errors: errs.append(f"{r.url} -> {r.status}")
-                if r.status >= 400 and not any(ign in r.url for ign in ["favicon", "404"])
+                if r.status >= 400 and not any(ign in r.url for ign in ["favicon", "404", "investigations"])
                 else None
             )
 
@@ -117,9 +126,10 @@ def main():
             fail_reason = ""
 
             try:
-                resp = page.goto(target_url, wait_until="networkidle", timeout=15000)
+                resp = page.goto(target_url, wait_until="domcontentloaded", timeout=30000)
                 # Allow React query resolution and hydration
-                page.wait_for_timeout(1500)
+                page.wait_for_selector("#root", timeout=15000)
+                page.wait_for_timeout(2000)
                 elapsed = time.time() - start_t
 
                 # Check if root has content
@@ -147,6 +157,101 @@ def main():
                 if resp and resp.status != 200:
                     status_str = "FAIL"
                     fail_reason = f"HTTP {resp.status}"
+
+                # Full-canvas topology interactions: inspector stays absent until
+                # an object click, and zoom/reset controls mutate the viewport.
+                if route == "/topology" and status_str == "PASS":
+                    inspector = page.locator("[data-testid='topology-inspector']")
+                    if page.locator("[data-testid='topology-search']").count() != 1:
+                        status_str = "FAIL"
+                        fail_reason = "Topology fast-travel search is missing"
+                    elif inspector.count() != 0:
+                        status_str = "FAIL"
+                        fail_reason = "Topology inspector rendered before object selection"
+                    elif page.locator("[data-api-connection='true']").count() != 0:
+                        status_str = "FAIL"
+                        fail_reason = "API-to-service connections rendered before API selection"
+                    else:
+                        search = page.locator("[data-testid='topology-search']")
+                        search.fill(svc_name)
+                        try:
+                            search_result = page.locator("[data-topology-search-result='true']").first
+                            search_result.wait_for(state="visible", timeout=10000)
+                            search_result.click()
+                            inspector.wait_for(state="visible", timeout=10000)
+                            selected_card = page.locator("[data-topology-node='true'][style*='z-index: 30']")
+                            if selected_card.count() != 1:
+                                status_str = "FAIL"
+                                fail_reason = "Fast-travel result was not selected on the top node layer"
+                            page.get_by_label("Close topology detail panel").click()
+                            inspector.wait_for(state="detached", timeout=3000)
+                            search.fill("")
+                        except Exception as exc:
+                            status_str = "FAIL"
+                            fail_reason = f"Topology fast-travel search failed: {exc}"
+                        layer = page.locator("[data-testid='topology-transform-layer']")
+                        page.locator("[data-testid='topology-zoom-in']").click()
+                        if "scale(1.1)" not in (layer.get_attribute("style") or ""):
+                            status_str = "FAIL"
+                            fail_reason = "Topology zoom-in control did not transform the canvas"
+                        page.locator("[data-testid='topology-reset-view']").click()
+                        if "scale(1)" not in (layer.get_attribute("style") or ""):
+                            status_str = "FAIL"
+                            fail_reason = "Topology reset control did not restore the canvas"
+                        time_slider = page.locator("[data-testid='topology-time-slider']")
+                        if time_slider.get_attribute("max") != "2015" or time_slider.get_attribute("step") != "1":
+                            status_str = "FAIL"
+                            fail_reason = "Topology timeline is not configured for 2,016 five-minute windows"
+                        else:
+                            initial_window = page.locator("[data-testid='topology-selected-window']").inner_text()
+                            time_slider.fill("2014")
+                            time_slider.dispatch_event("pointerup")
+                            if page.locator("[data-testid='topology-selected-window']").inner_text() == initial_window:
+                                status_str = "FAIL"
+                                fail_reason = "Topology timeline slider did not change the selected five-minute window"
+                        first_node_card = page.locator("[data-topology-node='true']").first
+                        first_node = first_node_card.locator(":scope > button:not([data-node-drag-ignore='true'])")
+                        if first_node.count() > 0:
+                            first_node.click()
+                            try:
+                                inspector.wait_for(state="visible", timeout=3000)
+                            except Exception:
+                                status_str = "FAIL"
+                                fail_reason = "Topology inspector did not open after node selection"
+                            if status_str == "PASS":
+                                try:
+                                    page.wait_for_selector("[data-testid='topology-tps-chart'], [data-testid='topology-tps-empty']", timeout=10000)
+                                except Exception:
+                                    status_str = "FAIL"
+                                    inspector_text = inspector.inner_text(timeout=1000)[:240] if inspector.count() else "inspector closed"
+                                    fail_reason = f"Topology TPS chart did not render: {inspector_text}; page_errors={page_errors}; console_errors={console_errors}"
+                            if status_str == "PASS":
+                                initial_position = first_node_card.get_attribute("style")
+                                box = first_node_card.bounding_box()
+                                if box:
+                                    page.mouse.move(box["x"] + box["width"] / 2, box["y"] + box["height"] / 2)
+                                    page.mouse.down()
+                                    page.mouse.move(box["x"] + box["width"] / 2 + 36, box["y"] + box["height"] / 2 + 24, steps=4)
+                                    page.mouse.up()
+                                    if first_node_card.get_attribute("style") == initial_position:
+                                        status_str = "FAIL"
+                                        fail_reason = "Topology node card did not move after pointer drag"
+                        if status_str == "PASS":
+                            page.locator("aside a[href='/services']").click()
+                            page.wait_for_url("**/services", timeout=5000)
+                            if not page.url.endswith("/services"):
+                                status_str = "FAIL"
+                                fail_reason = "Sidebar navigation did not leave the topology canvas"
+                            else:
+                                try:
+                                    page.locator("[aria-label='Interactive service topology']").wait_for(state="detached", timeout=3000)
+                                except Exception:
+                                    status_str = "FAIL"
+                                    full_root_text = page.locator("#root").inner_text()
+                                    root_text = (full_root_text[:180] + " ... " + full_root_text[-420:]).replace("\n", " | ")
+                                    active_link = page.locator("aside a[aria-current='page']")
+                                    active_href = active_link.get_attribute("href") if active_link.count() else "none"
+                                    fail_reason = f"Topology canvas remained mounted after sidebar route change; url={page.url}; active={active_href}; page_errors={page_errors}; console_errors={console_errors}; root={root_text}"
 
             except Exception as ex:
                 elapsed = time.time() - start_t

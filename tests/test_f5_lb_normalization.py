@@ -65,3 +65,48 @@ def test_untrusted_client_cannot_spoof_xff():
     normalized = normalize_otel_record(raw)
     assert normalized.original_client_ip == "203.0.113.50"
     assert normalized.original_client_ip_trusted == 0
+
+
+def test_f5_unresolved_ip_handling():
+    """When F5 forwards request without XFF/X-Real-IP, do NOT guess F5 as client!"""
+    raw = {
+        "service": {"name": "bpm-sale-service"},
+        "client": {"ip": "10.240.147.249"},  # F5 BIG-IP IP
+        "http": {
+            "request": {
+                "method": "POST",
+                "headers": {},  # No XFF header
+            },
+            "response": {"status_code": 200},
+        },
+        "user": {"name": "alice"},
+    }
+    normalized = normalize_otel_record(raw)
+    assert normalized.observed_ip == "10.240.147.249"
+    assert normalized.effective_client_ip == "unavailable"
+    assert normalized.effective_client_ip != "10.240.147.249"
+    assert normalized.ip_resolution == "load_balancer_unresolved"
+    assert normalized.client_identity_quality == "low"
+    assert normalized.traffic_class == "identified"
+    assert normalized.context_quality == "medium"  # identified user, but unresolved LB client IP
+
+
+def test_anonymous_and_f5_unresolved_quality_ladder():
+    """Worst-case: anonymous traffic behind unresolved F5 load balancer."""
+    raw = {
+        "service": {"name": "public-api"},
+        "client": {"ip": "10.240.147.249"},
+        "http": {
+            "request": {"method": "GET"},
+            "response": {"status_code": 200},
+        },
+        # No user / principal
+    }
+    normalized = normalize_otel_record(raw)
+    assert normalized.observed_ip == "10.240.147.249"
+    assert normalized.effective_client_ip == "unavailable"
+    assert normalized.ip_resolution == "load_balancer_unresolved"
+    assert normalized.client_identity_quality == "low"
+    assert normalized.traffic_class == "anonymous"
+    assert normalized.context_quality == "very_low"
+

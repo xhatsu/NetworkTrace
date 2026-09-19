@@ -25,7 +25,7 @@ export function UserTopologyTab() {
   const { principal } = useOutletContext<{ principal: string; profile: any }>();
   const { filters } = useFilters();
   const { t } = useI18n();
-  const [timeFilter, setTimeFilter] = useState<"5m" | "1h" | "24h" | "all">("1h");
+  const [timeFilter, setTimeFilter] = useState<"5m" | "1h" | "24h" | "7d" | "30d" | "all">("1h");
   const [statusFilter, setStatusFilter] = useState<"all" | "normal" | "changed" | "new" | "errors">("all");
   const [showNetworkPath, setShowNetworkPath] = useState<boolean>(false);
   const [expandedTarget, setExpandedTarget] = useState<string | null>(null);
@@ -45,6 +45,12 @@ export function UserTopologyTab() {
         extra.end = String(now);
       } else if (timeFilter === "24h") {
         extra.start = String(now - 86400_000);
+        extra.end = String(now);
+      } else if (timeFilter === "7d") {
+        extra.start = String(now - 7 * 86400_000);
+        extra.end = String(now);
+      } else if (timeFilter === "30d") {
+        extra.start = String(now - 30 * 86400_000);
         extra.end = String(now);
       }
       return api<any>(`/api/v1/users/${encodeURIComponent(principal)}/topology?${queryString(filters, extra)}`);
@@ -100,7 +106,7 @@ export function UserTopologyTab() {
 
           {/* Time Filter */}
           <div className="flex items-center rounded-lg border border-white/10 bg-black/40 p-0.5 text-xs">
-            {(["5m", "1h", "24h", "all"] as const).map((tf) => (
+            {(["5m", "1h", "24h", "7d", "30d", "all"] as const).map((tf) => (
               <button
                 key={tf}
                 onClick={() => setTimeFilter(tf)}
@@ -110,7 +116,17 @@ export function UserTopologyTab() {
                     : "text-[#cbd5e1] hover:text-white"
                 }`}
               >
-                {tf === "5m" ? t("Last 5m", "5 phút qua") : tf === "1h" ? t("Last 1h", "1 giờ qua") : tf === "24h" ? t("Last 24h", "24 giờ qua") : t("All Time", "Tất cả")}
+                {tf === "5m"
+                  ? t("Last 5m", "5 phút qua")
+                  : tf === "1h"
+                  ? t("Last 1h", "1 giờ qua")
+                  : tf === "24h"
+                  ? t("Last 24h", "24 giờ qua")
+                  : tf === "7d"
+                  ? t("Last 7d", "7 ngày qua")
+                  : tf === "30d"
+                  ? t("Last 30d", "30 ngày qua")
+                  : t("All Time", "Tất cả")}
               </button>
             ))}
           </div>

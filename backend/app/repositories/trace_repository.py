@@ -27,7 +27,9 @@ class TraceRepository:
             "auth_result", "auth_evidence", "caller_resolution_method", "caller_confidence",
             "network_peer_ip", "original_client_ip", "original_client_ip_trusted",
             "source_group", "operation_key", "soap_fault_code", "outcome_class",
-            "sampling_context", "dedup_key"
+            "sampling_context", "dedup_key", "observed_ip", "effective_client_ip",
+            "ip_resolution", "client_identity_quality", "context_quality",
+            "traffic_class", "is_agent_trace", "request_bytes", "response_bytes"
         ]
         with db_transaction(self.db_path) as db:
             table_info = db.execute("PRAGMA table_info(traces)").fetchall()
@@ -37,9 +39,12 @@ class TraceRepository:
             dedup_keys = [t.dedup_key for t in traces if getattr(t, "dedup_key", None)]
             existing_keys = set()
             if dedup_keys:
-                placeholders = ",".join("?" for _ in dedup_keys)
-                rows = db.execute(f"SELECT dedup_key FROM traces WHERE dedup_key IN ({placeholders})", dedup_keys).fetchall()
-                existing_keys = {r[0] for r in rows if r[0]}
+                chunk_sz = 500
+                for k in range(0, len(dedup_keys), chunk_sz):
+                    dk_chunk = dedup_keys[k:k + chunk_sz]
+                    placeholders = ",".join("?" for _ in dk_chunk)
+                    rows = db.execute(f"SELECT dedup_key FROM traces WHERE dedup_key IN ({placeholders})", dk_chunk).fetchall()
+                    existing_keys.update(r[0] for r in rows if r[0])
 
             traces_to_insert = [t for t in traces if not getattr(t, "dedup_key", None) or t.dedup_key not in existing_keys]
             if not traces_to_insert:

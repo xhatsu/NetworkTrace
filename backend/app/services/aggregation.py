@@ -12,6 +12,7 @@ from backend.app.models.topology import PrincipalServiceEdge, ServiceEdge
 from backend.app.repositories.aggregate_repository import AggregateRepository
 from backend.app.repositories.db_context import db_transaction, get_connection
 from backend.app.repositories.topology_repository import TopologyRepository
+from backend.app.repositories.interactive_topology_repository import InteractiveTopologyRepository
 
 FIVE_MINUTES_MS = 300_000
 AGGREGATION_SLICE_MS = 6 * 60 * 60 * 1000
@@ -266,6 +267,10 @@ def _aggregate_slice(start_ms: int, end_ms: int, db_path: Optional[str]) -> Dict
         for (principal, caller, target), value in principal_edges_map.items()
     ]
     top_repo.save_edges(service_edges, principal_edges)
+    # Interactive topology uses a separate bounded 5-minute/current materialization.
+    # It is a no-op in Elasticsearch mode, where the read repository performs
+    # server-side aggregations against the configured ELK index.
+    InteractiveTopologyRepository(db_path).materialize_slice(start_ms, end_ms)
     raw_rows = sum(bucket.request_count for bucket in buckets_1m)
     all_bucket_rows = len(buckets_1m) + len(buckets_5m)
     log.info(json.dumps({

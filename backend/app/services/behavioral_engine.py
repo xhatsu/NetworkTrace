@@ -40,6 +40,7 @@ EVENT_FAMILY = {
     "NEW_RELATIONSHIP": "access",
     "TARGET_FANOUT_SURGE": "access",
     "OPERATION_MIX_SHIFT": "access",
+    "UNUSUAL_ACCESS": "access",
     # Activity family (cap: 35)
     "DORMANT_REACTIVATED": "activity",
     "PRINCIPAL_RATE_SURGE": "activity",
@@ -71,6 +72,7 @@ BASE_IMPORTANCE = {
     "NEW_RELATIONSHIP": "low",
     "TARGET_FANOUT_SURGE": "medium",
     "OPERATION_MIX_SHIFT": "medium",
+    "UNUSUAL_ACCESS": "high",
     "DORMANT_REACTIVATED": "high",
     "PRINCIPAL_RATE_SURGE": "medium",
     "UNUSUAL_TIME": "low",
@@ -100,6 +102,7 @@ EVENT_SCORES = {
     "NEW_RELATIONSHIP": 15,
     "TARGET_FANOUT_SURGE": 25,
     "OPERATION_MIX_SHIFT": 25,
+    "UNUSUAL_ACCESS": 30,
     # Activity
     "DORMANT_REACTIVATED": 30,
     "PRINCIPAL_RATE_SURGE": 20,
@@ -158,11 +161,14 @@ def evaluate_readiness(
     - Relationship disappearance: repeated expected occurrences across several cycles
     - Authentication / policy rules: always ready (no personal-history requirement)
     """
+    p_name = principal_id.split(":")[-1] if ":" in principal_id else principal_id
+    if not p_name or p_name in ("-anonymous-", "unknown", "anonymous", ""):
+        return False, "anonymous_not_eligible"
+
     # Explicit policy or authentication detectors have no personal-history requirement
     if detector in {"AUTH_FAILURE_BURST", "FAILURE_THEN_SUCCESS", "SOURCE_IDENTITY_FANOUT", "DATA_QUALITY_GAP", "NEW_PRINCIPAL_ON_SOURCE"}:
         return True, "ready"
 
-    p_name = principal_id.split(":")[-1] if ":" in principal_id else principal_id
     row = db.execute(
         "SELECT MIN(timestamp_ms), MAX(timestamp_ms), COUNT(DISTINCT timestamp_ms / 86400000), COUNT(*) "
         "FROM traces WHERE principal_id = ? OR (principal_id IS NULL AND principal_name = ?)",
@@ -325,6 +331,11 @@ def get_or_create_incident(
     Finds an open incident for this principal + context within 30 minutes of last activity,
     under the 24-hour lifetime cap. If older than 24 hours, marks resolved and starts a successor.
     """
+    parts = principal_id.split(":")
+    p_name = parts[1] if len(parts) >= 2 else principal_id
+    if not p_name or p_name in ("-anonymous-", "unknown", "anonymous", ""):
+        return {}
+
     cache_key = (principal_id, environment, category)
     cached = incident_cache.get(cache_key) if incident_cache is not None else None
     row = cached or db.execute("""
@@ -543,6 +554,9 @@ def emit_behavioral_change(
     parts = principal_id.split(":")
     environment = parts[0] if len(parts) >= 2 else "production"
     principal_name = parts[1] if len(parts) >= 2 else principal_id
+
+    if not principal_name or principal_name in ("-anonymous-", "unknown", "anonymous", ""):
+        return 0
 
     # Check operator override
     scope_key = f"{principal_id}|{change_type}|{new_value}"
@@ -776,7 +790,7 @@ def detect_caller_principal_switch(
         FROM traces
         WHERE caller_service = ? AND target_service = ? AND operation_key = ?
           AND timestamp_ms >= ? AND timestamp_ms < ?
-          AND principal_name IS NOT NULL AND principal_name != 'unknown'
+          AND principal_name IS NOT NULL AND principal_name NOT IN ('unknown', '-anonymous-', 'anonymous', '')
         GROUP BY principal_id, principal_name
     """, (caller_service, target_service, operation_key, window_start_ms, window_end_ms)).fetchall()
 
@@ -788,7 +802,7 @@ def detect_caller_principal_switch(
         SELECT principal_id, COUNT(*) as cnt
         FROM traces
         WHERE caller_service = ? AND target_service = ? AND operation_key = ?
-          AND timestamp_ms < ? AND principal_name IS NOT NULL AND principal_name != 'unknown'
+          AND timestamp_ms < ? AND principal_name IS NOT NULL AND principal_name NOT IN ('unknown', '-anonymous-', 'anonymous', '')
         GROUP BY principal_id ORDER BY cnt DESC
     """, (caller_service, target_service, operation_key, window_start_ms)).fetchall()
 
@@ -987,6 +1001,10 @@ def detect_explicit_auth_anomalies(
     - AUTH_FAILURE_BURST: >= 5 explicit auth failures in window
     - FAILURE_THEN_SUCCESS: Explicit failure followed by explicit success in same window
     """
+    p_name = principal_id.split(":")[-1] if ":" in principal_id else principal_id
+    if not p_name or p_name in ("-anonymous-", "unknown", "anonymous", ""):
+        return []
+
     events_emitted = []
 
     # Check explicit auth failure count

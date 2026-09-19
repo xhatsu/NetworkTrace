@@ -1,12 +1,47 @@
 """Return dependency graphs from materialized edges for bounded interactive reads."""
 from __future__ import annotations
 import time
+from datetime import datetime
 from typing import Any, Dict, Optional
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, HTTPException, Query
 from backend.app.repositories.topology_repository import TopologyRepository
+from backend.app.repositories.interactive_topology_repository import InteractiveTopologyRepository
 from backend.app.repositories.db_context import get_connection
+from backend.app.models.interactive_topology import (
+    PrincipalIpPageResponse,
+    ServiceTopologyResponse,
+    TopologyDetailResponse,
+    TopologyExpansionResponse,
+)
 
 router = APIRouter(prefix="/api/v1", tags=["topology"])
+
+
+def _parse_ms(value: Optional[str | int]) -> Optional[int]:
+    if value is None or value == "":
+        return None
+    try:
+        number = int(value)
+        return number * 1000 if number < 10_000_000_000 else number
+    except (TypeError, ValueError):
+        try:
+            text = str(value).replace("Z", "+00:00")
+            return int(datetime.fromisoformat(text).timestamp() * 1000)
+        except (TypeError, ValueError, OverflowError):
+            raise HTTPException(status_code=422, detail="time must be epoch milliseconds or ISO-8601") from None
+
+
+def _interactive_window(
+    window: str,
+    from_time: Optional[str | int],
+    to_time: Optional[str | int],
+) -> tuple[InteractiveTopologyRepository, Dict[str, Any]]:
+    repo = InteractiveTopologyRepository()
+    try:
+        resolved = repo.resolve_window(window, _parse_ms(from_time), _parse_ms(to_time))
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from None
+    return repo, resolved
 
 def _time_window(from_t: Optional[int], to_t: Optional[int]) -> tuple[int, int]:
     if from_t and to_t:
@@ -53,3 +88,118 @@ async def get_service_topology(
 
     connected_nodes = [n for n in full_top.get("nodes", []) if n.get("name") in connected_node_names]
     return {"nodes": connected_nodes, "edges": connected_edges}
+
+
+# ---------------------------------------------------------------------------
+# Interactive service -> API -> principal topology contracts
+# ---------------------------------------------------------------------------
+
+
+@router.get("/topology/search")
+def interactive_topology_search(
+    q: str = Query(..., min_length=2, max_length=200),
+    limit: int = Query(20, ge=1, le=50),
+    window: str = Query("7d"),
+    from_time: Optional[str] = Query(None, alias="from"),
+    to_time: Optional[str] = Query(None, alias="to"),
+) -> Dict[str, Any]:
+    repo, resolved = _interactive_window(window, from_time, to_time)
+    return repo.search_entities(q, resolved, limit)
+
+
+@router.get("/topology/services", response_model=ServiceTopologyResponse)
+def interactive_service_graph(
+    window: str = Query("5m"),
+    from_time: Optional[str] = Query(None, alias="from"),
+    to_time: Optional[str] = Query(None, alias="to"),
+) -> Dict[str, Any]:
+    repo, resolved = _interactive_window(window, from_time, to_time)
+    return repo.service_graph(resolved)
+
+
+@router.get("/topology/services/{service}/apis", response_model=TopologyExpansionResponse)
+def interactive_service_apis(
+    service: str,
+    window: str = Query("5m"),
+    from_time: Optional[str] = Query(None, alias="from"),
+    to_time: Optional[str] = Query(None, alias="to"),
+) -> Dict[str, Any]:
+    repo, resolved = _interactive_window(window, from_time, to_time)
+    return repo.service_apis(service, resolved)
+
+
+@router.get("/topology/services/{service}/api-connections", response_model=ServiceTopologyResponse)
+def interactive_api_connections(
+    service: str,
+    api: str = Query(..., min_length=1, max_length=500),
+    window: str = Query("5m"),
+    from_time: Optional[str] = Query(None, alias="from"),
+    to_time: Optional[str] = Query(None, alias="to"),
+) -> Dict[str, Any]:
+    repo, resolved = _interactive_window(window, from_time, to_time)
+    return repo.api_connections(service, api, resolved)
+
+
+@router.get("/topology/services/{service}/apis/{api:path}/principals", response_model=TopologyExpansionResponse)
+def interactive_api_principals(
+    service: str,
+    api: str,
+    window: str = Query("5m"),
+    from_time: Optional[str] = Query(None, alias="from"),
+    to_time: Optional[str] = Query(None, alias="to"),
+) -> Dict[str, Any]:
+    repo, resolved = _interactive_window(window, from_time, to_time)
+    return repo.api_principals(service, api, resolved)
+
+
+@router.get("/topology/services/{service}/metrics", response_model=TopologyDetailResponse)
+def interactive_service_metrics(
+    service: str,
+    window: str = Query("5m"),
+    from_time: Optional[str] = Query(None, alias="from"),
+    to_time: Optional[str] = Query(None, alias="to"),
+) -> Dict[str, Any]:
+    repo, resolved = _interactive_window(window, from_time, to_time)
+    return repo.service_metrics(service, resolved)
+
+
+@router.get("/topology/apis/{api:path}/metrics", response_model=TopologyDetailResponse)
+def interactive_api_metrics(
+    api: str,
+    service: Optional[str] = Query(None),
+    window: str = Query("5m"),
+    from_time: Optional[str] = Query(None, alias="from"),
+    to_time: Optional[str] = Query(None, alias="to"),
+) -> Dict[str, Any]:
+    repo, resolved = _interactive_window(window, from_time, to_time)
+    return repo.api_metrics(api, resolved, service)
+
+
+@router.get("/topology/principals/{principal}/metrics", response_model=TopologyDetailResponse)
+def interactive_principal_metrics(
+    principal: str,
+    window: str = Query("5m"),
+    from_time: Optional[str] = Query(None, alias="from"),
+    to_time: Optional[str] = Query(None, alias="to"),
+) -> Dict[str, Any]:
+    repo, resolved = _interactive_window(window, from_time, to_time)
+    return repo.principal_metrics(principal, resolved)
+
+
+@router.get("/topology/principals/{principal}/ips", response_model=PrincipalIpPageResponse)
+def interactive_principal_ips(
+    principal: str,
+    service: Optional[str] = Query(None, max_length=200),
+    api: Optional[str] = Query(None, max_length=500),
+    window: str = Query("1h"),
+    page_size: int = Query(50, ge=1, le=500),
+    cursor: Optional[str] = Query(None, max_length=1024),
+    filter_name: str = Query("all", alias="filter"),
+    from_time: Optional[str] = Query(None, alias="from"),
+    to_time: Optional[str] = Query(None, alias="to"),
+) -> Dict[str, Any]:
+    repo, resolved = _interactive_window(window, from_time, to_time)
+    try:
+        return repo.principal_ips(principal, resolved, page_size, cursor, service, api, filter_name)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from None

@@ -33,6 +33,37 @@ export function UserOverviewTab() {
   const { t } = useI18n();
   const nav = useNavigate();
 
+  const rangeHours = Math.round(
+    (new Date(filters.end).getTime() - new Date(filters.start).getTime()) / 3600_000,
+  );
+  const isMultiDay = rangeHours > 24;
+
+  const formatTick = (ts: any) => {
+    try {
+      const d = new Date(Number(ts));
+      return isMultiDay
+        ? `${d.getMonth() + 1}/${d.getDate()} ${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`
+        : d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+    } catch {
+      return String(ts);
+    }
+  };
+
+  const formatTooltip = (ts: any) => {
+    if (!ts) return "";
+    try {
+      return new Date(Number(ts)).toLocaleString([], {
+        month: "short",
+        day: "numeric",
+        hour: "2-digit",
+        minute: "2-digit",
+        second: "2-digit",
+      });
+    } catch {
+      return String(ts);
+    }
+  };
+
   // Fetch performance series and Current 5m vs Baseline KPIs
   const { data: perfData, isLoading: perfLoading } = useQuery({
     queryKey: ["user-performance", principal, filters],
@@ -281,7 +312,7 @@ export function UserOverviewTab() {
                 <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.08)" />
                 <XAxis
                   dataKey="bucket_start"
-                  tickFormatter={(ts) => new Date(ts).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+                  tickFormatter={formatTick}
                   stroke="#cbd5e1"
                   fontSize={11}
                 />
@@ -296,7 +327,7 @@ export function UserOverviewTab() {
                     }
                     return [`${Number(val || 0).toFixed(2)} tps`, t("Baseline TPS")];
                   }}
-                  labelFormatter={(ts: any) => (ts ? new Date(Number(ts)).toLocaleTimeString() : "")}
+                  labelFormatter={formatTooltip}
                 />
                 <Legend iconSize={8} wrapperStyle={{ fontSize: 11, paddingTop: 4 }} />
                 <Line
@@ -342,7 +373,7 @@ export function UserOverviewTab() {
                 <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.08)" />
                 <XAxis
                   dataKey="bucket_start"
-                  tickFormatter={(ts) => new Date(ts).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+                  tickFormatter={formatTick}
                   stroke="#cbd5e1"
                   fontSize={11}
                 />
@@ -354,7 +385,7 @@ export function UserOverviewTab() {
                 <Tooltip
                   contentStyle={{ backgroundColor: "#18142c", borderColor: "rgba(255,255,255,0.2)", borderRadius: 8 }}
                   formatter={(val: any) => [`${(Number(val) * 100).toFixed(2)}%`, t("Error Rate")]}
-                  labelFormatter={(ts: any) => (ts ? new Date(Number(ts)).toLocaleTimeString() : "")}
+                  labelFormatter={formatTooltip}
                 />
                 <Legend iconSize={8} wrapperStyle={{ fontSize: 11, paddingTop: 4 }} />
                 <Line
@@ -391,7 +422,7 @@ export function UserOverviewTab() {
                 <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.08)" />
                 <XAxis
                   dataKey="bucket_start"
-                  tickFormatter={(ts) => new Date(ts).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+                  tickFormatter={formatTick}
                   stroke="#cbd5e1"
                   fontSize={11}
                 />
@@ -406,7 +437,7 @@ export function UserOverviewTab() {
                     }
                     return [`${Number(val || 0).toFixed(1)} ms`, t("Baseline P95")];
                   }}
-                  labelFormatter={(ts: any) => (ts ? new Date(Number(ts)).toLocaleTimeString() : "")}
+                  labelFormatter={formatTooltip}
                 />
                 <Legend iconSize={8} wrapperStyle={{ fontSize: 11, paddingTop: 4 }} />
                 <Line
@@ -452,7 +483,7 @@ export function UserOverviewTab() {
                 <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.08)" />
                 <XAxis
                   dataKey="bucket_start"
-                  tickFormatter={(ts) => new Date(ts).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+                  tickFormatter={formatTick}
                   stroke="#cbd5e1"
                   fontSize={11}
                 />
@@ -478,7 +509,7 @@ export function UserOverviewTab() {
                     }
                     return [`${num} pts`, t("Baseline Normal", "Mức cơ sở")];
                   }}
-                  labelFormatter={(ts: any) => (ts ? new Date(Number(ts)).toLocaleTimeString() : "")}
+                  labelFormatter={formatTooltip}
                 />
                 <Legend iconSize={8} wrapperStyle={{ fontSize: 11, paddingTop: 4 }} />
                 <Line

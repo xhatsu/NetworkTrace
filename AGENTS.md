@@ -10,7 +10,7 @@
   - Analytical data model: `caller_service` -> `principal_name` -> `target_service` -> `operation` -> `status + latency`.
   - Computes 1-minute (`60s`) and 5-minute (`300s`) rollups with exact p50/p95/p99 percentiles.
   - Computes rolling medians and MAD (Median Absolute Deviation) baselines across matching minute-of-week and hour-of-day.
-  - Detectors 1–8: Traffic spike, traffic drop, latency shift, error rate increase, new service relationship, new principal relationship, new operation, unusual execution time.
+  - Detectors: Traffic spike (`traffic_spike`), traffic drop (`traffic_drop`), latency shift (`latency`), error rate increase (`error_rate`), new service relationship (`new_service_edge`), new principal relationship (`new_principal_edge`), unusual access (`unusual_access` / "Truy cập Bất thường"), unusual execution time (`unusual_time`), and source IP behavioral anomalies (`user_new_source_ip` / `ip_new_user`).
   - Incident blast-radius analysis (upstream callers, affected principals/operations) and deterministic root-cause heuristic origin.
   - Serves fast analytics dashboards via FastAPI and an interactive React/TypeScript frontend.
 - **Storage Invariant**: OTel trace data from application services is retained in Elasticsearch. ClickHouse persistence is reserved strictly for **host/probe agent trace data** (`OTEL_CLICKHOUSE_ONLY_AGENT_TRACES=true`), preventing duplicate storage expansion. Ingest endpoints acknowledge OTel payloads without writing them to ClickHouse.
@@ -23,6 +23,13 @@
 - **Cluster APM & Elasticsearch Services**:
   - `tmp-elk-svc` (NodePort `9200:32073/TCP`, ClusterIP `10.97.180.119:9200`): Elasticsearch 7.17.24 holding APM indices (`apm-*-transaction-*`, `apm-*-metric-*`, `apm-*-span-*`, `apm-*-error-*`). Wired directly to `tracescope-worker` and dashboard on `http://127.0.0.1:32073`.
   - `apm-server` (NodePort `10.99.87.70:8200` -> NodePort `32765`): Ingestion gateway daemon streaming APM data into Elasticsearch.
+- **Lightweight Monitoring Stack (`light-mon`)**:
+  - Namespace: `monitoring`
+  - Release: `light-mon` (Chart: `prometheus-community/kube-prometheus-stack` via Helm with `--skip-crds -f values-lightweight.yaml`, Revision 5)
+  - Configuration: `values-lightweight.yaml` (ephemeral emptyDir, 2d retention, Alertmanager/nodeExporter/kubeStateMetrics disabled, Grafana NodePort `32080` with admin/admin, `additionalScrapeConfigs` scraping `https://trace.n2d.id.vn:443/metrics`).
+
+
+
 
 
 ---
@@ -64,7 +71,7 @@
   - `anomaly.py`: `AnomalyEvent` (clean model without unobtained `instance` or dummy attributes), `AnomalyReason`.
 - **Repository Layer** (`backend/app/repositories/`):
   - `db_context.py`: ClickHouse connection context with a narrow SQLite-compatibility DB-API adapter (dialect translation confined here).
-  - `trace_repository.py`: Normalized trace batch insert, query, and search.
+  - `trace_repository.py` & `elasticsearch_trace_repository.py`: Normalized trace batch insert, query, and search. `list_traces` filters out non-trace metric documents and requires `trace.id`, preventing unresolvable synthetic IDs from appearing in the UI. `get_trace` includes `_id` fallback in search.
   - `aggregate_repository.py`: Rollup storage, time-series query, KPI summaries.
   - `topology_repository.py`: Edge materialization, topology graph generation, caller/dependency traversal.
   - `baseline_repository.py`: Baseline storage and retrieval by hour-of-day/day-of-week.
@@ -75,10 +82,10 @@
   - `clickhouse_migrator.py`: Versioned migration orchestrator (`001` through `005_system_telemetry_retention.sql`) and system retention manager (`configure_system_telemetry_retention`, `truncate_system_logs`). Enforces bounded 3-day TTL on system logs (`text_log`, `query_log`, `processors_profile_log`, etc.) and 7-day TTL on `error_log` to prevent disk exhaustion.
 - **Analytics & Detection Services** (`backend/app/services/`):
   - `behavioral_engine.py`: Canonical identity normalization, detector readiness, multi-layer baselines, bounded incident lifecycle, capped family scoring (Origin cap 35, Access cap 40, Activity cap 35, Identity mapping cap 30, Authentication cap 45), 7-question explainability cards, and new behavioral/auth detectors (`OPERATION_MIX_SHIFT`, `CALLER_PRINCIPAL_SWITCH`, `TARGET_FANOUT_SURGE`, `SOURCE_FANOUT_SURGE`, `PRINCIPAL_RATE_SURGE`, `AUTH_FAILURE_BURST`, `FAILURE_THEN_SUCCESS`, `SOURCE_IDENTITY_FANOUT`, telemetry quality gates).
-  - `normalization.py`: Normalizes OTel / ELK payloads, derives trusted IP / proxies, extracts WSSE usernames with case preservation, sets canonical `operation_key` (`Service/operation`), and maps decoupled `auth_result` / `auth_evidence`.
+  - `normalization.py`: Normalizes OTel / ELK payloads, extracts canonical `enduser.id` / `labels.enduser.id` / `user.id` as principal username, derives trusted IP / proxies, extracts WSSE usernames with case preservation, sets canonical `operation_key` (`Service/operation`), and maps decoupled `auth_result` / `auth_evidence`.
   - `aggregation.py`: Computes 60s and 300s rollups with exact p50/p95/p99 percentiles.
   - `baseline.py`: Computes rolling median and MAD across dimensions.
-  - `anomaly_detection.py`: Detectors 1–8. Detector 8 (`unusual_time`) enforces an established baseline maturity gate (`sample_count >= 10`) for human principals, suppressing cold-start false positives for `-anonymous-` and periodic polling endpoints.
+  - `anomaly_detection.py`: Detectors: traffic_spike, traffic_drop, latency, error_rate, new_service_edge, new_principal_edge, unusual_access (behavioral shift by learned user or IP accessing a new endpoint never seen in baseline, or 401/403 authorization failure bursts without hardcoded strings), unusual_time (off-hours activity for established accounts), and user_new_source_ip / ip_new_user.
   - `blast_radius.py`: Recursive caller traversal and impact calculation.
   - `root_cause.py`: Probable origin heuristic.
   - `principal_extractor.py`, `principal_relationships.py`, `principal_profile.py`, `principal_baseline.py`, `principal_change_detector.py`, `principal_graph.py`, `principal_analytics.py`: incremental credential-behavior derivation from the existing sanitized `traces` table.
@@ -135,8 +142,12 @@
 
 ---
 
-## 4. Current State & Verification
-- **Test Suite**: 167/167 tests passed in an isolated temporary-database harness (`.venv/bin/python -m pytest tests/ -q`); production data is never mutated by tests:
+- **Test Suite**: 188/188 tests passed in an isolated temporary-database harness (`.venv/bin/python -m pytest tests/ -q`); production data is never mutated by tests:
+  - Canonical `enduser.id` extraction from Elasticsearch APM documents across top-level, nested, labels, attributes, and search fields (`tests/test_elk_enduser_normalization.py`).
+  - Worker metrics exposure via `/metrics` Prometheus endpoint (`tests/test_prometheus_metrics.py`).
+  - F5 BIG-IP unresolved IP handling without guessing client IP (`observed_ip = F5 IP`, `effective_client_ip = "unavailable"`, `ip_resolution = "load_balancer_unresolved"`), with explicit infrastructure IP categorization (`known_f5`, `known_lb`, `known_reverse_proxy`, `known_nat`) and suppression of IP behavioral signals on LBs (`tests/test_f5_lb_normalization.py` and `tests/test_user_ip_anomalies.py`).
+  - Anonymous Traffic Isolation (`user = -anonymous-`): isolated from user directory, user baselines, user risk scoring, and active accounts, while retaining 100% telemetry volume for TPS, RPS, latency, and capacity (`tests/test_user_ip_anomalies.py`).
+  - Detection of unauthorized / sensitive unusual access patterns (`unusual_access` / "Truy cập Bất thường") in `tests/test_user_ip_anomalies.py`.
   - Unified Helm global image tag resolution and component overrides (`tests/test_deployment_topology.py`).
   - LLM diagnostic investigation subsystem unit, integration, and security tests (`tests/test_llm_investigation_*.py`) including `_parse_object` resilience across markdown code fences, `<think>` tags, and reasoning token limits.
   - Unit & domain tests in `tests/test_analytics.py`, `tests/test_api.py`, `tests/test_ingestion.py`.
@@ -166,7 +177,7 @@
   - 0 unhandled `pageerror` exceptions, 0 React render crash boundaries, and 0 console error failures.
 - **Port 30102 Status**: Online and healthy, listening on all interfaces (`http://0.0.0.0:30102`).
 - **High-TPS Hub Deployment (2026-09-11)**: Bounded/coalescing writer is active on `:30102`; live ingestion status reported `writer_alive=true`, queue `0/256`, successful durable commits, zero failed requests, and atomic duplicate replay. Full isolated test suite passed 74/74 and the live curl/JavaScript contract suite passed 42/42 after deployment.
-- **Dataset Baseline (1-month dataset via Elasticsearch & ClickHouse)**: Ingested 60,000 documents spanning 30 days from `/home/ubuntu/Viettel/Data/otel_elk_traces_1month.jsonl.gz` into Elasticsearch NodePort `:32073` (`apm-7.17.24-transaction-000001`, 29.6 MB). Synced into ClickHouse `traces` (24.79 MiB) by `tracescope-worker`. Computed 153,181 metric buckets (1m and 5m), 7,418 principal baselines, 48,914 service baselines, 3,448 user behavioral change events, and 55 security incidents. All accounts established (`learning_status: established`). System logs truncated to 2.25 MiB with 1-day TTL.
+- **Testbed State**: Cleanly wiped testbed state via `backend/scripts/reset_testbed.py`. ClickHouse analytical tables (0 traces, 0 metric buckets, 0 principals, 0 anomalies) and Elasticsearch APM indices (`apm-*`) reset to clean state ready for new ingestion. System telemetry logs truncated. Dashboard online and healthy on port 30102.
 - **Data Correctness**: Anomaly APIs filter and investigate by telemetry observation windows, expose measured bucket/baseline sample counts and MAD ranges, return matching trace evidence, and include metadata-associated principals. User scores count distinct evidence types once and explicitly distinguish learning from established baselines.
 - **WSSE UsernameToken Attribution**: Active `/api/ingest` and `/v1/traces` ingestion safely normalize namespaced WSSE usernames and store only `principal_name` with `auth_scheme=wsse`. OASIS 2004 plus legacy 2002/07, 2002/12, and 2003/06 `secext` namespaces are supported; malformed, unnamespaced, DTD/entity, oversized, and invalid usernames remain anonymous. SOAP bodies, passwords/digests, and nonces are never persisted or logged. Verified live on `:30102` with HTTP 200 and trace/API/database evidence.
 - **Java WSSE OTLP Fixture**: `/tmp/wsse-java-service` accepts bounded SOAP on
@@ -181,6 +192,7 @@
   - Supports standard pcap, nanosecond pcap, gzip-compressed pcap, Linux cooked v1/v2, Ethernet.
   - Extracts and isolates usernames from HTTP Basic Auth (`Authorization: Basic <base64>`), WSSE SOAP XML (`<wsse:Username>...</wsse:Username>`), and WSSE HTTP Headers (`X-WSSE`).
   - Verified on real production captures: `Data/tcpdump_10.240.147.247.pcap` (218 WSSE tokens, user `product`), and `NetworkTracing/pcap/tcpdump_10.240.147.249.pcap` (149,263 packets, 12,593 auth occurrences, 80 distinct usernames including `cm2.0`, `sale`, `vtp`, `myViettel`, `pm_mini_app`, `chatbot`).
+- **Unauthenticated Traffic (`-anonymous-`) Architecture & Codex Review Guide**: Saved in [`docs/PLAN_ANONYMOUS_USER_HANDLING.md`](file:///home/ubuntu/Viettel/OtelTrace/docs/PLAN_ANONYMOUS_USER_HANDLING.md) and [`docs/GUIDE_PLAN_CODEX_REVIEW.md`](file:///home/ubuntu/Viettel/OtelTrace/docs/GUIDE_PLAN_CODEX_REVIEW.md).
 - **Redesigned Data Generator & Modular Anomaly / User Behavior Generator (`~/Viettel/Data` & `backend/scripts`)**:
   - `anomalies.py`: Modular object-oriented Anomaly & User Behavioral Change Generator defining scenarios aligned with TraceScope's 8 core detectors and User Intelligence behavioral engine (`principal_relationships.py`):
     - **Core Observability Detectors**:
@@ -214,6 +226,9 @@
   - **Installer Auto-Delegation (`bundle/install.sh`)**: Automatically detects kernel floor (< 5.5) or `--oldkernel` flag and delegates to the packaged oldkernel installer.
   - **Bootstrap Daemon**: Managed directly via `run_server.sh` alongside TraceScope API (`:30102`).
 - **Presentation Layer Migration (RPS to TPS)**: Standardized all user-facing throughput units, metrics, tooltips, chart legends, and comparison tables across the React frontend and API responses (`/users/{principal}/investigations`, `/anomalies`) from RPS / `req/s` to TPS / `tps` without breaking underlying database schemas or compatibility.
+- **Topology API Connection Focus**: The topology canvas renders service-to-service wires by default. Selecting an expanded API overlays only that API's observed caller-service connections; clearing the selection or selecting another object removes those contextual API wires. The bounded endpoint is `GET /api/v1/topology/services/{service}/api-connections?api=...`.
+- **Topology Fast Travel Search**: The full-page topology search finds services, APIs, and users across the seven-day slider horizon. Choosing a result jumps to its latest five-minute observation, expands its ancestry, centers the canvas card, and opens the matching detail inspector.
+- **Topology Selection Layering**: Selected topology cards are promoted above all other canvas cards, while selected relationship wires render last in the SVG layer so overlapping objects do not obscure the active selection.
 - **JavaScript Safe Integer Precision & Anomaly ID Guard**:
   - `deterministic_anomaly_id` (`anomaly_repository.py`) uses `(raw_hash % 9_000_000_000_000_000) + 1` to guarantee newly generated anomaly IDs strictly fit within JavaScript `Number.MAX_SAFE_INTEGER` ($2^{53} - 1 = 9,007,199,254,740,991$), preventing IEEE-754 precision loss and trailing-zero rounding in web browsers.
   - `get_anomaly`, `update_status`, and `anomaly_users` implement automatic float64 ULP tolerance fallback ($\pm 4096$) for any IDs $> 9 \times 10^{15}$, ensuring legacy or bookmarked URLs resolve accurately.
@@ -221,6 +236,17 @@
 - **Behavioral Change Events Deduplication (`principal_change_events FINAL`)**:
   - Enforced ClickHouse `FINAL` modifier across all `principal_change_events` queries in `UserRepository` (`list_changes`, `summary`, `analytics`, `service_users`, `graph`), ensuring `ReplacingMergeTree` collapses duplicate rows inserted across periodic micro-batches.
   - Added client-side defensive deduplication by fingerprint/key in `UserChangesTab.tsx`.
+- **24-Hour Authentic PCAP Dataset Ingestion to ELK & ClickHouse (2026-09-17)**:
+  - Tool: `/home/ubuntu/Viettel/Data/generate_pcap_to_elk.py`
+  - Ingested 25,000 authentic transaction documents directly into Elasticsearch NodePort `:32073` (`apm-7.17.24-transaction-000001`, 8.9 MB) derived from production PCAP captures (`tcpdump_10.240.147.249.pcap` & `tcpdump_10.240.147.247.pcap`).
+  - Realistic Gaussian latency distributions (p50: 25ms-120ms, p95: 80ms-220ms), authentic PCAP identities (`cm2.0`, `sale`, `myViettel`, `vtp`, `chatbot`, `cc2.0`, `product`, `cyber_space`, etc.), realistic status codes (97.5% 200, 1.5% 4xx, 1% 5xx), and 4 realistic scenarios (payment tail latency degradation, sale service traffic spike, product service error rate surge, novel caller/principal switch).
+  - Streamed into ClickHouse `traces` (25,073 rows), 46,831 metric buckets (1m and 5m), 2,726 baseline metrics, 6,940 principal baselines, 121 principal change events, 16 security incidents, and 168 detected behavioral anomalies.
+  - Verified with 100% pass on curl & JS contract safety test suite (48/48 tests passed across all 20 SPA routes and 28 backing APIs).
+- **Anomaly Detail Incident Time Horizon Line Graph Fix (2026-09-18)**:
+  - Fixed blank/missing line chart on `/anomalies/:id` (e.g. anomaly `6130971176347858`).
+  - Backend `GET /api/v1/anomalies/{anomaly_id}` now accepts time range query parameters (`from`, `to`, `start`, `end`), allowing custom inspection windows matching global time picker filters.
+  - Backend enriches `series` points with canonical millisecond `timestamp_ms` (`bucket_start * 1000`), computed `rps` / `tps` (`requests / 60.0`), `actual` values mapped according to anomaly metric type (latency p95, error rate %, or rps/tps), and `expected` baseline values.
+  - Frontend `Anomalies.tsx` AnomalyDetailPage passes global filter time parameters to the query and maps `chartData` with defensive fallbacks (`timestamp_ms`, `requests`, `rps`, `p95_ms`, `http_5xx_rate`, `actual`, `expected`).
 - **Reference**: Refer to `STATE.md` for full endpoints, features, and run guides.
 
 ---
@@ -507,4 +533,274 @@
   - History: `GET /api/v1/investigations?kind=anomaly_event&id=<id>`
 - **Verification**: 14/14 LLM investigation unit tests passed; full test suite (168 tests) passed.
 
+---
 
+## 18. OpenTelemetry Collector Telemetry Metrics Schema Migration Fix
+
+- **Issue**: OTel Collector Contrib pod failed during startup with:
+  `'migration.MetricsConfigV030' has invalid keys: address, no need for metrics`
+- **Root Cause**:
+  1. OpenTelemetry Collector schema migration `MetricsConfigV030` deprecated `service.telemetry.metrics.address` in favor of Prometheus pull `readers`.
+  2. Unquoted / uncommented text `no need for metrics` inside YAML dictionary was parsed as an invalid mapping key.
+- **Resolution (`/home/ubuntu/agy/otel-obi/otel-collector.yaml`)**:
+  - Replaced legacy `address: 0.0.0.0:8888` with valid schema:
+    ```yaml
+    service:
+      telemetry:
+        logs:
+          level: info
+        metrics:
+          readers:
+            - pull:
+                exporter:
+                  prometheus:
+                    host: 0.0.0.0
+                    port: 8888
+    ```
+  - For disabling collector internal metrics, use `level: none`.
+
+---
+
+## 19. Prometheus Exposition Metrics from Web Services
+
+- **Module**: `backend/app/services/prometheus_metrics.py`
+  - In-memory thread-safe `PrometheusMetricsRegistry` with pure ASGI `PrometheusMiddleware`.
+  - Exposes standard web application metrics at `GET /metrics`:
+    - `http_requests_total{method, handler, status}`: Request count per HTTP method, route, and status code.
+    - `http_request_duration_seconds_bucket{method, handler, le}`: Latency histogram with standard duration buckets (`0.005` to `10.0s` and `+Inf`), plus `_sum` and `_count`.
+    - `http_requests_in_progress`: In-flight active request gauge.
+    - Process metrics: `process_resident_memory_bytes`, `process_cpu_seconds_total`, `process_start_time_seconds`, `process_uptime_seconds`.
+    - Service info: `tracescope_service_info{version="0.3.3", role="...", backend="..."}`.
+    - Ingest writer metrics: `tracescope_ingest_writer_queue_depth`, `tracescope_ingest_writer_alive`, `tracescope_ingest_writer_committed_total`, etc.
+- **Cadence & Worker Integration**:
+  - Web requests only update in-memory request counters and latency histograms.
+  - Heavy database metrics (`total_spans`, `nodes_reporting`, `c_2xx`, `c_err`, `users_rpm`, `open_anomalies`) are **ONLY updated once per cycle by `backend.worker`** (`update_prometheus_metrics` stage).
+  - Snapshot is saved to ClickHouse `checkpoints(source='worker_prometheus_metrics')` and `/tmp/tracescope_worker_metrics.json`.
+  - Scraping `GET /metrics` never queries ClickHouse aggregations directly, serving the precomputed snapshot in microseconds.
+  - Exposes `tracescope_worker_last_run_timestamp_seconds` and `tracescope_worker_cycle_duration_seconds`.
+- **Verification**: Dedicated test suite in `tests/test_prometheus_metrics.py` (6/6 passed); worker integration verified via `python -m backend.worker --once`; full regression test suite passed (178/178 passed).
+
+---
+
+## 20. 30-Day Multi-Persona Demo Dataset & Behavioral Anomaly Cases
+
+- **Generator Script**: `backend/scripts/generate_30day_demo_dataset.py`
+  - Generates 38,734 realistic transaction traces across 30 days (`2026-08-19` to `2026-09-18`) spanning 10 distinct user personas.
+  - Dual ingestion: Indexed into Elasticsearch `apm-7.17.24-transaction` at `http://127.0.0.1:32073` with canonical `enduser.id` and inserted into ClickHouse `traces`.
+  - Rebuilt rollups (33,092 1m buckets, 23,265 5m buckets), baselines (2,967 median/MAD baselines), anomaly evaluations (327 anomaly events), and principal behavioral derivations (7 incidents, 11 principals).
+- **10 User Personas & Anomaly Cases**:
+  1. `alice` (Steady Golden Baseline): 6,003 traces across 30 days. Clean reference account with 0 security incidents.
+  2. `bob` (Candidate Promotion): 5,062 traces. Accesses `billing-service` on Days 20–29, promoted to established baseline. `unusual_access` detected on initial transition.
+  3. `charlie` (Traffic Spike & Rate Surge): 2,673 traces. Sudden 1,200 req burst in recent window vs baseline ~100–200 reqs (`traffic_spike` & `PRINCIPAL_RATE_SURGE`).
+  4. `david` (Traffic Drop / Outage): 11,514 traces. Collapses from 400 req/day to only 2 requests in recent window (`traffic_drop`).
+  5. `eve` (Latency Shift & Blast Radius): 2,321 traces. Latency blowout on `payment-service` to 950ms–1800ms (`latency` shift).
+  6. `frank` (Error Rate Surge): 3,000 traces. 45% 5xx Internal Server Errors on `order-service` (`error_rate` critical).
+  7. `grace` (Target Fanout Surge & New Edges): 2,696 traces. Sweeps 5 new target services (`auth`, `billing`, `payment`, `inventory`, `notification`) in 45m (`new_service_edge`, `new_principal_edge`, `TARGET_FANOUT_SURGE`, `unusual_access` x22, incident score 40).
+  8. `heidi` (Unusual Access & Credential Shift): 2,365 traces. Switches caller to `api-client` and executes administrative billing actions (`unusual_access`, `OPERATION_MIX_SHIFT`, `CALLER_PRINCIPAL_SWITCH`, incident score 70 - High).
+  9. `ivan` (Off-Hours Night Activity & Novel IP): 2,098 traces. Off-hours activity at 02:00–04:30 UTC (`unusual_time`) and novel external source IP `194.26.29.11` (`user_new_source_ip`, incident score 35).
+  10. `judy` (Auth Attack & Novel User on Known IP): 132 traces. Credential brute-force / auth failure burst (`AUTH_FAILURE_BURST` with 130+ 401s, then `FAILURE_THEN_SUCCESS` 200 OK login) and novel user on known internal IP `198.51.100.50` (`ip_new_user`, incidents scored 60 and 55 - High).
+
+---
+
+## 21. Pure TPS & Historical Baseline Chart Refactor (Overview Dashboard)
+
+- **Backend Fix (`backend/repository.py`)**:
+  - Resolved `baseline_rps` duplication bug in `dashboard_series` where `baseline_rps` was set to `rps`.
+  - Now queries `baseline_metrics` (`rps_median`) grouped by `(hour_of_day, day_of_week)` matching active filter (`service`, `account`, `operation`, or system-wide sum across services).
+  - Also enriches `dashboard_summary` with `baseline_rps` and `baseline_tps`.
+- **Frontend Refactor (`frontend/src/pages/Overview.tsx` & `frontend/src/i18n.tsx`)**:
+  - Converted "Tốc độ Lưu lượng Định danh & Tỷ lệ Lỗi" panel into a clean, dedicated TPS and Historical Baseline chart: "Tốc độ Thông lượng Định danh & Chuẩn Lịch sử".
+  - Subtitle updated to "Thông lượng giao dịch theo bucket 60s so với chuẩn lịch sử".
+  - Action header shows `TPS: {observed_tps} • Chuẩn Lịch sử: {baseline_tps}`.
+  - Eliminated the 5xx error rate line and secondary right Y-axis.
+  - Tooltip formatted strictly for TPS (`{val} tps`).
+  - Verified across 48 automated curl & JS safety tests.
+
+---
+
+## 22. Smooth Time-Series Generation & Prometheus Baseline TPS Exposition
+
+- **Smooth Timestamp Generation (`backend/scripts/generate_30day_demo_dataset.py`)**:
+  - Replaced high-variance Poisson `random.uniform()` with `generate_smooth_timestamps()`.
+  - Partitions target time ranges into 60-second intervals and applies profile weighting (`diurnal` half-sine bell curve for daytime, `ramp_up` for Charlie's surge and Judy's brute-force, `ramp_down` for David's collapse, `bell` for Ivan's off-hours).
+  - Micro-spaces events evenly within each minute with sub-second jitter, producing smooth, continuous 60s bucket curves without random zero drops or jagged spikes.
+- **Prometheus Exposition (`backend/app/services/prometheus_metrics.py`)**:
+  - Added `tracescope_observed_tps` and `tracescope_baseline_tps` gauge metrics to `GET /metrics`.
+  - Computed during periodic worker cycle (or on-demand snapshot) with historical fallback, serving instant in-memory responses with zero database load on Prometheus scrapes.
+
+---
+
+## 23. 7-Day & 30-Day Global Time Range Redesign & Multi-Grain Downsampling
+
+- **Global Time Range Controls (`frontend/src/App.tsx`)**:
+  - Expanded the segmented control in the top navigation bar from `1h`, `3h`, `6h`, `24h` to include **`7d` (168h)** and **`30d` (720h)**: `[{ label: "1h", hours: 1 }, { label: "3h", hours: 3 }, { label: "6h", hours: 6 }, { label: "24h", hours: 24 }, { label: "7d", hours: 168 }, { label: "30d", hours: 720 }]`.
+  - Dynamic active state detection: `Math.abs(rangeHours - hours) <= 1` prevents sub-minute floating point discrepancies from de-selecting the active preset button.
+  - Added descriptive title tooltips (`Last 7d`, `Last 30d` / `7 ngày qua`, `30 ngày qua`) and localized labels in `frontend/src/i18n.tsx`.
+  - Dynamic Rollup Indicator Badge: Dynamically switches between `60s rollup` (`<= 36h`), `5m rollup` (`36h < range <= 192h`), and `1h rollup` (`> 192h`).
+- **User Topology Tab Presets (`frontend/src/pages/user/UserTopologyTab.tsx`)**:
+  - Expanded topology view time filter buttons to `["5m", "1h", "24h", "7d", "30d", "all"]`.
+  - Wired `7d` to `extra.start = now - 7 * 86400_000` and `30d` to `extra.start = now - 30 * 86400_000`.
+- **Backend Dynamic Downsampling (`backend/repository.py` & `backend/app/repositories/user_repository.py`)**:
+  - `backend/repository.py:dashboard_series`:
+    - Auto-scales aggregation grain based on time window duration:
+      - `<= 36h`: 60-second buckets (`grain_sec = 60`), preserves high resolution for 1h/3h/6h/24h.
+      - `36h < duration <= 192h` (7 days): 5-minute buckets (`grain_sec = 300`, `intDiv(bucket_start, 300) * 300`), returns ~500–650 points.
+      - `> 192h` (30 days): 1-hour buckets (`grain_sec = 3600`, `intDiv(bucket_start, 3600) * 3600`), returns ~250–350 points.
+    - Prevents 43,200 raw bucket transfer bottlenecks, ensuring instant, lag-free chart rendering on 7d and 30d views.
+  - `backend/app/repositories/user_repository.py:performance`:
+    - Auto-adapts `bucket_ms` based on query horizon: 1h buckets for `> 192h`, 5m buckets for `> 36h`, and 60s/300s buckets for shorter intervals.
+- **Chart Date Formatting for Multi-Day Ranges (`Overview.tsx`, `UserOverviewTab.tsx`, `UserActivityTab.tsx`)**:
+  - Added multi-day date detection (`rangeHours > 24`).
+  - XAxis tick formatters display `M/D HH:mm` when viewing 7d/30d ranges instead of ambiguous repeated time-only strings (`HH:mm`).
+  - Tooltips display full locale timestamp (`Month Day, Year HH:mm:ss`) for unambiguous investigation context.
+- **Testing & Verification**:
+  - Vite production bundle built cleanly (`npm run build` exited code 0).
+  - All 48 curl and JavaScript safety tests passed (`sh backend/scripts/curl_test_all_pages.sh`).
+  - Verified 1h (60 points), 7d (627 points), and 30d (275 points) API series queries returning in sub-10ms.
+
+---
+
+## 24. Enterprise System Account Dataset & 100% Anomaly/Change Coverage
+
+- **Database Clean Reset & Dual-Ingest Simulation**:
+  - Script: `backend/scripts/generate_30day_demo_dataset.py`.
+  - Wiped and re-indexed ClickHouse (`tracescope`) and Elasticsearch (`apm-7.17.24-transaction` on `127.0.0.1:32073`).
+  - Transformed persona identities into realistic enterprise system/service accounts modeled after `~/Viettel/Data`:
+    - `sys_erp_batch` (golden baseline diurnal jobs)
+    - `api_gateway_sync` (candidate promotion to billing)
+    - `svc_order_dispatcher` (traffic spike & rate surge)
+    - `cron_reconciler` (traffic drop / complete service outage)
+    - `paygate_settlement` (latency shift to 950ms+)
+    - `billing_integrator` (45% 5xx server error rate surge)
+    - `inventory_sync_worker` (target fanout surge across 5 microservices)
+    - `sec_audit_collector` (unusual access & caller switch to CLI)
+    - `infra_monitor_daemon` (off-hours night access & novel external IP)
+    - `partner_b2b_client` (brute-force auth failure burst & novel user on known internal IP)
+    - `legacy_backup_job` (dormant account reactivation after 25 days)
+  - Trace Volume: 49,606 traces, 41,958 1m buckets, 14,281 5m buckets, 1,410 baselines.
+- **100% Detector Coverage**:
+  - **All 10 Anomaly Types** (`tracescope.anomaly_events`):
+    1. `unusual_access`: 37 events
+    2. `new_service_edge`: 25 events
+    3. `new_principal_edge`: 22 events
+    4. `unusual_time`: 20 events
+    5. `traffic_drop`: 12 events
+    6. `latency`: 4 events
+    7. `error_rate`: 3 events
+    8. `user_new_source_ip`: 2 events
+    9. `traffic_spike`: 1 event
+    10. `ip_new_user`: 1 event
+  - **All 7 Behavioral Change Types** (`tracescope.principal_change_events`):
+    1. `TARGET_FANOUT_SURGE`: 17
+    2. `CALLER_PRINCIPAL_SWITCH`: 8
+    3. `PRINCIPAL_RATE_SURGE`: 4
+    4. `FAILURE_THEN_SUCCESS`: 2
+    5. `AUTH_FAILURE_BURST`: 2
+    6. `DORMANT_REACTIVATED`: 1
+    7. `OPERATION_MIX_SHIFT`: 1
+    (plus novelty detections: `NEW_RELATIONSHIP`: 35, `NEW_OPERATION`: 19, `NEW_TARGET`: 11, `NEW_CALLER`: 2, `NEW_SOURCE_IP`: 2, `USERNAME_FIRST_SEEN`: 1).
+- **Anomaly Detail 24h Horizon & Time Toggles**:
+  - Expanded `GET /api/v1/anomalies/{id}` with `window` parameter defaulting to 24h (`now - 86400`).
+  - Added dynamic bucket sizing (`300s` for >12h horizons, `60s` for short horizons) and dynamic RPS calculation (`round(reqs / float(chosen_b_size), 3)`).
+  - Frontend `frontend/src/pages/Anomalies.tsx`: Added interactive horizon toggle buttons (`1h`, `6h`, `24h`, `7d`) in panel action bar and date-time tick formatting (`MM/DD HH:mm`) on XAxis.
+- **Defensive Float Sanitization (`NaN`/`Inf`)**:
+  - Added `_clean()` helper in `backend/app/repositories/user_repository.py` to prevent ClickHouse `quantile(0.95)` from emitting `NaN` on 0-request outage windows, eliminating FastAPI 500 crashes.
+
+---
+
+## 25. Behavioral Scope Stability Redesign (Radar · Grouped Bar · Stability Trend)
+
+- **Problem Addressed**:
+  - The previous "Behavioral Scope Stability" component drew 4 overlapping stair-step lines (`stepAfter`) for integer dimensions (Targets, Operations, Callers, Source IPs) with small values (1 to 5) jumping on top of each other.
+  - The chart was hard to read and did not clearly convey whether the identity was operating within authorized boundaries or performing privilege escalation.
+- **Redesigned Multi-View Scope Component (`frontend/src/pages/user/UserPatternsTab.tsx`)**:
+  - **Concept & Purpose**: Monitors the identity's credential footprint / scope envelope against its learned baseline across 4 dimensions: Target Services, Operations/APIs, Callers, and Source IPs. Protects against lateral movement, privilege escalation, and token hijacking.
+  - **View 1: Radar Multi-Axis Chart (`scopeViewMode === 'radar'`, Default)**:
+    - Recharts `<RadarChart>` rendering two overlapping multi-axis polygons:
+      - **Historical Baseline**: Violet/Indigo shaded polygon (`#818cf8`) representing the learned normal perimeter.
+      - **Observed Current**: Cyan (`#00f0ff`) or Amber (`#f59e0b`) polygon representing live observed scope.
+    - An immediate glanceable visual: if Current is contained inside Baseline, the credential is strictly contained; if any axis extends outward, privilege expansion is detected.
+    - Side-by-side **Stability Score Card** (`0% - 100%`) with containment badge (`ShieldCheck` for Contained / `AlertTriangle` for Expansion) and 4 dimension summary tiles showing baseline vs current numbers and delta tags (`+N new` or `Stable`).
+  - **View 2: Grouped Bar Comparison (`scopeViewMode === 'bar'`)**:
+    - Recharts `<BarChart>` displaying side-by-side bars for each of the 4 dimensions (Targets, Operations, Callers, Source IPs), comparing Baseline vs Current with clear numbers and distinct fills.
+  - **View 3: Timeline Stability Trend (`scopeViewMode === 'timeline'`)**:
+    - Recharts `<AreaChart>` with a single smooth gradient curve displaying the **Scope Stability Score (%)** over time with an 80% Safe Threshold reference line, completely replacing the 4 crisscrossing stair-step lines.
+- **Testing & Verification**:
+  - Vite production bundle built cleanly (`npm run build` completed in 19.1s).
+  - All 48 curl and JavaScript safety tests passed (`sh backend/scripts/curl_test_all_pages.sh`).
+  - All 17 Playwright Chromium headless browser pages passed (`python3 backend/scripts/test_pages_playwright.py`) with 0 unhandled JS exceptions and 0 render errors on `/users/:principal/patterns`.
+
+---
+
+## 26. Unknown & Unauthenticated Users Traffic Monitor (`/unknown-users`)
+
+- **Architecture & Rationale**:
+  - Implements the architectural design from `PLAN_ANONYMOUS_USER_HANDLING.md`: Isolates `-anonymous-`, `unknown`, and empty principal traffic from human and service account directories and risk ranking algorithms, preventing pseudo-user risk score distortion while maintaining 100% telemetry visibility.
+- **Backend API (`GET /api/v1/unknown-users` & `GET /api/v1/users/unknown-traffic`)**:
+  - Method: `UserRepository.unknown_users_analytics(start_ms, end_ms, limit=50)`
+  - Returns comprehensive unauthenticated traffic KPIs:
+    - `total_requests`: unauthenticated transaction volume and `traffic_percentage` of total estate ingress.
+    - Status code breakdown: 2xx success, 401/403 authorization failures (`auth_fail_rate`), and 5xx server errors (`error_rate`).
+    - Latency: exact `avg_latency`, `p95_latency`, and `p99_latency`.
+    - Probed surface: `unique_targets`, `unique_operations`, `unique_sources`.
+    - Time-series buckets (`series`) correlating throughput with auth failure bursts.
+    - Top target services, top probed endpoints, and top source IPs with infrastructure roles (Load Balancer, Client IP, Reverse Proxy).
+    - Recent 50 unauthenticated traces with HTTP statuses and direct links to multi-tier trace waterfall.
+- **Frontend Page (`frontend/src/pages/UnknownUsers.tsx` -> `/unknown-users`)**:
+  - Navigation: Prominently added to SideNav under `Identity & Access` (`[UserX, "Unknown Users", "/unknown-users"]`).
+  - Routing: Wired to `/unknown-users`, with automatic redirects for `/users/-anonymous-` and `/users/unknown`.
+  - Header in `UserDirectory.tsx`: Added an amber badge link `[Unknown Users & Public Traffic]` leading directly to the monitor page.
+  - Interactive features: Search filter by service, operation, or IP; quick status tabs (`All`, `Auth Fails (401/403)`, `5xx Errors`); one-click jump to Trace Waterfall inspector.
+- **Testing & Verification**:
+  - All 50 curl tests passed in `sh backend/scripts/curl_test_all_pages.sh` (100% JS contract safe).
+  - All 18 real browser pages passed in `python3 backend/scripts/test_pages_playwright.py` with 0 console errors and 0 unhandled exceptions.
+
+---
+
+## 27. Enterprise System Accounts Dataset Regeneration & 100% Detector Verification (2026-09-18)
+
+- **Identity Renaming & Realism**:
+  - Replaced legacy account names with 11 authentic enterprise and telecom infrastructure system accounts:
+    1. `telecom_sync_svc`: Steady Golden Baseline (Days 0-29, 100% normal health).
+    2. `vtp_express_dispatch`: Candidate Promotion (Days 20-29 promoted to established baseline).
+    3. `pos_checkout_terminal`: Traffic Spike & Principal Rate Surge (Sudden volume ramp to 200+ req/5m).
+    4. `billing_reconcile_job`: Traffic Drop / Outage (Daily 02:00-04:00 batch completely collapses to 0 req).
+    5. `interbank_settlement_gw`: Latency Degradation & Blast Radius (Payment latency blowup to 950ms on `PayService/chargeCard`).
+    6. `partner_sales_broker`: Error Rate Surge & Caller Switch (45% 5xx server errors on order creation + CustomerService calls).
+    7. `enterprise_b2b_gateway`: New Service Edge + New Principal Edge + Target Fanout Surge (Sweeps 5 services in 45m).
+    8. `secops_monitor_agent`: Unusual Access + Operation Mix Shift + Caller Switch (Switches to api-client & billing APIs).
+    9. `sysadmin_deploy_agent`: Unusual Time (Off-Hours Night Rogue Access) + User New Source IP (Active 02:00-04:30 UTC from 185.220.101.5).
+    10. `mobile_miniapp_gateway`: Auth Attack (Failure Burst then Success) + IP New User (130+ 401s then 200 OK on host 172.16.10.45, baseline host user `worker_health_monitor`).
+    11. `audit_compliance_worker`: Dormant Reactivated (Active Days 0-1, silent 27 days, reactivated on Day 29).
+    12. `unknown` / `-anonymous-`: Unauthenticated Public Traffic & Auth Probes (Populates the Unknown Users Monitor with 1,634 transactions and 401/403 authorization probes).
+- **Database Metrics & Ground-Truth Coverage**:
+  - Database Volume: 51,348 traces, 43,616 1m buckets, 14,538 5m buckets, 1,304 baselines, 820 anomaly events, 399 principal behavioral change events.
+  - 10/10 Anomaly Detectors Active: `unusual_access` (48), `new_service_edge` (25), `new_principal_edge` (19), `error_rate` (10), `latency` (6), `unusual_time` (5), `traffic_spike` (4), `traffic_drop` (4), `ip_new_user` (1), `user_new_source_ip` (1).
+  - All Behavioral Detectors Active: `NEW_IP_CALLER_PAIR` (2981), `NEW_OPERATION` (90), `UNUSUAL_TIME` (79), `NEW_TARGET` (73), `NEW_RELATIONSHIP` (31), `NEW_SOURCE_IP` (19), `TARGET_FANOUT_SURGE` (18), `NEW_CALLER` (11), `CALLER_PRINCIPAL_SWITCH` (8), `PRINCIPAL_RATE_SURGE` (4), `AUTH_FAILURE_BURST` (4), `FAILURE_THEN_SUCCESS` (2), `DORMANT_REACTIVATED` (1), `USERNAME_FIRST_SEEN` (1), `OPERATION_MIX_SHIFT` (1).
+- **Verification Suites**:
+  - `sh backend/scripts/curl_test_all_pages.sh`: 50/50 tests passed (0 JS crash risks).
+  - `python3 backend/scripts/test_pages_playwright.py`: 18/18 real browser pages passed in headless Chromium with 0 unhandled exceptions.
+  - `.venv/bin/python3 -m pytest tests/ -q`: 188/188 unit & integration tests passed cleanly in temporary test databases.
+
+## 28. Interactive Service Topology (2026-09-18)
+
+- `backend/clickhouse_migrations/008_interactive_topology.sql` defines bounded five-minute/current service, API, principal, and principal/IP topology tables, plus normalized source-IP/attribution and request/response byte columns on sanitized trace rows.
+- `backend/app/repositories/interactive_topology_repository.py` reads those derived ClickHouse tables in ClickHouse mode and uses bounded server-side Elasticsearch aggregations in ELK mode; it never adds application trace persistence to ClickHouse for an ELK topology request.
+- Interactive API routes live under `/api/v1/topology/services`, `/api/v1/topology/services/{service}/apis`, `/api/v1/topology/services/{service}/apis/{api}/principals`, service/API/principal metrics, and cursor-paginated principal IPs. They expose operational metrics, direct/inferred evidence, confidence, anonymous attribution, and previous-window change indicators.
+- The frontend `/topology` route is service-only initially, expands branches explicitly, keeps source IPs in the detail panel, and preserves node positions while loading child branches.
+
+## 29. Full-Canvas Topology Interaction Redesign (2026-09-18)
+
+- `/topology` now uses the complete route viewport as a matte grid canvas; the previous page header, graph card, reserved inspector column, and attribution card layout were removed.
+- Time-window controls, graph legend, relationship change counts, and identity-attribution quality are compact floating canvas controls.
+- The detail inspector is a floating right-side window rendered only after a node or edge is clicked; closing it or clicking blank canvas restores the unobstructed graph.
+- Canvas navigation supports mouse-wheel zoom, explicit `+`/`-` zoom controls (50%-250%), primary-pointer drag panning, and reset by clicking the percentage or double-clicking blank canvas.
+- Service, API, and principal node cards display TPS, p95 latency, error rate, and change state as vertically stacked label/value rows for faster scanning.
+- Service, API, and principal cards can be dragged independently across an effectively unbounded grid; connection lines follow the moved cards and whole-canvas panning remains unrestricted.
+- The floating node inspector includes a TPS-over-time line chart backed by ClickHouse five-minute series or bounded Elasticsearch date-histogram aggregation.
+- The inspector TPS chart uses a smooth curve and fixed five-minute buckets across every observation window; longer windows never change the aggregation to hourly or multi-hour buckets.
+- The topology range pills were replaced by a seven-day slider containing 2,016 selectable five-minute windows. Scrubbing previews the timestamp and releasing the pointer or keyboard key commits one exact five-minute topology snapshot.
+- Sidebar links leaving `/topology` use a full route load to prevent React Router's in-memory location from retaining the old canvas after the browser URL changes; modified clicks still preserve normal browser behavior.
+- The topology route owns exactly the available height below the global header. Its isolated stacking context remains below the persistent sidebar, so sidebar navigation stays clickable even while the topology inspector is open.
+- Added Vietnamese strings for topology canvas actions and accessible labels.
+- Verification: frontend TypeScript lint and production build passed; live `/topology` and `/api/v1/topology/services?window=24h` returned HTTP 200; the Playwright suite passed **18/18** pages with zero browser exceptions and now asserts zoom/reset, hidden-until-selection inspector behavior, and `/topology` to `/services` sidebar navigation.

@@ -31,7 +31,7 @@ from typing import Annotated, Any
 
 from fastapi import Depends, FastAPI, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import FileResponse, JSONResponse, PlainTextResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.concurrency import run_in_threadpool
 
@@ -59,6 +59,7 @@ from backend.app.api.investigations import router as investigations_router
 from backend.app.services.ingest_writer import ingest_writer
 from backend.app.services.investigation import InvestigationRunner
 from backend.app.services.storage_owner_client import StorageOwnerError, storage_owner_client
+from backend.app.services.prometheus_metrics import PrometheusMiddleware, prometheus_registry
 
 
 # --------------------------------------------------------------------------
@@ -151,6 +152,7 @@ def create_app(role: str = ROLE_ALL) -> FastAPI:
         allow_methods=["GET", "POST", "PATCH", "DELETE", "OPTIONS"],
         allow_headers=["*"],
     )
+    app.add_middleware(PrometheusMiddleware, registry=prometheus_registry)
 
     @app.middleware("http")
     async def authenticate_public_mutations(request: Request, call_next):
@@ -233,6 +235,13 @@ def create_app(role: str = ROLE_ALL) -> FastAPI:
         _register_dashboard_routes(app, repo)
     if role in (ROLE_ALL, ROLE_INGEST):
         _register_ingestion_status_route(app, repo)
+    if role != ROLE_ALL:
+        @app.get("/metrics", response_class=PlainTextResponse, include_in_schema=False)
+        async def metrics_endpoint():
+            return PlainTextResponse(
+                prometheus_registry.render(repo=repo, role=role),
+                media_type="text/plain; version=0.0.4; charset=utf-8",
+            )
 
     @app.exception_handler(Exception)
     async def database_error(_request, exc):

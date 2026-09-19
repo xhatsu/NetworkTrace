@@ -63,6 +63,16 @@ class NormalizedTrace(BaseModel):
     dedup_key: Optional[str] = None
     is_agent_trace: bool = False
 
+    # Identity and IP Resolution Quality Ladder
+    observed_ip: Optional[str] = None
+    effective_client_ip: Optional[str] = None
+    ip_resolution: str = "unknown"
+    client_identity_quality: str = "low"
+    context_quality: str = "low"
+    traffic_class: str = "identified"
+    request_bytes: Optional[int] = None
+    response_bytes: Optional[int] = None
+
     from pydantic import model_validator
 
     @model_validator(mode="after")
@@ -75,4 +85,11 @@ class NormalizedTrace(BaseModel):
                 self.operation_key = f"{self.target_service}/{self.operation}"
             elif self.operation:
                 self.operation_key = self.operation
+        if not self.observed_ip:
+            self.observed_ip = self.network_peer_ip or self.caller_ip
+        if not self.traffic_class or self.traffic_class == "identified":
+            if not self.principal_name or self.principal_name in ("unknown", "-anonymous-", ""):
+                self.traffic_class = "anonymous"
+            else:
+                self.traffic_class = "identified"
         return self

@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import math
 import time
 from typing import Any, Optional
 
@@ -14,10 +15,13 @@ class UserRepository:
         self.db_path = db_path
 
     def _bounds(self, db, start_ms: int | None, end_ms: int | None) -> tuple[int, int, int]:
-        available = db.execute("SELECT COALESCE(MIN(timestamp_ms),0),COALESCE(MAX(timestamp_ms),0) FROM traces").fetchone()
-        end = end_ms or int(available[1]) + 1
-        start = start_ms or int(available[0])
-        return start, end, int(available[1])
+        available = db.execute("SELECT COALESCE(MIN(first_seen),0), COALESCE(MAX(last_seen),0) FROM principals").fetchone()
+        if not available or not available[1]:
+            available = db.execute("SELECT COALESCE(MIN(timestamp_ms),0), COALESCE(MAX(timestamp_ms),0) FROM traces").fetchone()
+        latest = int(available[1] or 0)
+        end = end_ms or latest + 1
+        start = start_ms or int(available[0] or 0)
+        return start, end, latest
 
     def list_users(self, *, start_ms: int | None = None, end_ms: int | None = None,
                    search: str | None = None, active: str | None = None,
@@ -26,11 +30,14 @@ class UserRepository:
                    has_changes: bool | None = None, first_from: int | None = None,
                    first_to: int | None = None, last_from: int | None = None,
                    last_to: int | None = None, sort: str = "most_active",
-                   environment: str | None = None, limit: int = 100, offset: int = 0) -> dict[str, Any]:
+                   environment: str | None = None, limit: int = 100, offset: int = 0,
+                   include_anonymous: bool = False) -> dict[str, Any]:
         with get_connection(self.db_path) as db:
             start, end, latest = self._bounds(db, start_ms, end_ms)
             active_cutoff = latest - settings.principal_active_minutes * 60_000
             clauses, args = ["1=1"], []
+            if not include_anonymous:
+                clauses.append("p.principal_name NOT IN ('-anonymous-', 'unknown', '')")
             if search:
                 like = f"%{search}%"
                 clauses.append("""(p.principal_name LIKE ? OR p.principal_name IN (
@@ -124,21 +131,34 @@ class UserRepository:
             active_cutoff = latest - settings.principal_active_minutes * 60_000
             day_start = (latest // 86_400_000) * 86_400_000
             scalar = lambda sql, args=(): db.execute(sql, args).fetchone()[0] or 0
+
+            anon_traces = scalar(
+                "SELECT count() FROM traces WHERE principal_name IN ('-anonymous-', 'unknown', '') AND timestamp_ms>=? AND timestamp_ms<?",
+                (start, end)
+            )
+            total_traces = scalar(
+                "SELECT count() FROM traces WHERE timestamp_ms>=? AND timestamp_ms<?",
+                (start, end)
+            )
+            anon_pct = round((anon_traces / max(1, total_traces)) * 100, 1)
+
             return {
-                "observed_principals": scalar("SELECT count() FROM principals FINAL"),
-                "active_principals": scalar("SELECT count() FROM principals FINAL WHERE last_seen>=?", (active_cutoff,)),
-                "new_principals_today": scalar("SELECT count() FROM principals FINAL WHERE first_seen>=?", (day_start,)),
-                "principals_with_changes": scalar("SELECT COUNT(DISTINCT principal_name) FROM principal_change_events FINAL WHERE detected_at>=? AND detected_at<? AND status NOT IN ('expected','ignored')", (start, end)),
-                "dormant_reactivated": scalar("SELECT COUNT(DISTINCT principal_name) FROM principal_change_events FINAL WHERE change_type='DORMANT_REACTIVATED' AND detected_at>=? AND detected_at<?", (start, end)),
-                "new_service_relationships": scalar("SELECT COUNT(*) FROM principal_change_events FINAL WHERE change_type='NEW_TARGET' AND detected_at>=? AND detected_at<?", (start, end)),
-                "new_caller_relationships": scalar("SELECT COUNT(*) FROM principal_change_events FINAL WHERE change_type='NEW_CALLER' AND detected_at>=? AND detected_at<?", (start, end)),
+                "observed_principals": scalar("SELECT count() FROM principals FINAL WHERE principal_name NOT IN ('-anonymous-', 'unknown', '')"),
+                "active_principals": scalar("SELECT count() FROM principals FINAL WHERE last_seen>=? AND principal_name NOT IN ('-anonymous-', 'unknown', '')", (active_cutoff,)),
+                "new_principals_today": scalar("SELECT count() FROM principals FINAL WHERE first_seen>=? AND principal_name NOT IN ('-anonymous-', 'unknown', '')", (day_start,)),
+                "principals_with_changes": scalar("SELECT COUNT(DISTINCT principal_name) FROM principal_change_events FINAL WHERE detected_at>=? AND detected_at<? AND status NOT IN ('expected','ignored') AND principal_name NOT IN ('-anonymous-', 'unknown', '')", (start, end)),
+                "dormant_reactivated": scalar("SELECT COUNT(DISTINCT principal_name) FROM principal_change_events FINAL WHERE change_type='DORMANT_REACTIVATED' AND detected_at>=? AND detected_at<? AND principal_name NOT IN ('-anonymous-', 'unknown', '')", (start, end)),
+                "new_service_relationships": scalar("SELECT COUNT(*) FROM principal_change_events FINAL WHERE change_type='NEW_TARGET' AND detected_at>=? AND detected_at<? AND principal_name NOT IN ('-anonymous-', 'unknown', '')", (start, end)),
+                "new_caller_relationships": scalar("SELECT COUNT(*) FROM principal_change_events FINAL WHERE change_type='NEW_CALLER' AND detected_at>=? AND detected_at<? AND principal_name NOT IN ('-anonymous-', 'unknown', '')", (start, end)),
+                "anonymous_requests": anon_traces,
+                "anonymous_traffic_percentage": anon_pct,
             }
 
     def _distribution(self, db, principal: str, table: str, value_select: str,
                       start_ms: int | None = None, end_ms: int | None = None) -> list[dict[str, Any]]:
-        if start_ms is None or end_ms is None:
-            rows = db.execute(f"SELECT {value_select} value,observation_count requests,first_seen,last_seen FROM {table} FINAL WHERE principal_name=? ORDER BY requests DESC", (principal,)).fetchall()
-        else:
+        # Fast path: query precomputed principal distribution tables
+        rows = db.execute(f"SELECT {value_select} value,observation_count requests,first_seen,last_seen FROM {table} WHERE principal_name=? ORDER BY requests DESC", (principal,)).fetchall()
+        if not rows and start_ms is not None and end_ms is not None:
             column = {"principal_callers": "caller_service", "principal_sources": "caller_ip",
                       "principal_targets": "target_service", "principal_operations": "operation"}[table]
             group = "target_service,operation" if table == "principal_operations" else column
@@ -190,7 +210,8 @@ class UserRepository:
                     )
             score = min(100, sum(score_by_type.values()))
             hourly = [dict(r) for r in db.execute("SELECT * FROM principal_hourly_activity WHERE principal_name=? ORDER BY day_of_week,hour_of_day", (principal,))]
-            daily = [dict(r) for r in db.execute("SELECT * FROM principal_daily_stats WHERE principal_name=? ORDER BY day_start", (principal,))]
+            daily = [dict(r) for r in db.execute("SELECT * FROM principal_daily_stats WHERE principal_name=? ORDER BY day_start DESC LIMIT 90", (principal,))]
+            daily.reverse()
             active_hours = [r[0] for r in db.execute("SELECT hour_of_day FROM principal_hourly_activity WHERE principal_name=? GROUP BY hour_of_day HAVING SUM(observation_count)>0 ORDER BY hour_of_day", (principal,))]
             profile.update({"current": current, "normal": normal, "changes": changes,
                             "behavior_score": score, "behavior_level": "High" if score>=60 else "Medium" if score>=25 else "Low",
@@ -451,7 +472,7 @@ class UserRepository:
     def analytics(self) -> dict[str, Any]:
         with get_connection(self.db_path) as db:
             def rows(order: str, limit: int = 10):
-                return [dict(r) for r in db.execute(f"SELECT * FROM principals FINAL ORDER BY {order} LIMIT ?", (limit,))]
+                return [dict(r) for r in db.execute(f"SELECT * FROM principals FINAL WHERE principal_name NOT IN ('-anonymous-', 'unknown', '') ORDER BY {order} LIMIT ?", (limit,))]
             return {
                 "most_active": rows("total_requests DESC"), "most_callers": rows("unique_callers DESC"),
                 "most_sources": rows("unique_sources DESC"), "most_targets": rows("unique_targets DESC"),
@@ -462,13 +483,14 @@ class UserRepository:
                     JOIN (
                         SELECT principal_name, count() as changes, sum(score) as behavior_score
                         FROM principal_change_events FINAL
-                        WHERE status NOT IN ('expected', 'ignored')
+                        WHERE status NOT IN ('expected', 'ignored') AND principal_name NOT IN ('-anonymous-', 'unknown', '')
                         GROUP BY principal_name
                     ) c ON p.principal_name = c.principal_name
+                    WHERE p.principal_name NOT IN ('-anonymous-', 'unknown', '')
                     ORDER BY c.behavior_score DESC
                     LIMIT 10
                 """)],
-                "shared_credentials": [dict(r) for r in db.execute("SELECT principal_name,COUNT(*) callers,SUM(observation_count) requests FROM principal_callers FINAL GROUP BY principal_name HAVING callers>1 ORDER BY callers DESC LIMIT 20")],
+                "shared_credentials": [dict(r) for r in db.execute("SELECT principal_name,COUNT(*) callers,SUM(observation_count) requests FROM principal_callers FINAL WHERE principal_name NOT IN ('-anonymous-', 'unknown', '') GROUP BY principal_name HAVING callers>1 ORDER BY callers DESC LIMIT 20")],
                 "source_diversity": rows("unique_sources DESC"),
                 "dormant_reactivated": [dict(r) for r in db.execute("""
                     SELECT p.*, c.reactivated_at
@@ -476,9 +498,10 @@ class UserRepository:
                     JOIN (
                         SELECT principal_name, max(detected_at) as reactivated_at
                         FROM principal_change_events FINAL
-                        WHERE change_type = 'DORMANT_REACTIVATED'
+                        WHERE change_type = 'DORMANT_REACTIVATED' AND principal_name NOT IN ('-anonymous-', 'unknown', '')
                         GROUP BY principal_name
                     ) c ON p.principal_name = c.principal_name
+                    WHERE p.principal_name NOT IN ('-anonymous-', 'unknown', '')
                     ORDER BY c.reactivated_at DESC
                     LIMIT 20
                 """)],
@@ -528,14 +551,25 @@ class UserRepository:
         with get_connection(self.db_path) as db:
             from backend.app.services.normalization import classify_source_ip_role
 
-            raw_sources = db.execute("""
-                SELECT coalesce(caller_ip, '') as ip, count() as cnt
-                FROM traces
-                WHERE principal_name = ? AND coalesce(caller_ip, '') <> ''
-                GROUP BY ip
-                ORDER BY cnt DESC
+            # Fast path: query principal_sources
+            p_sources = db.execute("""
+                SELECT source_ip, observation_count
+                FROM principal_sources
+                WHERE principal_name = ?
+                ORDER BY observation_count DESC
                 LIMIT 30
             """, (principal,)).fetchall()
+            if p_sources:
+                raw_sources = [(r[0], r[1]) for r in p_sources]
+            else:
+                raw_sources = db.execute("""
+                    SELECT coalesce(caller_ip, '') as ip, count() as cnt
+                    FROM traces
+                    WHERE principal_name = ? AND coalesce(caller_ip, '') <> ''
+                    GROUP BY ip
+                    ORDER BY cnt DESC
+                    LIMIT 30
+                """, (principal,)).fetchall()
 
             available_sources = []
             for r in raw_sources:
@@ -550,20 +584,33 @@ class UserRepository:
                     "is_load_balancer": (role == "load_balancer"),
                 })
 
-            min_max = db.execute("SELECT MIN(timestamp_ms), MAX(timestamp_ms) FROM traces WHERE principal_name=?", (principal,)).fetchone()
-            if not min_max or min_max[0] is None or int(min_max[0] or 0) == 0:
-                return {
-                    "principal_name": principal,
-                    "series": [],
-                    "kpis": {"current_5m": {}, "baseline_5m": {}, "deltas": {}},
-                    "burstiness": 1.0,
-                    "available_sources": available_sources,
-                    "selected_source_ip": source_ip,
-                }
-            user_min, user_max = int(min_max[0]), int(min_max[1])
+            p_info = db.execute("SELECT first_seen, last_seen FROM principals WHERE principal_name = ?", (principal,)).fetchone()
+            if p_info and p_info[0] is not None and int(p_info[0] or 0) > 0:
+                user_min, user_max = int(p_info[0]), int(p_info[1])
+            else:
+                min_max = db.execute("SELECT MIN(timestamp_ms), MAX(timestamp_ms) FROM traces WHERE principal_name=?", (principal,)).fetchone()
+                if not min_max or min_max[0] is None or int(min_max[0] or 0) == 0:
+                    return {
+                        "principal_name": principal,
+                        "series": [],
+                        "kpis": {"current_5m": {}, "baseline_5m": {}, "deltas": {}},
+                        "burstiness": 1.0,
+                        "available_sources": available_sources,
+                        "selected_source_ip": source_ip,
+                    }
+                user_min, user_max = int(min_max[0]), int(min_max[1])
             start = start_ms if start_ms is not None else user_min
             end = end_ms if end_ms is not None else user_max + 1000
-            bucket_ms = max(60, bucket_size) * 1000
+            
+            # Auto-adapt bucket size for wide time horizons (7d / 30d)
+            duration_h = max(0.1, (end - start) / 3600_000.0)
+            if duration_h > 192.0:  # > 8 days (e.g. 30d = 720h)
+                effective_bucket_s = max(bucket_size, 3600)
+            elif duration_h > 36.0:  # > 36 hours (e.g. 7d = 168h)
+                effective_bucket_s = max(bucket_size, 300)
+            else:
+                effective_bucket_s = max(60, bucket_size)
+            bucket_ms = effective_bucket_s * 1000
 
             source_where = " AND (caller_ip = ? OR original_client_ip = ?)" if source_ip else ""
             series_params = [bucket_ms, bucket_ms, bucket_ms, bucket_ms, principal, start, end]
@@ -592,7 +639,21 @@ class UserRepository:
                 ORDER BY bucket_start ASC
             """, series_params).fetchall()
 
+            def _clean(val: Any, default: float = 0.0) -> float:
+                if val is None:
+                    return default
+                try:
+                    f = float(val)
+                    if math.isnan(f) or math.isinf(f):
+                        return default
+                    return f
+                except (ValueError, TypeError):
+                    return default
+
             series = [dict(r) for r in series_rows]
+            for s in series:
+                for k in ("rps", "requests_per_min", "error_rate", "latency_p50", "latency_p95", "latency_p99", "latency_avg"):
+                    s[k] = _clean(s.get(k))
 
             # Calculate burstiness
             rps_values = [s.get("rps", 0.0) for s in series]
@@ -608,9 +669,9 @@ class UserRepository:
             if base_rps_val == 0.0:
                 base_rps_val = 0.01
 
-            base_err_val = round(sum(s.get("errors", 0) for s in series) / max(total_reqs, 1), 4)
-            p95_vals = [s.get("latency_p95", 0.0) for s in series if s.get("latency_p95") is not None]
-            base_p95_val = round(sum(p95_vals) / len(p95_vals), 2) if p95_vals else 0.0
+            base_err_val = _clean(round(sum(s.get("errors", 0) for s in series) / max(total_reqs, 1), 4))
+            p95_vals = [s.get("latency_p95", 0.0) for s in series if s.get("latency_p95") is not None and not math.isnan(s.get("latency_p95", 0.0))]
+            base_p95_val = _clean(round(sum(p95_vals) / len(p95_vals), 2) if p95_vals else 0.0)
 
             # Query anomaly score spikes from principal_change_events and anomaly_events
             score_rows = db.execute("""
@@ -717,9 +778,9 @@ class UserRepository:
 
             cur_raw = dict(cur_row) if cur_row else {}
             cur_req = int(cur_raw.get("requests") or 0)
-            cur_rps = float(cur_raw.get("rps") or 0.0)
-            cur_err = float(cur_raw.get("error_rate") or 0.0)
-            cur_p95 = float(cur_raw.get("p95") or 0.0)
+            cur_rps = _clean(cur_raw.get("rps"))
+            cur_err = _clean(cur_raw.get("error_rate"))
+            cur_p95 = _clean(cur_raw.get("p95"))
             cur_callers = int(cur_raw.get("callers") or 0)
             cur_targets = int(cur_raw.get("targets") or 0)
             cur_ops = int(cur_raw.get("operations") or 0)
@@ -732,9 +793,9 @@ class UserRepository:
 
             # Baseline 5m averages
             base_requests = round(sum(s.get("requests", 0) for s in series) / max(len(series), 1), 1)
-            base_rps = round(base_requests / 300.0, 3)
-            base_err = base_err_val
-            base_p95 = base_p95_val
+            base_rps = _clean(round(base_requests / 300.0, 3))
+            base_err = _clean(base_err_val)
+            base_p95 = _clean(base_p95_val)
             base_callers = max(1, round(cur_callers * 0.75))
             base_targets = max(1, round(cur_targets * 0.7))
             base_ops = max(1, round(cur_ops * 0.7))
@@ -747,10 +808,10 @@ class UserRepository:
             }
 
             deltas = {
-                "requests_pct": round((cur_req - base_requests) / max(base_requests, 0.1) * 100.0, 1),
-                "rps_pct": round((cur_rps - base_rps) / max(base_rps, 0.001) * 100.0, 1),
-                "error_rate_pct": round((cur_err - base_err) * 100.0, 2),
-                "p95_pct": round((cur_p95 - base_p95) / max(base_p95, 1.0) * 100.0, 1),
+                "requests_pct": _clean(round((cur_req - base_requests) / max(base_requests, 0.1) * 100.0, 1)),
+                "rps_pct": _clean(round((cur_rps - base_rps) / max(base_rps, 0.001) * 100.0, 1)),
+                "error_rate_pct": _clean(round((cur_err - base_err) * 100.0, 2)),
+                "p95_pct": _clean(round((cur_p95 - base_p95) / max(base_p95, 1.0) * 100.0, 1)),
                 "callers_diff": cur_callers - base_callers,
                 "targets_diff": cur_targets - base_targets,
                 "operations_diff": cur_ops - base_ops,
@@ -799,17 +860,25 @@ class UserRepository:
                 LIMIT 50
             """, (principal, f"%:{principal}", f"production:{principal}")).fetchall()
 
+            # Batch fetch all candidate change events for this principal once
+            all_events = [dict(e) for e in db.execute("""
+                SELECT * FROM principal_change_events
+                WHERE principal_name = ?
+                ORDER BY score DESC, detected_at ASC
+                LIMIT 500
+            """, (principal,)).fetchall()]
+
             investigations = []
             for inc in inc_rows:
                 inc_dict = dict(inc)
                 inc_id = inc_dict["incident_id"]
+                inc_start = inc_dict["started_at"]
+                inc_end = inc_dict.get("last_seen_at") or inc_start
 
-                events = [dict(e) for e in db.execute("""
-                    SELECT * FROM principal_change_events FINAL
-                    WHERE incident_id = ? OR (principal_name = ? AND detected_at >= ? AND detected_at <= ?)
-                    ORDER BY score DESC, detected_at ASC
-                    LIMIT 20
-                """, (inc_id, principal, inc_dict["started_at"] - 60000, (inc_dict.get("last_seen_at") or inc_dict["started_at"]) + 60000)).fetchall()]
+                events = [
+                    e for e in all_events
+                    if e.get("incident_id") == inc_id or (e.get("principal_name") == principal and inc_start - 60000 <= (e.get("detected_at") or 0) <= inc_end + 60000)
+                ][:20]
 
                 triggers = []
                 chain_nodes = [principal]
@@ -1085,4 +1154,237 @@ class UserRepository:
                 "target_operations": target_operations,
                 "network_hops": network_hops,
             }
+
+    def unknown_users_analytics(self, start_ms: int | None = None, end_ms: int | None = None, limit: int = 50) -> dict[str, Any]:
+        with get_connection(self.db_path) as db:
+            from backend.app.services.normalization import classify_source_ip_role
+
+            where = "principal_name IN ('unknown', '-anonymous-', '')"
+            params = []
+            if start_ms is not None and end_ms is not None:
+                where += " AND timestamp_ms >= ? AND timestamp_ms < ?"
+                params.extend([start_ms, end_ms])
+
+            # Total requests across entire estate in this window
+            sys_where = "WHERE timestamp_ms >= ? AND timestamp_ms < ?" if start_ms and end_ms else ""
+            sys_total_row = db.execute(
+                f"SELECT count() FROM traces {sys_where}",
+                [start_ms, end_ms] if start_ms and end_ms else []
+            ).fetchone()
+            total_estate_requests = sys_total_row[0] if sys_total_row else 1
+
+            # Summary KPIs for unknown/anonymous traffic
+            kpi_row = db.execute(f"""
+                SELECT
+                    count() as total_requests,
+                    countIf(http_status >= 200 AND http_status < 300) as s_2xx,
+                    countIf(http_status IN (401, 403)) as s_auth_fail,
+                    countIf(http_status >= 400 AND http_status < 500 AND http_status NOT IN (401, 403)) as s_4xx_other,
+                    countIf(http_status >= 500 OR outcome = 'failure') as s_5xx,
+                    round(avg(duration_ms), 2) as avg_latency,
+                    round(quantile(0.95)(duration_ms), 2) as p95_latency,
+                    round(quantile(0.99)(duration_ms), 2) as p99_latency,
+                    uniqExact(target_service) as unique_targets,
+                    uniqExact(operation) as unique_ops,
+                    uniqExact(coalesce(nullif(original_client_ip, ''), nullif(caller_ip, ''), '')) as unique_ips
+                FROM traces
+                WHERE {where}
+            """, params).fetchone()
+
+            def _clean(val, default=0.0):
+                if val is None or math.isnan(val) or math.isinf(val): return default
+                return float(val)
+
+            total_reqs = kpi_row[0] if kpi_row else 0
+            s_2xx = kpi_row[1] if kpi_row else 0
+            s_auth_fail = kpi_row[2] if kpi_row else 0
+            s_4xx_other = kpi_row[3] if kpi_row else 0
+            s_5xx = kpi_row[4] if kpi_row else 0
+            avg_lat = _clean(kpi_row[5]) if kpi_row else 0.0
+            p95_lat = _clean(kpi_row[6]) if kpi_row else 0.0
+            p99_lat = _clean(kpi_row[7]) if kpi_row else 0.0
+            uniq_targets = kpi_row[8] if kpi_row else 0
+            uniq_ops = kpi_row[9] if kpi_row else 0
+            uniq_ips = kpi_row[10] if kpi_row else 0
+
+            traffic_pct = round((total_reqs / max(total_estate_requests, 1)) * 100.0, 2)
+            auth_fail_rate = round((s_auth_fail / max(total_reqs, 1)) * 100.0, 2)
+            error_rate = round(((s_auth_fail + s_4xx_other + s_5xx) / max(total_reqs, 1)) * 100.0, 2)
+
+            # Time-series (adaptive bucket 60s, 300s, or 3600s)
+            duration_h = max(0.1, ((end_ms or 0) - (start_ms or 0)) / 3600_000.0) if start_ms and end_ms else 24.0
+            bucket_sec = 3600 if duration_h > 192.0 else (300 if duration_h > 36.0 else 60)
+            bucket_ms = bucket_sec * 1000
+
+            ts_params = [bucket_ms, bucket_ms, float(bucket_sec)] + params
+            series_rows = db.execute(f"""
+                SELECT
+                    intDiv(timestamp_ms, ?) * ? as bucket_start,
+                    count() as requests,
+                    round(count() / ?, 2) as rps,
+                    countIf(http_status >= 200 AND http_status < 300) as s_2xx,
+                    countIf(http_status IN (401, 403)) as s_auth_fail,
+                    countIf(http_status >= 500 OR outcome = 'failure') as s_5xx,
+                    round(quantile(0.95)(duration_ms), 2) as latency_p95
+                FROM traces
+                WHERE {where}
+                GROUP BY bucket_start
+                ORDER BY bucket_start ASC
+            """, ts_params).fetchall()
+
+            series = []
+            for r in series_rows:
+                series.append({
+                    "bucket_start": r[0],
+                    "requests": r[1],
+                    "rps": _clean(r[2]),
+                    "s_2xx": r[3],
+                    "s_auth_fail": r[4],
+                    "s_5xx": r[5],
+                    "latency_p95": _clean(r[6]),
+                })
+
+            # Top target services
+            target_rows = db.execute(f"""
+                SELECT
+                    target_service,
+                    count() as reqs,
+                    countIf(http_status IN (401, 403)) as auth_fails,
+                    countIf(http_status >= 500 OR outcome = 'failure') as server_errors,
+                    round(quantile(0.95)(duration_ms), 2) as p95
+                FROM traces
+                WHERE {where}
+                GROUP BY target_service
+                ORDER BY reqs DESC
+                LIMIT 15
+            """, params).fetchall()
+
+            top_targets = []
+            for r in target_rows:
+                top_targets.append({
+                    "target_service": r[0],
+                    "requests": r[1],
+                    "share": round(r[1] / max(total_reqs, 1), 3),
+                    "auth_failures": r[2],
+                    "server_errors": r[3],
+                    "latency_p95": _clean(r[4]),
+                })
+
+            # Top operations
+            op_rows = db.execute(f"""
+                SELECT
+                    operation,
+                    target_service,
+                    count() as reqs,
+                    countIf(http_status IN (401, 403)) as auth_fails,
+                    countIf(http_status >= 500 OR outcome = 'failure') as server_errors,
+                    round(quantile(0.95)(duration_ms), 2) as p95
+                FROM traces
+                WHERE {where}
+                GROUP BY operation, target_service
+                ORDER BY reqs DESC
+                LIMIT 20
+            """, params).fetchall()
+
+            top_operations = []
+            for r in op_rows:
+                top_operations.append({
+                    "operation": r[0],
+                    "target_service": r[1],
+                    "requests": r[2],
+                    "share": round(r[2] / max(total_reqs, 1), 3),
+                    "auth_failures": r[3],
+                    "server_errors": r[4],
+                    "latency_p95": _clean(r[5]),
+                })
+
+            # Top Source IPs
+            ip_rows = db.execute(f"""
+                SELECT
+                    coalesce(nullif(original_client_ip, ''), nullif(caller_ip, ''), 'unknown') as ip,
+                    count() as reqs,
+                    countIf(http_status IN (401, 403)) as auth_fails,
+                    countIf(http_status >= 500 OR outcome = 'failure') as server_errors
+                FROM traces
+                WHERE {where}
+                GROUP BY ip
+                ORDER BY reqs DESC
+                LIMIT 20
+            """, params).fetchall()
+
+            top_sources = []
+            for r in ip_rows:
+                ip_str = r[0]
+                role, role_label, conf = classify_source_ip_role(ip_str)
+                top_sources.append({
+                    "source_ip": ip_str,
+                    "requests": r[1],
+                    "share": round(r[1] / max(total_reqs, 1), 3),
+                    "auth_failures": r[2],
+                    "server_errors": r[3],
+                    "role": role,
+                    "role_label": role_label,
+                    "attribution_confidence": conf,
+                    "is_load_balancer": (role == "load_balancer"),
+                })
+
+            # Recent unauthenticated traces
+            trace_rows = db.execute(f"""
+                SELECT
+                    trace_id,
+                    timestamp_ms,
+                    caller_service,
+                    target_service,
+                    operation,
+                    caller_ip,
+                    original_client_ip,
+                    http_status,
+                    duration_ms,
+                    outcome
+                FROM traces
+                WHERE {where}
+                ORDER BY timestamp_ms DESC
+                LIMIT ?
+            """, params + [limit]).fetchall()
+
+            recent_traces = []
+            for r in trace_rows:
+                recent_traces.append({
+                    "trace_id": r[0],
+                    "timestamp_ms": r[1],
+                    "caller_service": r[2] or "direct-client",
+                    "target_service": r[3],
+                    "operation": r[4],
+                    "caller_ip": r[5] or "",
+                    "original_client_ip": r[6] or "",
+                    "http_status": r[7] if r[7] is not None else 0,
+                    "duration_ms": _clean(r[8]),
+                    "outcome": r[9] or "unknown",
+                })
+
+            return {
+                "kpis": {
+                    "total_requests": total_reqs,
+                    "estate_requests": total_estate_requests,
+                    "traffic_percentage": traffic_pct,
+                    "s_2xx": s_2xx,
+                    "s_auth_fail": s_auth_fail,
+                    "s_4xx_other": s_4xx_other,
+                    "s_5xx": s_5xx,
+                    "auth_fail_rate": auth_fail_rate,
+                    "error_rate": error_rate,
+                    "avg_latency": avg_lat,
+                    "p95_latency": p95_lat,
+                    "p99_latency": p99_lat,
+                    "unique_targets": uniq_targets,
+                    "unique_operations": uniq_ops,
+                    "unique_sources": uniq_ips,
+                },
+                "series": series,
+                "top_targets": top_targets,
+                "top_operations": top_operations,
+                "top_sources": top_sources,
+                "recent_traces": recent_traces,
+            }
+
 

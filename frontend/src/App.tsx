@@ -24,6 +24,7 @@ import {
   SlidersHorizontal,
   Sparkles,
   Users,
+  UserX,
   X,
 } from "lucide-react";
 import type { Filters } from "./types";
@@ -33,6 +34,8 @@ import { ServicesPage, ServiceDetailPage } from "./pages/Services";
 import { AnomaliesPage, AnomalyDetailPage } from "./pages/Anomalies";
 import { TracesPage, TraceDetailPage } from "./pages/Traces";
 import { AgentStatsPage, AgentNodeDetailPage } from "./pages/AgentStats";
+import { UnknownUsersPage } from "./pages/UnknownUsers";
+import { InteractiveTopologyPage } from "./pages/InteractiveTopology";
 
 // 6 User-Centric Pages & Components
 import { UserDirectory } from "./pages/user/UserDirectory";
@@ -65,6 +68,7 @@ export const useFilters = () => useContext(FilterContext);
 
 function SideNav() {
   const { t } = useI18n();
+  const location = useLocation();
   const groups = [
     {
       label: "System Level",
@@ -79,6 +83,7 @@ function SideNav() {
       links: [
         [LayoutDashboard, "Dashboard", "/dashboard"],
         [Users, "Users Hub", "/users"],
+        [UserX, "Unknown Users", "/unknown-users"],
         [AlertOctagon, "Anomalies", "/anomalies"],
       ],
     },
@@ -94,6 +99,7 @@ function SideNav() {
       hoverClass: "hover:bg-violet-500/10 hover:text-white",
       links: [
         [Boxes, "Services", "/services"],
+        [Network, "Service Topology", "/topology"],
         [Activity, "Traces", "/traces"],
       ],
     },
@@ -114,7 +120,7 @@ function SideNav() {
   ] as const;
 
   return (
-    <aside className="fixed inset-y-0 left-0 z-30 hidden w-[190px] flex-col border-r border-[#262838] bg-[#0c0e17] py-4 md:flex shadow-md">
+    <aside className="fixed inset-y-0 left-0 z-50 hidden w-[190px] flex-col border-r border-[#262838] bg-[#0c0e17] py-4 md:flex shadow-md">
       {/* Brand mark */}
       <div className="mb-6 flex items-center gap-2.5 px-4">
         <div className="grid h-10 w-10 place-items-center rounded-xl bg-indigo-600 border border-indigo-400/40 text-white font-bold">
@@ -139,6 +145,11 @@ function SideNav() {
                 <NavLink
                   key={to}
                   to={to}
+                  onClick={(event) => {
+                    if (location.pathname !== "/topology" || to === "/topology" || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+                    event.preventDefault();
+                    window.location.assign(to);
+                  }}
                   className={({ isActive }) =>
                     `group relative flex h-9 w-full items-center gap-2.5 rounded-lg px-2.5 text-xs font-semibold transition duration-150 focus-visible:outline-none focus-visible:ring-2 ${group.focusRing} ${
                       isActive
@@ -248,17 +259,20 @@ function FilterBar() {
         {/* Center: Range preset segmented control */}
         <div className="flex items-center rounded-lg border border-[#262838] bg-[#141622] p-0.5">
           {[
-            { label: "1h", hours: 1 },
-            { label: "3h", hours: 3 },
-            { label: "6h", hours: 6 },
-            { label: "24h", hours: 24 },
-          ].map(({ label, hours }) => (
+            { label: "1h", hours: 1, title: t("Last 1h") },
+            { label: "3h", hours: 3, title: t("Last 3h") },
+            { label: "6h", hours: 6, title: t("Last 6h") },
+            { label: "24h", hours: 24, title: t("Last 24h") },
+            { label: "7d", hours: 168, title: t("Last 7d") },
+            { label: "30d", hours: 720, title: t("Last 30d") },
+          ].map(({ label, hours, title }) => (
             <button
               key={label}
               onClick={() => setRange(hours)}
-              className={`rounded-md px-2.5 py-1 text-xs font-bold transition ${
-                rangeHours === hours
-                  ? "bg-cyan-500 text-black font-bold"
+              title={title}
+              className={`rounded-md px-2 py-1 text-xs font-bold transition ${
+                Math.abs(rangeHours - hours) <= 1
+                  ? "bg-cyan-500 text-black font-bold shadow-sm"
                   : "text-[#cbd5e1] hover:text-white"
               }`}
             >
@@ -297,7 +311,9 @@ function FilterBar() {
 
           <div className="chip font-mono text-[10px] font-bold text-emerald-300 border-emerald-500/40 bg-emerald-500/15">
             <Radio size={11} className="text-emerald-400" />
-            <span>{t("60s rollup")}</span>
+            <span>
+              {rangeHours > 192 ? t("1h rollup") : rangeHours > 36 ? t("5m rollup") : t("60s rollup")}
+            </span>
           </div>
         </div>
       </div>
@@ -351,7 +367,7 @@ function Layout() {
         <header className="sticky top-0 z-20">
           <FilterBar />
         </header>
-        <div key={location.pathname} className="min-h-[calc(100vh-60px)] pb-12">
+        <div key={location.pathname} className={location.pathname === "/topology" ? "h-[calc(100dvh-94px)]" : "min-h-[calc(100vh-60px)] pb-12"}>
           <Routes>
             <Route path="/" element={<Navigate to="/users" replace />} />
             <Route path="/overview" element={<OverviewPage />} />
@@ -369,10 +385,15 @@ function Layout() {
               <Route path="investigations" element={<UserInvestigationsTab />} />
             </Route>
 
+            {/* Unknown & Unauthenticated Users Traffic Monitor */}
+            <Route path="/unknown-users" element={<UnknownUsersPage />} />
+            <Route path="/users/-anonymous-" element={<Navigate to="/unknown-users" replace />} />
+            <Route path="/users/unknown" element={<Navigate to="/unknown-users" replace />} />
+
             {/* System Observability & Fleet */}
             <Route path="/anomalies" element={<AnomaliesPage />} />
             <Route path="/anomalies/:id" element={<AnomalyDetailPage />} />
-            <Route path="/topology" element={<Navigate to="/users" replace />} />
+            <Route path="/topology" element={<InteractiveTopologyPage />} />
             <Route path="/services" element={<ServicesPage />} />
             <Route path="/services/:name" element={<ServiceDetailPage />} />
             <Route path="/traces" element={<TracesPage />} />

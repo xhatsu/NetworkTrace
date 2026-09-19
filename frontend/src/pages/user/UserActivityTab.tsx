@@ -39,6 +39,37 @@ export function UserActivityTab() {
   const [selectedSlice, setSelectedSlice] = useState<any | null>(null);
   const [selectedSourceIp, setSelectedSourceIp] = useState<string>("");
 
+  const rangeHours = Math.round(
+    (new Date(filters.end).getTime() - new Date(filters.start).getTime()) / 3600_000,
+  );
+  const isMultiDay = rangeHours > 24;
+
+  const formatTick = (ts: any) => {
+    try {
+      const d = new Date(Number(ts));
+      return isMultiDay
+        ? `${d.getMonth() + 1}/${d.getDate()} ${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`
+        : d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+    } catch {
+      return String(ts);
+    }
+  };
+
+  const formatTooltip = (ts: any) => {
+    if (!ts) return "";
+    try {
+      return new Date(Number(ts)).toLocaleString([], {
+        month: "short",
+        day: "numeric",
+        hour: "2-digit",
+        minute: "2-digit",
+        second: "2-digit",
+      });
+    } catch {
+      return String(ts);
+    }
+  };
+
   const { data: perfData, isLoading } = useQuery({
     queryKey: ["user-performance", principal, filters, selectedSourceIp],
     queryFn: () => {
@@ -205,11 +236,11 @@ export function UserActivityTab() {
             <div className="flex items-center gap-2">
               <Zap size={16} className="text-cyan-400" />
               <h3 className="text-sm font-bold uppercase tracking-wider text-white">
-                1. {t("Throughput TPS & Volume / Min")}
+                1. {t("Throughput TPS vs Baseline", "Thông lượng TPS & Baseline Lịch sử")}
               </h3>
             </div>
             <p className="text-xs text-[#cbd5e1]">
-              {t("TPS, requests/minute, request count, and peak-to-average burst ratio", "TPS, yêu cầu/phút, tổng lượt yêu cầu và hệ số bùng phát")}
+              {t("Observed throughput TPS vs historical baseline and burst ratio", "Thông lượng TPS thực tế so với baseline lịch sử và hệ số bùng phát")}
             </p>
           </div>
 
@@ -237,7 +268,7 @@ export function UserActivityTab() {
               <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.08)" />
               <XAxis
                 dataKey="bucket_start"
-                tickFormatter={(ts) => new Date(ts).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+                tickFormatter={formatTick}
                 stroke="#cbd5e1"
                 fontSize={11}
               />
@@ -246,19 +277,19 @@ export function UserActivityTab() {
                 contentStyle={{ backgroundColor: "#18142c", borderColor: "rgba(255,255,255,0.2)", borderRadius: 8 }}
                 formatter={(val: any, name: any, item: any) => {
                   const key = item?.dataKey || "";
-                  const isRps = key === "rps" || name === "TPS" || name === "Throughput (TPS)" || name === "Throughput (RPS)" || String(name).toLowerCase().includes("sec");
-                  if (isRps) {
-                    return [`${Number(val || 0).toFixed(2)} tps`, t("Throughput (TPS)")];
+                  const isObserved = key === "rps" || name === "Observed TPS" || name === "Throughput (TPS)" || name === "Throughput (RPS)";
+                  if (isObserved) {
+                    return [`${Number(val || 0).toFixed(2)} tps`, t("Observed TPS")];
                   }
-                  return [`${Number(val || 0).toFixed(1)} req/min`, t("Requests / Min")];
+                  return [`${Number(val || 0).toFixed(2)} tps`, t("Baseline TPS")];
                 }}
-                labelFormatter={(ts: any) => (ts ? new Date(Number(ts)).toLocaleTimeString() : "")}
+                labelFormatter={formatTooltip}
               />
               <Legend wrapperStyle={{ fontSize: 11, paddingTop: 4 }} />
               <Line
                 type="monotone"
                 dataKey="rps"
-                name={t("Throughput (TPS)")}
+                name={t("Observed TPS")}
                 stroke="#00f0ff"
                 strokeWidth={2.5}
                 dot={false}
@@ -266,11 +297,11 @@ export function UserActivityTab() {
               />
               <Line
                 type="monotone"
-                dataKey="requests_per_min"
-                name={t("Requests / Min")}
+                dataKey="baseline_rps"
+                name={t("Baseline TPS")}
                 stroke="#b388ff"
                 strokeWidth={1.8}
-                strokeDasharray="3 3"
+                strokeDasharray="4 4"
                 dot={false}
               />
             </LineChart>
@@ -278,15 +309,15 @@ export function UserActivityTab() {
         </div>
       </div>
 
-      {/* SECTION 2: ERRORS (Error-rate line over time + 100% Stacked status chart) */}
-      <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
-        {/* Error Rate Line Over Time */}
+      {/* SECTION 2: RELIABILITY (Error Dynamics & Stacked Status) */}
+      <div className="grid gap-6 lg:grid-cols-2">
+        {/* Error Rate Area Chart */}
         <div className="rounded-2xl border border-[rgba(255,255,255,0.18)] bg-[#171329] p-5 shadow-lg">
           <div className="mb-4 flex items-center justify-between border-b border-white/10 pb-3">
             <div>
               <h3 className="text-sm font-bold uppercase tracking-wider text-white flex items-center gap-2">
                 <AlertTriangle size={16} className="text-rose-400" />
-                <span>{t("Error Rate Over Time")}</span>
+                <span>{t("Error Rate Dynamics")}</span>
               </h3>
               <p className="text-xs text-[#cbd5e1]">{t("Ratio of HTTP 4xx, 5xx, and failures to total requests", "Tỷ lệ lỗi HTTP 4xx, 5xx và lỗi mạng trên tổng yêu cầu")}</p>
             </div>
@@ -311,7 +342,7 @@ export function UserActivityTab() {
                 <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.08)" />
                 <XAxis
                   dataKey="bucket_start"
-                  tickFormatter={(ts) => new Date(ts).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+                  tickFormatter={formatTick}
                   stroke="#cbd5e1"
                   fontSize={11}
                 />
@@ -319,7 +350,7 @@ export function UserActivityTab() {
                 <Tooltip
                   contentStyle={{ backgroundColor: "#18142c", borderColor: "rgba(255,255,255,0.2)", borderRadius: 8 }}
                   formatter={(val: any) => [`${(Number(val) * 100).toFixed(2)}%`, t("Error Rate")]}
-                  labelFormatter={(ts: any) => (ts ? new Date(Number(ts)).toLocaleTimeString() : "")}
+                  labelFormatter={formatTooltip}
                 />
                 <Area
                   type="monotone"
@@ -362,7 +393,7 @@ export function UserActivityTab() {
                 <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.08)" />
                 <XAxis
                   dataKey="bucket_start"
-                  tickFormatter={(ts) => new Date(ts).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+                  tickFormatter={formatTick}
                   stroke="#cbd5e1"
                   fontSize={11}
                 />
@@ -370,7 +401,7 @@ export function UserActivityTab() {
                 <Tooltip
                   contentStyle={{ backgroundColor: "#18142c", borderColor: "rgba(255,255,255,0.2)", borderRadius: 8 }}
                   formatter={(val: any, name: any) => [`${val}%`, name]}
-                  labelFormatter={(ts: any) => (ts ? new Date(Number(ts)).toLocaleTimeString() : "")}
+                  labelFormatter={formatTooltip}
                 />
                 <Legend wrapperStyle={{ fontSize: 11, paddingTop: 4 }} />
                 <Bar dataKey="pct_2xx" name={`2xx ${t("Success", "Thành công")}`} stackId="status" fill="#00e676" />
@@ -421,7 +452,7 @@ export function UserActivityTab() {
               <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.08)" />
               <XAxis
                 dataKey="bucket_start"
-                tickFormatter={(ts) => new Date(ts).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+                tickFormatter={formatTick}
                 stroke="#cbd5e1"
                 fontSize={11}
               />
@@ -432,7 +463,7 @@ export function UserActivityTab() {
                   const label = name || item?.name || item?.dataKey || t("Latency", "Độ trễ");
                   return [`${Number(val || 0).toFixed(1)} ms`, label];
                 }}
-                labelFormatter={(ts: any) => (ts ? new Date(Number(ts)).toLocaleTimeString() : "")}
+                labelFormatter={formatTooltip}
               />
               <Legend wrapperStyle={{ fontSize: 11, paddingTop: 4 }} />
               <Line

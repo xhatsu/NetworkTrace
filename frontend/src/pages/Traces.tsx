@@ -172,13 +172,27 @@ export function TracesPage() {
                         {item.duration_ms ? `${item.duration_ms.toFixed(1)} ms` : "0.0 ms"}
                       </td>
                       <td className="px-4 py-3 text-right font-mono">
-                        {isError ? (
+                        {item.http_status ? (
+                          isError ? (
+                            <span className="inline-flex items-center gap-1 rounded bg-rose-500/10 px-2 py-0.5 text-[11px] font-semibold text-rose-400 border border-rose-500/20">
+                              {item.http_status} ERROR
+                            </span>
+                          ) : (
+                            <span className="inline-flex items-center gap-1 rounded bg-emerald-500/10 px-2 py-0.5 text-[11px] font-semibold text-emerald-400 border border-emerald-500/20">
+                              {item.http_status} OK
+                            </span>
+                          )
+                        ) : isError ? (
                           <span className="inline-flex items-center gap-1 rounded bg-rose-500/10 px-2 py-0.5 text-[11px] font-semibold text-rose-400 border border-rose-500/20">
-                            {item.http_status || "500"} ERROR
+                            ERROR
+                          </span>
+                        ) : item.outcome === "success" ? (
+                          <span className="inline-flex items-center gap-1 rounded bg-emerald-500/10 px-2 py-0.5 text-[11px] font-semibold text-emerald-400 border border-emerald-500/20">
+                            200 OK
                           </span>
                         ) : (
-                          <span className="inline-flex items-center gap-1 rounded bg-emerald-500/10 px-2 py-0.5 text-[11px] font-semibold text-emerald-400 border border-emerald-500/20">
-                            {item.http_status || "200"} OK
+                          <span className="inline-flex items-center gap-1 rounded bg-slate-500/10 px-2 py-0.5 text-[11px] font-semibold text-slate-400 border border-slate-500/20">
+                            N/A
                           </span>
                         )}
                       </td>
@@ -340,9 +354,13 @@ export function TraceDetailPage() {
                     {/* Right: Status badge */}
                     <div className="w-20 shrink-0 text-right">
                       <span className={`font-mono text-[10px] px-1.5 py-0.5 rounded ${
-                        isErr ? "bg-rose-500/20 text-rose-300" : "bg-emerald-500/20 text-emerald-300"
+                        isErr
+                          ? "bg-rose-500/20 text-rose-300"
+                          : (span.http_status || span.outcome === "success")
+                          ? "bg-emerald-500/20 text-emerald-300"
+                          : "bg-slate-500/20 text-slate-300"
                       }`}>
-                        {span.http_status || (span.outcome === "failure" ? "500" : "200")}
+                        {span.http_status || (span.outcome === "failure" ? "500" : span.outcome === "success" ? "200" : "N/A")}
                       </span>
                     </div>
                   </div>

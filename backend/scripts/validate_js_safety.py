@@ -55,6 +55,23 @@ def check_payload(endpoint, data):
         elif not data.get("principal_name"):
             errors.append("User profile missing principal_name")
 
+    elif endpoint == "/api/v1/unknown-users":
+        if not isinstance(data, dict):
+            errors.append("Expected dict root for unknown users")
+        else:
+            if not isinstance(data.get("kpis"), dict):
+                errors.append("Expected 'kpis' dict in unknown users response")
+            if not isinstance(data.get("series"), list):
+                errors.append("Expected 'series' list in unknown users response")
+            if not isinstance(data.get("top_targets"), list):
+                errors.append("Expected 'top_targets' list in unknown users response")
+            if not isinstance(data.get("top_operations"), list):
+                errors.append("Expected 'top_operations' list in unknown users response")
+            if not isinstance(data.get("top_sources"), list):
+                errors.append("Expected 'top_sources' list in unknown users response")
+            if not isinstance(data.get("recent_traces"), list):
+                errors.append("Expected 'recent_traces' list in unknown users response")
+
     elif endpoint == "/api/v1/user-changes":
         if not isinstance(data, dict) or not isinstance(data.get("items"), list):
             errors.append("Expected 'items' array in user changes response")

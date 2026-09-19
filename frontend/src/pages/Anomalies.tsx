@@ -75,11 +75,18 @@ function isUserAnomaly(a: Anomaly): boolean {
     type.includes("identity") ||
     type.includes("cred") ||
     type.includes("auth") ||
-    type.includes("token")
+    type.includes("token") ||
+    type.includes("access") ||
+    type.includes("spike") ||
+    type.includes("drop")
   ) {
     return true;
   }
   if (a.blast_radius?.affected_principals && a.blast_radius.affected_principals.length > 0) {
+    return true;
+  }
+  const metaPrincipals = (a as any).metadata?.principals;
+  if (Array.isArray(metaPrincipals) && metaPrincipals.length > 0) {
     return true;
   }
   return false;
@@ -90,7 +97,7 @@ export function AnomaliesPage() {
   const { t } = useI18n();
   const nav = useNavigate();
   const [status, setStatus] = useState("");
-  const [perspective, setPerspective] = useState<"all" | "user" | "service">("user");
+  const [perspective, setPerspective] = useState<"all" | "user" | "service">("all");
   const [search, setSearch] = useState("");
 
   const qs = queryString(filters, status ? { status } : {});
@@ -458,7 +465,7 @@ export function AnomaliesPage() {
                     const isMulti = grp.items.length > 1;
 
                     const detectorType = a.anomaly_type || "";
-                    const detectorBadgeColor = detectorType.includes("user") || detectorType.includes("cred") || detectorType.includes("auth")
+                    const detectorBadgeColor = detectorType.includes("user") || detectorType.includes("cred") || detectorType.includes("auth") || detectorType.includes("access")
                       ? "text-cyan-300 bg-cyan-500/15 border-cyan-500/30"
                       : detectorType.includes("spike")
                         ? "text-sky-300 bg-sky-500/15 border-sky-500/30"
@@ -749,7 +756,7 @@ export function AnomaliesPage() {
                 ) : (
                   filteredItems.map((a) => {
                     const detectorType = a.anomaly_type || "";
-                    const detectorBadgeColor = detectorType.includes("user") || detectorType.includes("cred") || detectorType.includes("auth")
+                    const detectorBadgeColor = detectorType.includes("user") || detectorType.includes("cred") || detectorType.includes("auth") || detectorType.includes("access")
                       ? "text-cyan-300 bg-cyan-500/15 border-cyan-500/30"
                       : detectorType.includes("spike")
                         ? "text-sky-300 bg-sky-500/15 border-sky-500/30"
@@ -961,9 +968,12 @@ export function AnomalyDetailPage() {
   const nav = useNavigate();
   const client = useQueryClient();
 
+  const { filters } = useFilters();
+  const [timeHorizon, setTimeHorizon] = useState<"1h" | "6h" | "24h" | "7d">("24h");
+
   const q = useQuery({
-    queryKey: ["anomaly", id],
-    queryFn: () => api<Detail>(`/api/v1/anomalies/${id}`),
+    queryKey: ["anomaly", id, timeHorizon],
+    queryFn: () => api<Detail>(`/api/v1/anomalies/${id}?window=${timeHorizon}`),
   });
   const relatedUsers = useQuery({
     queryKey: ["anomaly-users", id],
@@ -1015,8 +1025,38 @@ export function AnomalyDetailPage() {
   }
 
   const a = q.data!;
-  const metric = a.anomaly_type?.includes("latency") ? "p95_ms" : "rps";
-  const chartData = (a.series || []).map((p) => ({ ...p, expected: a.baseline_value }));
+  const metric = a.anomaly_type?.includes("latency")
+    ? "p95_ms"
+    : a.anomaly_type?.includes("error")
+      ? "http_5xx_rate"
+      : "rps";
+
+  const chartData = (a.series || []).map((p: any) => {
+    const rawBucket = Number(p.bucket_start ?? p.timestamp_ms ?? 0);
+    const ts = rawBucket > 10_000_000_000 ? rawBucket : rawBucket * 1000;
+    const reqs = Number(p.requests ?? p.sample_count ?? 0);
+    const calculatedRps = p.rps != null ? Number(p.rps) : reqs / 60.0;
+    const actualVal =
+      p.actual != null
+        ? Number(p.actual)
+        : a.anomaly_type?.includes("latency")
+          ? Number(p.latency_p95 ?? p.p95_ms ?? 0)
+          : a.anomaly_type?.includes("error")
+            ? Number(p.error_rate ?? p.http_5xx_rate ?? 0) * 100
+            : calculatedRps;
+
+    return {
+      ...p,
+      timestamp_ms: ts,
+      requests: reqs,
+      rps: Number(calculatedRps.toFixed(3)),
+      tps: Number(calculatedRps.toFixed(3)),
+      p95_ms: Number((p.latency_p95 ?? p.p95_ms ?? 0).toFixed(1)),
+      http_5xx_rate: Number(((p.error_rate ?? p.http_5xx_rate ?? 0) * 100).toFixed(2)),
+      actual: Number(actualVal.toFixed(3)),
+      expected: p.expected != null ? Number(p.expected) : (a.baseline_value != null ? Number(a.baseline_value) : 0),
+    };
+  });
   const usersList = relatedUsers.data?.items || [];
 
   return (
@@ -1257,6 +1297,24 @@ export function AnomalyDetailPage() {
         title={t("Incident Time Horizon: Actual vs Expected Baseline")}
         subtitle={`${t("Shaded region highlights the anomaly window")} (${a.unit || "metrics"})`}
         className="mt-4"
+        action={
+          <div className="flex items-center gap-1 bg-[#0c0d14] p-1 rounded-lg border border-[#262838]">
+            {(["1h", "6h", "24h", "7d"] as const).map((h) => (
+              <button
+                key={h}
+                type="button"
+                onClick={() => setTimeHorizon(h)}
+                className={`px-2.5 py-1 text-xs font-medium rounded transition-colors ${
+                  timeHorizon === h
+                    ? "bg-[#6366f1] text-white shadow-sm"
+                    : "text-[#9e97b3] hover:text-[#f5f3fa] hover:bg-white/[0.04]"
+                }`}
+              >
+                {h}
+              </button>
+            ))}
+          </div>
+        }
       >
         <div className="h-[340px] p-4">
           <ResponsiveContainer>
@@ -1264,12 +1322,16 @@ export function AnomalyDetailPage() {
               <CartesianGrid stroke="rgba(255,255,255,0.08)" vertical={false} />
               <XAxis
                 dataKey="timestamp_ms"
-                tickFormatter={(v) =>
-                  new Date(v).toLocaleTimeString([], {
+                tickFormatter={(v) => {
+                  const d = new Date(v);
+                  if (timeHorizon === "24h" || timeHorizon === "7d") {
+                    return `${d.getMonth() + 1}/${d.getDate()} ${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
+                  }
+                  return d.toLocaleTimeString([], {
                     hour: "2-digit",
                     minute: "2-digit",
-                  })
-                }
+                  });
+                }}
                 stroke="#766e92"
               />
               <YAxis stroke="#766e92" />

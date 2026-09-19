@@ -77,19 +77,34 @@ def classify_source_ip_role(ip: Optional[str], known_lbs: tuple[str, ...] = ()) 
         Roles: 'load_balancer', 'reverse_proxy', 'nat_gateway', 'service_ingress', 'client', 'unknown'
         Confidence: 'high', 'medium', 'low'
     """
-    if not ip or ip in {"unknown", ""}:
+    if not ip or ip in {"unknown", "", "unavailable"}:
         return "unknown", "Unknown source", "low"
     clean = ip.strip()
 
-    if not known_lbs:
-        try:
-            from backend.config import settings
-            known_lbs = settings.known_load_balancers
-        except Exception:
-            known_lbs = ()
+    try:
+        from backend.config import settings
+        known_f5 = settings.known_f5
+        known_lb = settings.known_lb
+        known_rp = settings.known_reverse_proxy
+        known_nat = settings.known_nat
+        configured_lbs = settings.known_load_balancers
+    except Exception:
+        known_f5 = ()
+        known_lb = ()
+        known_rp = ()
+        known_nat = ()
+        configured_lbs = ()
 
-    # 1. Configured or known Load Balancer list
-    if clean in known_lbs or any(clean == lb.strip() for lb in known_lbs):
+    # 1. Configured infrastructure IP lists
+    if clean in known_f5 or any(clean == x.strip() for x in known_f5):
+        return "load_balancer", "F5 BIG-IP Load Balancer", "low"
+    if clean in known_lb or any(clean == x.strip() for x in known_lb):
+        return "load_balancer", "Load Balancer", "low"
+    if clean in known_rp or any(clean == x.strip() for x in known_rp):
+        return "reverse_proxy", "Reverse Proxy", "low"
+    if clean in known_nat or any(clean == x.strip() for x in known_nat):
+        return "nat_gateway", "NAT Gateway", "low"
+    if clean in known_lbs or clean in configured_lbs or any(clean == lb.strip() for lb in (known_lbs or configured_lbs)):
         return "load_balancer", "Likely load balancer", "low"
 
     lower = clean.lower()
@@ -102,14 +117,36 @@ def classify_source_ip_role(ip: Optional[str], known_lbs: tuple[str, ...] = ()) 
     if "ingress" in lower:
         return "service_ingress", "Service ingress", "low"
 
-    # 2. Localhost or private RFC 1918 ranges (cluster/internal service mesh or LB hop)
+    # 2. Localhost
     if clean in {"127.0.0.1", "::1", "localhost"}:
         return "reverse_proxy", "Localhost / Proxy", "low"
-    if clean.startswith("10.") or clean.startswith("192.168.") or any(clean.startswith(f"172.{i}.") for i in range(16, 32)):
-        return "load_balancer", "Likely load balancer", "low"
 
-    # 3. Public routable address without LB markers: likely client address
+    # 3. Private RFC 1918 ranges without LB markers: internal client address
+    if clean.startswith("10.") or clean.startswith("192.168.") or any(clean.startswith(f"172.{i}.") for i in range(16, 32)):
+        return "client", "Internal client address", "high"
+
+    # 4. Public routable address without LB markers: likely client address
     return "client", "Client address", "high"
+
+
+def is_known_infrastructure_ip(ip: Optional[str]) -> bool:
+    """Return True if IP explicitly belongs to known infrastructure (F5, LB, reverse proxy, NAT)."""
+    if not ip or ip in {"unknown", "", "unavailable"}:
+        return False
+    clean = ip.strip()
+    try:
+        from backend.config import settings
+        known = set(settings.known_f5) | set(settings.known_lb) | set(settings.known_reverse_proxy) | set(settings.known_nat) | set(settings.known_load_balancers)
+        if clean in known or any(clean == x.strip() for x in known if x):
+            return True
+    except Exception:
+        pass
+    lower = clean.lower()
+    if any(k in lower for k in ("lb", "loadbalancer", "proxy", "gateway", "ingress")):
+        return True
+    if clean in {"127.0.0.1", "::1", "localhost"}:
+        return True
+    return False
 
 
 
@@ -217,11 +254,37 @@ def _extract_attributes(document: dict[str, Any]) -> dict[str, Any]:
                 result[item["key"]] = raw
     elif isinstance(attributes, dict):
         result.update(attributes)
+    labels = document.get("labels")
+    if isinstance(labels, dict):
+        result.update(labels)
+        for k, v in labels.items():
+            result[f"labels.{k}"] = v
+            if "_" in k:
+                dot_k = k.replace("_", ".")
+                result[dot_k] = v
+                result[f"labels.{dot_k}"] = v
+            elif "." in k:
+                under_k = k.replace(".", "_")
+                result[under_k] = v
+                result[f"labels.{under_k}"] = v
+    user = document.get("user")
+    if isinstance(user, dict):
+        result.update(user)
+        for k, v in user.items():
+            result[f"user.{k}"] = v
+    enduser = document.get("enduser")
+    if isinstance(enduser, dict):
+        result.update(enduser)
+        for k, v in enduser.items():
+            result[f"enduser.{k}"] = v
     return result
 
 def get_field(document: dict[str, Any], path: str, attrs: dict[str, Any], default: Any = None) -> Any:
+    val = None
     if path in document:
         val = document[path]
+    elif path in attrs:
+        val = attrs[path]
     else:
         val = document
         for part in path.split("."):
@@ -229,12 +292,34 @@ def get_field(document: dict[str, Any], path: str, attrs: dict[str, Any], defaul
                 val = None
                 break
             val = val[part]
+    if val is None and path in attrs:
+        val = attrs[path]
+    if val is None and "." in path:
+        underscore_path = path.replace(".", "_")
+        if underscore_path in attrs:
+            val = attrs[underscore_path]
+        elif underscore_path in document:
+            val = document[underscore_path]
+        elif f"labels.{underscore_path}" in attrs:
+            val = attrs[f"labels.{underscore_path}"]
+        elif f"labels.{path}" in attrs:
+            val = attrs[f"labels.{path}"]
+    if val is None:
+        parts = path.split(".")
+        for i in range(1, len(parts)):
+            prefix = ".".join(parts[:i])
+            remainder = ".".join(parts[i:])
+            if prefix in document and isinstance(document[prefix], dict) and remainder in document[prefix]:
+                val = document[prefix][remainder]
+                break
     if val is not None:
+        if isinstance(val, dict):
+            for subk in ("id", "name", "username", "value", "stringValue"):
+                if subk in val and val[subk] is not None:
+                    return val[subk]
         if isinstance(val, list) and len(val) == 1:
             return val[0]
         return val
-    if path in attrs:
-        return attrs[path]
     return default
 
 def normalize_otel_record(raw: dict[str, Any], source_label: str = "import") -> Optional[NormalizedTrace]:
@@ -243,6 +328,10 @@ def normalize_otel_record(raw: dict[str, Any], source_label: str = "import") -> 
         return None
 
     attrs = _extract_attributes(source)
+    if isinstance(raw.get("fields"), dict):
+        for k, v in raw["fields"].items():
+            if k not in attrs:
+                attrs[k] = v[0] if isinstance(v, list) and len(v) == 1 else v
     is_network_event = _is_networktracing_event(source)
 
     def pick(first: str, *alternates: str, default: Any = None) -> Any:
@@ -307,9 +396,21 @@ def normalize_otel_record(raw: dict[str, Any], source_label: str = "import") -> 
     event_uid = str(supplied_id) if supplied_id else f"{trace_id}:{span_id}"
 
     # Status & Outcome
-    status_raw = pick("http.response.status_code", "http.status_code", "status")
+    status_raw = pick(
+        "http.response.status_code", "http_response_status_code",
+        "http.status_code", "http_status_code", "http_status",
+        "labels.http_response_status_code", "labels.http_status_code",
+        "response.status_code", "status_code", "status"
+    )
     try:
-        http_status = int(status_raw) if status_raw is not None else None
+        if isinstance(status_raw, str):
+            import re
+            m = re.search(r'\b([1-5]\d\d)\b', status_raw)
+            http_status = int(m.group(1)) if m else int(status_raw)
+        elif status_raw is not None:
+            http_status = int(status_raw)
+        else:
+            http_status = None
     except Exception:
         http_status = None
 
@@ -321,11 +422,12 @@ def normalize_otel_record(raw: dict[str, Any], source_label: str = "import") -> 
         elif http_status >= 200: status_class = "2xx"
 
     outcome = str(pick("event.outcome", default="unknown"))[:30]
-    if outcome == "unknown":
+    if outcome == "unknown" or outcome == "None" or not outcome:
         status_code_name = str(pick("status.code", default="")).upper()
-        if (http_status and http_status >= 400) or status_code_name == "STATUS_CODE_ERROR":
+        trans_res = str(pick("transaction.result", "transaction_result", default="")).upper()
+        if (http_status and http_status >= 400) or status_code_name == "STATUS_CODE_ERROR" or "4XX" in trans_res or "5XX" in trans_res or "ERROR" in trans_res or "FAIL" in trans_res:
             outcome = "failure"
-        elif (http_status and http_status < 400) or status_code_name == "STATUS_CODE_OK":
+        elif (http_status and http_status < 400) or status_code_name == "STATUS_CODE_OK" or "2XX" in trans_res or "3XX" in trans_res or "SUCCESS" in trans_res:
             outcome = "success"
 
     # Span Kind & Networking
@@ -337,10 +439,10 @@ def normalize_otel_record(raw: dict[str, Any], source_label: str = "import") -> 
 
     peer_service = str(pick("peer.service.name", "peer.service", "destination.service.resource", "parent.service.name", "labels.caller_service", "labels.net_peer_service", "caller.service", "caller_service", default=""))[:200] or None
     peer_address = str(pick("labels.net_sock_peer_addr", "net.peer.name", "destination.address", "peer.address", default=""))[:250] or None
-    host_address = str(pick("labels.net_sock_host_addr", "net.host.name", "server.address", "dst_ip", default=""))[:250] or None
-    client_ip = str(pick("client.ip", "client.address", "source.ip", "caller", default=""))[:100] or None
+    host_address = str(pick("labels.net_sock_host_addr", "server_address", "labels.server_address", "net.host.name", "server.address", "dst_ip", default=""))[:250] or None
+    client_ip = str(pick("client.ip", "client_ip", "client.address", "client_address", "labels.client_address", "labels.network_peer_address", "network_peer_address", "source.ip", "source_ip", "caller", default=""))[:100] or None
 
-    target_port = pick("url.port", "dst_port", default=None)
+    target_port = pick("url.port", "dst_port", "server_port", "labels.server_port", default=None)
     try:
         target_port = int(target_port) if target_port else None
     except Exception:
@@ -369,9 +471,32 @@ def normalize_otel_record(raw: dict[str, Any], source_label: str = "import") -> 
 
     # Principal extraction. Credential-bearing inputs are read only in memory and
     # are never copied into attributes_json.
-    auth_header = pick("labels.http_request_header_authorization", "http.request.headers.authorization", "authorization")
-    principal_name = extract_principal(auth_header, fallback_user=None)
-    auth_scheme = "basic" if principal_name != "unknown" else None
+    # 1. Canonical OpenTelemetry & Elasticsearch APM enduser.id / user identity
+    enduser_val = pick(
+        "enduser.id",
+        "enduser_id",
+        "labels.enduser.id",
+        "labels.enduser_id",
+        "labels.enduser",
+        "enduser",
+        "user.id",
+        "user.name",
+        "user.username",
+        "user.email",
+        "context.user.id",
+        "context.user.username",
+        "context.user.name",
+        "labels.principal",
+        "account.username",
+    )
+    if enduser_val is not None and str(enduser_val).strip() and str(enduser_val).strip().lower() not in ("unknown", "-", "null", "none"):
+        principal_name = str(enduser_val).strip()[:200]
+        auth_scheme = "enduser"
+    else:
+        auth_header = pick("labels.http_request_header_authorization", "http.request.headers.authorization", "authorization")
+        principal_name = extract_principal(auth_header, fallback_user=None)
+        auth_scheme = "basic" if principal_name != "unknown" else None
+
     if principal_name == "unknown":
         for key in WSSE_USERNAME_ATTRIBUTES:
             wsse_username = normalize_wsse_username(pick(key))
@@ -391,9 +516,8 @@ def normalize_otel_record(raw: dict[str, Any], source_label: str = "import") -> 
             principal_name = str(legacy_user).strip()[:200]
             supplied_scheme = str(pick("scheme", default="")).strip().lower()
             auth_scheme = supplied_scheme if supplied_scheme in {"basic", "wsse"} else None
-    # Elasticsearch APM and canonical OTel user fields
     if principal_name == "unknown":
-        user_val = pick("user.name", "user.id", "user")
+        user_val = pick("user")
         if user_val is not None and str(user_val).strip() and str(user_val).strip() != "unknown":
             principal_name = str(user_val).strip()[:200]
             auth_scheme = "authenticated_user"
@@ -406,6 +530,8 @@ def normalize_otel_record(raw: dict[str, Any], source_label: str = "import") -> 
         identity_source = "wsse_username"
     elif auth_scheme == "basic":
         identity_source = "basic_auth"
+    elif auth_scheme == "enduser":
+        identity_source = "enduser_id"
     elif is_network_event and principal_name != "unknown":
         identity_source = "legacy_agent"
     elif principal_name != "unknown":
@@ -439,21 +565,58 @@ def normalize_otel_record(raw: dict[str, Any], source_label: str = "import") -> 
         auth_result = "unknown"
         auth_evidence = "unknown"
 
-    # Client IP, Forwarded IP, and Source Group
+    # Client IP, Observed IP, Effective Client IP, and Quality Ladder
     network_peer_ip = peer_address or client_ip
+    observed_ip = network_peer_ip
     forwarded_for = pick(
         "x_real_ip",
         "http.request.headers.x-real-ip",
         "x_forwarded_for",
         "http.request.headers.x-forwarded-for",
     )
+    is_behind_lb = (
+        _is_trusted_proxy(peer_address)
+        or _is_trusted_proxy(client_ip)
+        or is_known_infrastructure_ip(network_peer_ip)
+        or classify_source_ip_role(network_peer_ip)[0] in ("load_balancer", "reverse_proxy", "nat_gateway")
+    )
+
     if forwarded_for and (_is_trusted_proxy(peer_address) or _is_trusted_proxy(client_ip)):
-        original_client_ip = str(forwarded_for).split(",")[0].strip()
+        effective_client_ip = str(forwarded_for).split(",")[0].strip()
+        original_client_ip = effective_client_ip
         original_client_ip_trusted = 1
+        ip_resolution = "forwarded_trusted"
+        client_identity_quality = "high"
+    elif is_behind_lb:
+        # F5 / LB observed, but no trusted forwarded header was provided: DO NOT guess client IP as F5 IP!
+        effective_client_ip = "unavailable"
+        original_client_ip = "unavailable"
+        original_client_ip_trusted = 0
+        ip_resolution = "load_balancer_unresolved"
+        client_identity_quality = "low"
     else:
+        # Direct connection from client without intermediate proxy/load balancer
+        effective_client_ip = network_peer_ip
         original_client_ip = client_ip or network_peer_ip
         original_client_ip_trusted = 0
-    source_group = derive_source_group(original_client_ip)
+        ip_resolution = "direct" if network_peer_ip else "unknown"
+        client_identity_quality = "high" if network_peer_ip else "low"
+
+    source_group = derive_source_group(effective_client_ip if effective_client_ip != "unavailable" else observed_ip)
+
+    # Determine Traffic Class & Context Quality Ladder
+    is_identified_user = bool(principal_name and principal_name not in ("unknown", "-anonymous-", ""))
+    traffic_class = "identified" if is_identified_user else "anonymous"
+
+    has_client_ip = bool(effective_client_ip and effective_client_ip != "unavailable")
+    if is_identified_user and has_client_ip:
+        context_quality = "high"
+    elif is_identified_user and not has_client_ip:
+        context_quality = "medium"
+    elif not is_identified_user and has_client_ip:
+        context_quality = "low"
+    else:
+        context_quality = "very_low"
 
     # Operation Key Normalization
     rpc_method = pick("rpc.method", "soap.action", "soap_action", "operation_name")
@@ -529,6 +692,9 @@ def normalize_otel_record(raw: dict[str, Any], source_label: str = "import") -> 
 
     attributes_json = json.dumps(extra, separators=(',', ':')) if extra else None
 
+    request_bytes = extra.get("request_bytes")
+    response_bytes = extra.get("response_bytes")
+
     return NormalizedTrace(
         event_uid=event_uid,
         timestamp=int(timestamp_ms / 1000),
@@ -548,7 +714,12 @@ def normalize_otel_record(raw: dict[str, Any], source_label: str = "import") -> 
         target_port=target_port,
         principal_name=principal_name,
         operation=operation,
-        http_method=str(pick("http.request.method", "http.method", "method", default=""))[:20] or None,
+        http_method=str(pick(
+            "http.request.method", "http_request_method",
+            "http.method", "http_method",
+            "labels.http_request_method", "labels.http_method",
+            "method", default=""
+        ))[:20] or None,
         http_route=extra.get("http_route") or (operation if is_network_event and operation != "unknown" else None),
         http_status=http_status,
         status_class=status_class,
@@ -576,4 +747,12 @@ def normalize_otel_record(raw: dict[str, Any], source_label: str = "import") -> 
         sampling_context=sampling_context,
         dedup_key=dedup_key,
         is_agent_trace=bool(is_network_event or source_label == "agent" or is_agent_trace(raw)),
+        observed_ip=observed_ip,
+        effective_client_ip=effective_client_ip,
+        ip_resolution=ip_resolution,
+        client_identity_quality=client_identity_quality,
+        context_quality=context_quality,
+        traffic_class=traffic_class,
+        request_bytes=request_bytes,
+        response_bytes=response_bytes,
     )

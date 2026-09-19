@@ -7,6 +7,10 @@ metadata:
   labels:
     app.kubernetes.io/name: tracescope
     app.kubernetes.io/component: api
+  annotations:
+    prometheus.io/scrape: "true"
+    prometheus.io/port: "30102"
+    prometheus.io/path: "/metrics"
 spec:
   # ClusterIP keeps the historical external port 30102 at the Ingress edge;
   # the in-cluster port is also 30102 for symmetry with the live deployment.

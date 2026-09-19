@@ -58,6 +58,8 @@ type UserSummary = {
   dormant_reactivated: number;
   new_service_relationships: number;
   new_caller_relationships: number;
+  anonymous_requests?: number;
+  anonymous_traffic_percentage?: number;
 };
 
 type UserItem = {
@@ -113,6 +115,9 @@ export function OverviewPage() {
   const qs = queryString(filters);
   const [userSearch, setUserSearch] = useState("");
   const [riskFilter, setRiskFilter] = useState<"all" | "high" | "med" | "active">("all");
+  const rangeHours = Math.round(
+    (new Date(filters.end).getTime() - new Date(filters.start).getTime()) / 3600_000,
+  );
 
   // 1. User Summary KPIs
   const userSummaryQuery = useQuery({
@@ -243,6 +248,14 @@ export function OverviewPage() {
       description={t("Executive identity monitoring: real-time account behavior, baseline deviations, novel touchpoints, and active triage.")}
       actions={
         <div className="flex flex-wrap items-center gap-2">
+          {uSum.anonymous_traffic_percentage !== undefined && (
+            <div className="flex items-center gap-1.5 rounded-md border border-cyan-500/40 bg-cyan-500/10 px-2.5 py-1 text-xs font-mono font-medium text-cyan-300">
+              <Radio size={12} className="text-cyan-400" />
+              <span>{t("Identified Traffic")}: {Math.max(0, 100 - (uSum.anonymous_traffic_percentage || 0)).toFixed(1)}%</span>
+              <span className="text-[#64748b]">|</span>
+              <span className="text-[#94a3b8]">{t("Anonymous")}: {(uSum.anonymous_traffic_percentage || 0).toFixed(1)}%</span>
+            </div>
+          )}
           <div className="flex items-center gap-1.5 rounded-md border border-emerald-500/40 bg-emerald-500/10 px-2.5 py-1 text-xs font-mono font-bold text-emerald-300">
             <span className="h-2 w-2 rounded-full bg-emerald-400" />
             <span>{t("Behavioral Engine Active")}</span>
@@ -355,16 +368,16 @@ export function OverviewPage() {
 
       {/* Central Visualizations: User Ingress Velocity vs Error Dynamics & Risk Cohort Split */}
       <div className="mt-4 grid gap-4 lg:grid-cols-12">
-        {/* Left 7 Cols: Identity Traffic Velocity & Error Dynamics */}
+        {/* Left 7 Cols: Identity Traffic Velocity & Historical Baseline */}
         <Panel
-          title={t("Identity Traffic Velocity & Error Rates")}
-          subtitle={t("60s bucketed transaction throughput vs HTTP failure proportions")}
+          title={t("Identity Traffic Velocity & Historical Baseline")}
+          subtitle={t("60s bucketed transaction throughput vs historical baseline")}
           className="lg:col-span-7"
           action={
             <div className="flex items-center gap-2 text-xs font-mono text-[#94a3b8]">
               <span>TPS: <strong className="text-cyan-300 font-bold">{n(s?.observed_rps || 0, 1)}</strong></span>
               <span>•</span>
-              <span>5xx: <strong className="text-rose-400 font-bold">{pct(s?.http_5xx_rate || 0)}</strong></span>
+              <span>{t("Baseline")}: <strong className="text-purple-300 font-bold">{n(s?.baseline_rps ?? (points.length ? points[points.length - 1]?.baseline_rps : 0), 1)}</strong></span>
             </div>
           }
         >
@@ -374,35 +387,22 @@ export function OverviewPage() {
                 <CartesianGrid stroke="rgba(255,255,255,0.06)" vertical={false} />
                 <XAxis
                   dataKey="timestamp_ms"
-                  tickFormatter={(v) => formatTime(v, filters.timezone)}
+                  tickFormatter={(v) => formatTime(v, filters.timezone, rangeHours > 24)}
                   minTickGap={50}
                   stroke="#766e92"
                 />
                 <YAxis
-                  yAxisId="left"
                   stroke="#766e92"
                   width={45}
                   unit=" tps"
                 />
-                <YAxis
-                  yAxisId="right"
-                  orientation="right"
-                  stroke="#f43f5e"
-                  width={45}
-                  tickFormatter={(v) => `${Math.round(v * 100)}%`}
-                />
                 <Tooltip
                   {...chartTooltip}
-                  formatter={(val: any, name: any) => {
-                    if (name === "5xx Failure Rate" || String(name).includes("5xx")) {
-                      return [`${(Number(val || 0) * 100).toFixed(2)}%`, name];
-                    }
-                    return [`${Number(val || 0).toFixed(2)} tps`, name];
-                  }}
+                  formatter={(val: any, name: any) => [`${Number(val || 0).toFixed(2)} tps`, name]}
+                  labelFormatter={(v: any) => formatTooltipTime(v, filters.timezone)}
                 />
                 <Legend wrapperStyle={{ fontSize: 11, paddingTop: 4 }} />
                 <Area
-                  yAxisId="left"
                   type="monotone"
                   dataKey="rps"
                   name={t("Observed Throughput (TPS)")}
@@ -412,22 +412,12 @@ export function OverviewPage() {
                   strokeWidth={2}
                 />
                 <Line
-                  yAxisId="left"
                   type="monotone"
                   dataKey="baseline_rps"
                   name={t("Historical Baseline TPS")}
                   stroke="#a78bfa"
                   strokeDasharray="4 4"
-                  strokeWidth={1.5}
-                  dot={false}
-                />
-                <Line
-                  yAxisId="right"
-                  type="monotone"
-                  dataKey="http_5xx_rate"
-                  name={t("5xx Failure Rate")}
-                  stroke="#f43f5e"
-                  strokeWidth={2}
+                  strokeWidth={1.8}
                   dot={false}
                 />
               </ComposedChart>
@@ -825,14 +815,31 @@ export function OverviewPage() {
   );
 }
 
-function formatTime(value: number, timezone: string) {
+function formatTime(value: number, timezone: string, isMultiDay = false) {
   try {
-    return new Intl.DateTimeFormat([], {
-      hour: "2-digit",
-      minute: "2-digit",
-      timeZone: timezone === "local" ? undefined : timezone,
-    }).format(new Date(Number(value)));
+    const opts: Intl.DateTimeFormatOptions = isMultiDay
+      ? { month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" }
+      : { hour: "2-digit", minute: "2-digit" };
+    if (timezone !== "local") opts.timeZone = timezone;
+    return new Intl.DateTimeFormat([], opts).format(new Date(Number(value)));
   } catch {
     return new Date(Number(value)).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+  }
+}
+
+function formatTooltipTime(value: any, timezone: string) {
+  if (!value) return "";
+  try {
+    const opts: Intl.DateTimeFormatOptions = {
+      month: "short",
+      day: "numeric",
+      hour: "2-digit",
+      minute: "2-digit",
+      second: "2-digit",
+    };
+    if (timezone !== "local") opts.timeZone = timezone;
+    return new Intl.DateTimeFormat([], opts).format(new Date(Number(value)));
+  } catch {
+    return new Date(Number(value)).toLocaleString();
   }
 }

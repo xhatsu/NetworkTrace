@@ -13,9 +13,23 @@ import {
   Server,
   Sparkles,
   TrendingUp,
+  BarChart3,
+  Activity,
+  ShieldCheck,
+  AlertTriangle,
 } from "lucide-react";
 import {
   ResponsiveContainer,
+  RadarChart,
+  Radar,
+  PolarGrid,
+  PolarAngleAxis,
+  PolarRadiusAxis,
+  BarChart,
+  Bar,
+  AreaChart,
+  Area,
+  ReferenceLine,
   LineChart,
   Line,
   XAxis,
@@ -36,6 +50,7 @@ export function UserPatternsTab() {
   const { filters } = useFilters();
   const { t } = useI18n();
   const [hoveredCell, setHoveredCell] = useState<{ day: string; hour: number; count: number } | null>(null);
+  const [scopeViewMode, setScopeViewMode] = useState<"radar" | "bar" | "timeline">("radar");
 
   // Performance series for behavioral scope over time
   const { data: perfData } = useQuery({
@@ -81,14 +96,96 @@ export function UserPatternsTab() {
   const normalOps: any[] = (profile?.normal?.operations || profile?.current?.operations || []).slice(0, 8);
   const totalOpReqs = normalOps.reduce((acc, o) => acc + (o.requests || 0), 0) || 1;
 
-  // Behavioral scope time-series synthesis from series
-  const scopeSeries = series.map((s: any, idx: number) => {
+  // Real Multi-Dimensional Scope (Baseline vs Current)
+  const baseTargets = Math.max(1, (profile?.normal?.targets || []).length || (profile?.current?.targets || []).length || 1);
+  const currTargets = Math.max(1, (profile?.current?.targets || []).length || baseTargets);
+
+  const baseOps = Math.max(1, (profile?.normal?.operations || []).length || (profile?.current?.operations || []).length || 1);
+  const currOps = Math.max(1, (profile?.current?.operations || []).length || baseOps);
+
+  const baseCallers = Math.max(1, (profile?.normal?.callers || []).length || (profile?.current?.callers || []).length || 1);
+  const currCallers = Math.max(1, (profile?.current?.callers || []).length || baseCallers);
+
+  const baseSources = Math.max(1, (profile?.normal?.sources || []).length || (profile?.current?.sources || []).length || 1);
+  const currSources = Math.max(1, (profile?.current?.sources || []).length || baseSources);
+
+  const targetsDelta = Math.max(0, currTargets - baseTargets);
+  const opsDelta = Math.max(0, currOps - baseOps);
+  const callersDelta = Math.max(0, currCallers - baseCallers);
+  const sourcesDelta = Math.max(0, currSources - baseSources);
+  const totalExpansion = targetsDelta + opsDelta + callersDelta + sourcesDelta;
+
+  // Stability Score 0-100%
+  const stabilityScore = totalExpansion === 0 ? 100 : Math.max(15, 100 - totalExpansion * 20);
+
+  // Radar chart data with normalized scale
+  const maxDomain = Math.max(baseTargets, currTargets, baseOps, currOps, baseCallers, currCallers, baseSources, currSources) + 1;
+  const radarData = [
+    {
+      dimension: t("Targets", "Dịch vụ Đích"),
+      baseline: baseTargets,
+      current: currTargets,
+      fullMark: maxDomain,
+    },
+    {
+      dimension: t("Operations", "Thao tác API"),
+      baseline: baseOps,
+      current: currOps,
+      fullMark: maxDomain,
+    },
+    {
+      dimension: t("Callers", "Nguồn Gọi"),
+      baseline: baseCallers,
+      current: currCallers,
+      fullMark: maxDomain,
+    },
+    {
+      dimension: t("Source IPs", "Địa chỉ IP"),
+      baseline: baseSources,
+      current: currSources,
+      fullMark: maxDomain,
+    },
+  ];
+
+  // Grouped bar chart data
+  const barData = [
+    {
+      name: t("Targets", "Dịch vụ Đích"),
+      baseline: baseTargets,
+      current: currTargets,
+      delta: targetsDelta,
+    },
+    {
+      name: t("Operations", "Thao tác API"),
+      baseline: baseOps,
+      current: currOps,
+      delta: opsDelta,
+    },
+    {
+      name: t("Callers", "Nguồn Gọi"),
+      baseline: baseCallers,
+      current: currCallers,
+      delta: callersDelta,
+    },
+    {
+      name: t("Source IPs", "Địa chỉ IP"),
+      baseline: baseSources,
+      current: currSources,
+      delta: sourcesDelta,
+    },
+  ];
+
+  // Timeline stability series (single smooth curve instead of 4 overlapping stairs)
+  const stabilityTimeline = series.map((s: any) => {
+    const isAnomalous = (s.error_rate && s.error_rate > 0.05) || (s.rps && s.rps > 2.0);
+    const pointStability = s.requests === 0
+      ? 100
+      : Math.max(20, Math.min(100, Math.round(100 - (totalExpansion * 15) - (isAnomalous ? 25 : 0))));
     return {
       bucket_start: s.bucket_start,
-      unique_targets: Math.min(normalTargets.length, Math.max(1, Math.round(s.requests ? 2 + (idx % 3) : 1))),
-      unique_callers: Math.max(1, Math.round(s.requests ? 1 + (idx % 2) : 1)),
-      unique_operations: Math.min(normalOps.length, Math.max(1, Math.round(s.requests ? 4 + (idx % 5) : 1))),
-      unique_sources: Math.max(1, Math.round(s.requests ? 2 + (idx % 2) : 1)),
+      stability: pointStability,
+      requests: s.requests || 0,
+      rps: s.rps || 0,
     };
   });
 
@@ -277,44 +374,319 @@ export function UserPatternsTab() {
         </div>
       </div>
 
-      {/* SECTION 3: BEHAVIORAL SCOPE OVER TIME */}
-      <div className="rounded-2xl border border-[rgba(255,255,255,0.18)] bg-[#171329] p-5 shadow-lg">
-        <div className="mb-4 flex flex-wrap items-center justify-between gap-3 border-b border-white/10 pb-3">
+      {/* SECTION 3: BEHAVIORAL SCOPE STABILITY */}
+      <div className="rounded-2xl border border-[rgba(255,255,255,0.18)] bg-[#171329] p-5 shadow-lg space-y-4">
+        <div className="flex flex-wrap items-center justify-between gap-3 border-b border-white/10 pb-3">
           <div>
             <h3 className="text-sm font-bold uppercase tracking-wider text-white flex items-center gap-2">
               <Compass size={16} className="text-amber-400" />
               <span>{t("Behavioral Scope Stability")}</span>
             </h3>
-            <p className="text-xs text-[#cbd5e1]">
+            <p className="text-xs text-[#cbd5e1] mt-0.5">
               {t("Measures credential scope containment vs unexpected privilege or surface expansion")}
             </p>
           </div>
+
+          <div className="flex items-center gap-1 rounded-lg border border-white/10 bg-white/5 p-1">
+            <button
+              onClick={() => setScopeViewMode("radar")}
+              className={`flex items-center gap-1.5 rounded px-2.5 py-1 text-xs font-medium transition-all ${
+                scopeViewMode === "radar"
+                  ? "bg-cyan-500 text-black font-bold shadow"
+                  : "text-[#94a3b8] hover:text-white"
+              }`}
+            >
+              <Compass size={13} />
+              <span>{t("Radar View", "Radar Đa Chiều")}</span>
+            </button>
+            <button
+              onClick={() => setScopeViewMode("bar")}
+              className={`flex items-center gap-1.5 rounded px-2.5 py-1 text-xs font-medium transition-all ${
+                scopeViewMode === "bar"
+                  ? "bg-cyan-500 text-black font-bold shadow"
+                  : "text-[#94a3b8] hover:text-white"
+              }`}
+            >
+              <BarChart3 size={13} />
+              <span>{t("Bar Comparison", "So Sánh Cột")}</span>
+            </button>
+            <button
+              onClick={() => setScopeViewMode("timeline")}
+              className={`flex items-center gap-1.5 rounded px-2.5 py-1 text-xs font-medium transition-all ${
+                scopeViewMode === "timeline"
+                  ? "bg-cyan-500 text-black font-bold shadow"
+                  : "text-[#94a3b8] hover:text-white"
+              }`}
+            >
+              <Activity size={13} />
+              <span>{t("Stability Trend", "Xu Hướng Thời Gian")}</span>
+            </button>
+          </div>
         </div>
 
-        <div className="h-56 w-full">
-          <ResponsiveContainer width="100%" height="100%">
-            <LineChart data={scopeSeries} margin={{ top: 5, right: 10, left: -20, bottom: 5 }}>
-              <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.08)" />
-              <XAxis
-                dataKey="bucket_start"
-                tickFormatter={(ts) => new Date(ts).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
-                stroke="#cbd5e1"
-                fontSize={11}
-              />
-              <YAxis stroke="#cbd5e1" fontSize={11} allowDecimals={false} />
-              <Tooltip
-                contentStyle={{ backgroundColor: "#18142c", borderColor: "rgba(255,255,255,0.2)", borderRadius: 8 }}
-                formatter={(val: any, name: any) => [val, name]}
-                labelFormatter={(ts: any) => (ts ? new Date(Number(ts)).toLocaleTimeString() : "")}
-              />
-              <Legend wrapperStyle={{ fontSize: 11, paddingTop: 4 }} />
-              <Line type="stepAfter" dataKey="unique_targets" name={t("Unique Targets", "Dịch vụ Đích Duy Nhất")} stroke="#00f0ff" strokeWidth={2} dot={false} />
-              <Line type="stepAfter" dataKey="unique_operations" name={t("Unique Operations", "Thao Tác Duy Nhất")} stroke="#00e676" strokeWidth={2} dot={false} />
-              <Line type="stepAfter" dataKey="unique_callers" name={t("Unique Callers", "Nguồn Gọi Duy Nhất")} stroke="#b388ff" strokeWidth={2} dot={false} />
-              <Line type="stepAfter" dataKey="unique_sources" name={t("Unique Source IPs", "IP Nguồn Duy Nhất")} stroke="#ffab00" strokeWidth={2} dot={false} />
-            </LineChart>
-          </ResponsiveContainer>
-        </div>
+        {/* VIEW MODE 1: RADAR MULTI-AXIS CHART (DEFAULT) */}
+        {scopeViewMode === "radar" && (
+          <div className="grid grid-cols-1 lg:grid-cols-12 gap-5 items-center">
+            <div className="lg:col-span-6 h-72 w-full flex items-center justify-center">
+              <ResponsiveContainer width="100%" height="100%">
+                <RadarChart cx="50%" cy="50%" outerRadius="70%" data={radarData}>
+                  <PolarGrid stroke="rgba(255,255,255,0.12)" />
+                  <PolarAngleAxis
+                    dataKey="dimension"
+                    stroke="#cbd5e1"
+                    fontSize={11}
+                    tick={{ fill: "#cbd5e1" }}
+                  />
+                  <PolarRadiusAxis
+                    angle={30}
+                    domain={[0, maxDomain]}
+                    stroke="rgba(255,255,255,0.2)"
+                    fontSize={10}
+                  />
+                  <Tooltip
+                    contentStyle={{
+                      backgroundColor: "#18142c",
+                      borderColor: "rgba(255,255,255,0.2)",
+                      borderRadius: 8,
+                      fontSize: 12,
+                    }}
+                  />
+                  <Legend wrapperStyle={{ fontSize: 11, paddingTop: 4 }} />
+                  <Radar
+                    name={t("Historical Baseline", "Phạm vi Chuẩn (Baseline)")}
+                    dataKey="baseline"
+                    stroke="#818cf8"
+                    fill="#818cf8"
+                    fillOpacity={0.25}
+                    strokeWidth={2}
+                  />
+                  <Radar
+                    name={t("Observed Current", "Quan sát Thực tế (Current)")}
+                    dataKey="current"
+                    stroke={totalExpansion > 0 ? "#f59e0b" : "#00f0ff"}
+                    fill={totalExpansion > 0 ? "#f59e0b" : "#00f0ff"}
+                    fillOpacity={0.4}
+                    strokeWidth={2}
+                  />
+                </RadarChart>
+              </ResponsiveContainer>
+            </div>
+
+            <div className="lg:col-span-6 space-y-4">
+              {/* Stability Score Card */}
+              <div
+                className={`rounded-xl border p-4 transition-all ${
+                  totalExpansion === 0
+                    ? "border-emerald-500/30 bg-emerald-950/20"
+                    : "border-amber-500/30 bg-amber-950/20"
+                }`}
+              >
+                <div className="flex items-center justify-between gap-3 mb-2">
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs uppercase tracking-wider text-[#94a3b8] font-mono">
+                      {t("Stability Score", "Chỉ Số Ổn Định")}
+                    </span>
+                    <span
+                      className={`text-xl font-bold font-mono ${
+                        totalExpansion === 0 ? "text-emerald-400" : "text-amber-300"
+                      }`}
+                    >
+                      {stabilityScore}%
+                    </span>
+                  </div>
+                  <span
+                    className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-bold border ${
+                      totalExpansion === 0
+                        ? "border-emerald-500/40 bg-emerald-500/15 text-emerald-300"
+                        : "border-amber-500/40 bg-amber-500/15 text-amber-300"
+                    }`}
+                  >
+                    {totalExpansion === 0 ? (
+                      <>
+                        <ShieldCheck size={13} />
+                        {t("Scope Strictly Contained", "Phạm vi Được Kiểm Soát Tốt")}
+                      </>
+                    ) : (
+                      <>
+                        <AlertTriangle size={13} />
+                        {t("Privilege Expansion Detected", "Phát Hiện Mở Rộng Phạm Vi")} (+{totalExpansion})
+                      </>
+                    )}
+                  </span>
+                </div>
+                <p className="text-xs text-[#cbd5e1] leading-relaxed">
+                  {totalExpansion === 0
+                    ? t(
+                        "Operating strictly within learned boundaries. No unexpected services or privilege escalation detected.",
+                        "Hoạt động hoàn toàn trong ranh giới đã học. Không phát hiện dịch vụ lạ hay dấu hiệu leo thang đặc quyền."
+                      )
+                    : `Phát hiện mở rộng phạm vi ra ngoài baseline: ${
+                        targetsDelta > 0 ? `+${targetsDelta} dịch vụ đích, ` : ""
+                      }${opsDelta > 0 ? `+${opsDelta} thao tác API, ` : ""}${
+                        callersDelta > 0 ? `+${callersDelta} nguồn gọi, ` : ""
+                      }${sourcesDelta > 0 ? `+${sourcesDelta} địa chỉ IP mới` : ""}.`}
+                </p>
+              </div>
+
+              {/* 4 Dimension Status Tiles */}
+              <div className="grid grid-cols-2 gap-2.5">
+                {barData.map((d) => (
+                  <div
+                    key={d.name}
+                    className="rounded-lg border border-[#262838] bg-[#141624] p-2.5 flex flex-col justify-between"
+                  >
+                    <div className="flex items-center justify-between gap-1 mb-1">
+                      <span className="text-[11px] font-medium text-[#94a3b8]">{d.name}</span>
+                      <span
+                        className={`text-[9px] font-bold px-1.5 py-0.5 rounded border ${
+                          d.delta === 0
+                            ? "bg-emerald-500/15 border-emerald-500/30 text-emerald-300"
+                            : "bg-amber-500/15 border-amber-500/30 text-amber-300"
+                        }`}
+                      >
+                        {d.delta === 0 ? "Ổn định" : `+${d.delta} mới`}
+                      </span>
+                    </div>
+                    <div className="flex items-baseline justify-between text-xs font-mono">
+                      <span className="text-[#64748b]">
+                        Chuẩn: <strong className="text-[#94a3b8]">{d.baseline}</strong>
+                      </span>
+                      <span className="text-[#64748b]">
+                        Hiện tại: <strong className={d.delta > 0 ? "text-amber-300" : "text-white"}>{d.current}</strong>
+                      </span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* VIEW MODE 2: GROUPED BAR COMPARISON */}
+        {scopeViewMode === "bar" && (
+          <div className="space-y-4">
+            <div className="h-64 w-full">
+              <ResponsiveContainer width="100%" height="100%">
+                <BarChart data={barData} margin={{ top: 10, right: 15, left: -20, bottom: 5 }}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.08)" />
+                  <XAxis dataKey="name" stroke="#cbd5e1" fontSize={11} />
+                  <YAxis stroke="#cbd5e1" fontSize={11} allowDecimals={false} />
+                  <Tooltip
+                    contentStyle={{
+                      backgroundColor: "#18142c",
+                      borderColor: "rgba(255,255,255,0.2)",
+                      borderRadius: 8,
+                      fontSize: 12,
+                    }}
+                  />
+                  <Legend wrapperStyle={{ fontSize: 11, paddingTop: 4 }} />
+                  <Bar
+                    dataKey="baseline"
+                    name={t("Historical Baseline", "Phạm vi Chuẩn (Baseline)")}
+                    fill="#818cf8"
+                    radius={[4, 4, 0, 0]}
+                  />
+                  <Bar
+                    dataKey="current"
+                    name={t("Observed Current", "Quan sát Thực tế (Current)")}
+                    fill={totalExpansion > 0 ? "#f59e0b" : "#00f0ff"}
+                    radius={[4, 4, 0, 0]}
+                  />
+                </BarChart>
+              </ResponsiveContainer>
+            </div>
+
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-2.5 pt-2 border-t border-white/5">
+              {barData.map((d) => (
+                <div
+                  key={d.name}
+                  className="rounded-lg border border-[#262838] bg-[#141624] p-2.5 flex items-center justify-between"
+                >
+                  <div>
+                    <div className="text-[11px] font-medium text-[#94a3b8]">{d.name}</div>
+                    <div className="text-xs font-mono mt-0.5 text-white">
+                      {d.baseline} → <span className={d.delta > 0 ? "text-amber-300 font-bold" : "text-cyan-300"}>{d.current}</span>
+                    </div>
+                  </div>
+                  <span
+                    className={`text-[9px] font-bold px-1.5 py-0.5 rounded border ${
+                      d.delta === 0
+                        ? "bg-emerald-500/15 border-emerald-500/30 text-emerald-300"
+                        : "bg-amber-500/15 border-amber-500/30 text-amber-300"
+                    }`}
+                  >
+                    {d.delta === 0 ? "Ổn định" : `+${d.delta}`}
+                  </span>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* VIEW MODE 3: TIMELINE STABILITY TREND */}
+        {scopeViewMode === "timeline" && (
+          <div className="space-y-4">
+            <div className="h-64 w-full">
+              <ResponsiveContainer width="100%" height="100%">
+                <AreaChart data={stabilityTimeline} margin={{ top: 10, right: 15, left: -20, bottom: 5 }}>
+                  <defs>
+                    <linearGradient id="stabilityGrad" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="5%" stopColor="#00e676" stopOpacity={0.35} />
+                      <stop offset="95%" stopColor="#00e676" stopOpacity={0.0} />
+                    </linearGradient>
+                  </defs>
+                  <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.08)" />
+                  <XAxis
+                    dataKey="bucket_start"
+                    tickFormatter={(ts) =>
+                      new Date(ts).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
+                    }
+                    stroke="#cbd5e1"
+                    fontSize={11}
+                  />
+                  <YAxis stroke="#cbd5e1" fontSize={11} domain={[0, 100]} unit="%" />
+                  <Tooltip
+                    contentStyle={{
+                      backgroundColor: "#18142c",
+                      borderColor: "rgba(255,255,255,0.2)",
+                      borderRadius: 8,
+                      fontSize: 12,
+                    }}
+                    formatter={(val: any) => [`${val}%`, t("Stability Score", "Điểm Ổn Định")]}
+                    labelFormatter={(ts: any) => (ts ? new Date(Number(ts)).toLocaleString() : "")}
+                  />
+                  <Legend wrapperStyle={{ fontSize: 11, paddingTop: 4 }} />
+                  <ReferenceLine
+                    y={80}
+                    stroke="#f59e0b"
+                    strokeDasharray="3 3"
+                    label={{
+                      value: t("Safe Threshold (80%)", "Ngưỡng An Toàn (80%)"),
+                      fill: "#fbbf24",
+                      fontSize: 10,
+                      position: "insideTopRight",
+                    }}
+                  />
+                  <Area
+                    type="monotone"
+                    dataKey="stability"
+                    name={t("Stability Score", "Điểm Ổn Định Phạm Vi (%)")}
+                    stroke="#00e676"
+                    fill="url(#stabilityGrad)"
+                    strokeWidth={2}
+                  />
+                </AreaChart>
+              </ResponsiveContainer>
+            </div>
+
+            <div className="flex items-center justify-between text-xs text-[#94a3b8] px-1 font-mono">
+              <span>{t("Normal Range: 80% – 100% Contained", "Vùng Bình Thường: 80% – 100% Được Kiểm Soát")}</span>
+              <span className="text-amber-300">
+                {t("Below 80%: Privilege Escalation / Lateral Movement Alert", "Dưới 80%: Cảnh Báo Leo Thang Đặc Quyền / Dịch Chuyển Ngang")}
+              </span>
+            </div>
+          </div>
+        )}
       </div>
 
       {/* SECTION 4: KNOWN SOURCE IPS BASELINE (SECONDARY CONTEXT) */}

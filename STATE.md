@@ -23,17 +23,66 @@
 - **ClickHouse Cluster Datastore (`tracescope-clickhouse`)**:
   - Service Type: `ClusterIP`
   - Cluster IP: `10.105.101.253:8123` (auto-detected by `backend/config.py:_detect_clickhouse_host`)
-  - Status: Healthy, open, serving ClickHouse 24.8.14.39. Total active on-disk data: **25.2 MiB**.
-    - `tracescope` (Application database): **23.1 MiB** (57,990 traces, 36,053 1m metric buckets, 16,005 5m metric buckets, 628 baselines, 1,598 anomalies detected) generated from authentic production PCAP capture traffic (`tcpdump_10.240.147.249.pcap`) with realistic RPS rates and authentic RPS anomaly spikes.
-    - `system` (ClickHouse internal engine logs): **2.1 MiB**. Enforced **1-day TTL retention** (`event_date + toIntervalDay(1)`) across all system log tables (`text_log`, `query_log`, `processors_profile_log`, `part_log`, `trace_log`, `metric_log`, `asynchronous_metric_log`, `error_log`) via migration `005_system_telemetry_retention.sql` and `clickhouse_migrator.py:configure_system_telemetry_retention`.
-  - Elasticsearch Datastore (`apm-7.17.24-transaction-000001` on `:32073`): **28.4 MB** (57,990 docs across 2-hour window).
+  - Status: Healthy, open, serving ClickHouse 24.8.14.39.
+    - `tracescope` (Application database): **2,000,000 traces, 43,616 1m buckets, 14,538 5m buckets, 1,304 baselines, 915 anomaly events, 399 principal behavioral change events, 11 enterprise system accounts + unauthenticated traffic** (Populated via `backend/scripts/generate_2m_enterprise_dataset.py` with authentic telecom/enterprise system accounts: `telecom_sync_svc`, `vtp_express_dispatch`, `pos_checkout_terminal`, `billing_reconcile_job`, `interbank_settlement_gw`, `partner_sales_broker`, `enterprise_b2b_gateway`, `secops_monitor_agent`, `sysadmin_deploy_agent`, `mobile_miniapp_gateway`, `audit_compliance_worker`, and `unknown` / unauthenticated public traffic across `apex-*` microservices).
+    - **2,000,000 Trace Storage Benchmark**:
+      - ClickHouse `tracescope.traces`: **427.14 MiB compressed** (1,485.33 MiB uncompressed, **3.48x compression ratio**).
+      - Elasticsearch `apm-7.17.24-transaction`: **542.79 MiB**, 2,000,334 documents (~284.5 bytes/doc).
+      - Combined Storage: **969.93 MiB** total telemetry footprint across both systems. Linux root filesystem has 33.3 GiB free (23.7%).
+    - **TPS Surge Detection & Anomalies Page Visibility**:
+      - Detected and verified all 3 principal-level TPS surge cases requested:
+        1. `pos_checkout_terminal` on `apex-order-service`: baseline 0.15 -> current 0.59 TPS (+293.3%, Anomaly ID `879726895952825`).
+        2. `vtp_express_dispatch` on `apex-customer-service`: baseline 0.15 -> current 0.32 TPS (+113.3%, Anomaly ID `3319515299048063`).
+        3. `unknown` (Unauthenticated) on `apex-edge-gateway`: baseline 0.15 -> current 0.30 TPS (+100.0%, Anomaly ID `8194410154801793`).
+      - Resolved omission root causes:
+        * Added principal-level traffic spike detector in `anomaly_detection.py` so individual identity surges are not diluted by background service traffic.
+        * Adjusted frontend `Anomalies.tsx` default perspective to `"all"` and broadened `isUserAnomaly` matching to include `metadata.principals`.
+        * Fixed integer day truncation in `principal_daily_stats` (eliminating 617,425 bloated float-division rows down to 31 clean daily rows, accelerating `/api/v1/users/:principal` from 19.05s to 0.29s).
+    - **Interactive Service Topology Data Availability & DB Fix**:
+      - Resolved "Topology data is unavailable":
+        * Restarted FastAPI on port 30102 to load the interactive topology router endpoints (`/api/v1/topology/services`, `/api/v1/topology/services/{service}/apis`, `/api/v1/topology/services/{service}/apis/{api}/principals`, etc.) which were previously returning HTTP 404.
+        * Fixed `InteractiveTopologyRepository.backend` property: strictly checks `settings.storage_backend in ("elasticsearch", "elk")`, preventing false Elasticsearch fallbacks when ClickHouse contains the active durable dataset and `OTEL_ES_URL` is set for APM sync.
+        * Fully materialized and populated all 8 ClickHouse topology tables directly from the 2,000,000 traces in `tracescope.traces`:
+          - `topology_service_edges_5m`: **42,291 rows** (5-minute multi-service rollups with exact p50/p95/p99 percentiles).
+          - `topology_api_edges_5m`: **74,856 rows** (API-level endpoint rollups).
+          - `topology_principal_edges_5m`: **78,396 rows** (Principal-to-API caller rollups).
+          - `topology_principal_ip_5m`: **78,396 rows** (Client IP attribution and classification context).
+          - `topology_*_current`: Latest point-in-time lookup tables populated across all 4 dimensions.
+        * Enhanced `InteractiveTopologyPage` (`frontend/src/pages/InteractiveTopology.tsx`): Defaults to `24h` window (displaying 20 nodes and 23 edges across `apex-*` microservices), added interactive pill buttons (`5m`, `15m`, `1h`, `6h`, `24h`, `7d`, `all`), added 1-click fallback button on empty states, and applied authentic Vietnamese localization.
+    - **100% Anomaly & Behavioral Coverage Verified**:
+      - 10/10 Anomaly Detectors active: `unusual_access`, `new_service_edge`, `new_principal_edge`, `error_rate`, `latency`, `unusual_time`, `traffic_spike`, `traffic_drop`, `ip_new_user`, `user_new_source_ip`.
+      - All Behavioral Detectors active: `NEW_IP_CALLER_PAIR`, `NEW_OPERATION`, `UNUSUAL_TIME`, `NEW_TARGET`, `NEW_RELATIONSHIP`, `NEW_SOURCE_IP`, `TARGET_FANOUT_SURGE`, `NEW_CALLER`, `CALLER_PRINCIPAL_SWITCH`, `PRINCIPAL_RATE_SURGE`, `AUTH_FAILURE_BURST`, `FAILURE_THEN_SUCCESS`, `DORMANT_REACTIVATED`, `USERNAME_FIRST_SEEN`, `OPERATION_MIX_SHIFT`.
+    - `system` (ClickHouse internal engine logs): Truncated with enforced 1-day TTL retention (`event_date + toIntervalDay(1)`).
+  - Elasticsearch Datastore on `:32073`: APM index `apm-7.17.24-transaction` holds **2,000,334 transaction documents** with canonical `enduser.id` field and zero mapper parsing errors.
   - Table Engine: `ReplacingMergeTree`. Queries across `principals`, `principal_callers`, etc., use `FINAL` (e.g. `FROM principals AS p FINAL`) to guarantee deduplicated records across asynchronous background merges.
+  - Anomaly Time Horizon: Incident Time Horizon line graph on `/anomalies/:id` defaults to a **24-hour horizon** with interactive `1h` / `6h` / `24h` / `7d` controls and dual date-time XAxis ticks (`MM/DD HH:mm`).
+  - User Performance API Resilience: Implemented defensive `_clean()` float sanitization in `UserRepository.performance()` to safely handle empty / zero-traffic outage windows (ClickHouse `quantile(0.95)` returning `NaN`), ensuring 100% JSON-compliant numeric responses.
+  - Behavioral Scope Stability Redesign: Replaced confusing 4-line overlapping stair-step graph on `/users/:principal/patterns` with an interactive multi-view Scope Stability system:
+    1. **Radar View (Default)**: Recharts `RadarChart` comparing learned baseline polygon vs live observed scope across 4 dimensions (Targets, Operations, Callers, Source IPs) with side-by-side Stability Score card (`0%-100%`), containment badges, and 4 dimension metric tiles.
+    2. **Grouped Bar View**: Side-by-side comparison of baseline vs current counts per dimension.
+    3. **Stability Trend View**: Single smooth `AreaChart` tracking scope stability score over time with an 80% safe reference threshold.
+  - Unknown & Unauthenticated Users Traffic Monitor (`/unknown-users`): Added dedicated monitoring page and backing API (`/api/v1/unknown-users`) for unauthenticated, anonymous (`-anonymous-`), and `unknown` traffic. Displays volume %, auth failure rate (401/403), avg/p95 latency, explored surface, throughput & error time series, top target services, top probed endpoints, top source IPs, and recent raw traces with direct links to distributed waterfall views. Accessible via SideNav under `Identity & Access` and via the header in `UserDirectory.tsx`.
 
 - **TraceScope Dashboard Hub & Aggregation Worker**:
   - Dashboard API & Frontend: `http://0.0.0.0:30102` (FastAPI + React 19 SPA)
   - Aggregation Worker: `tracescope-worker` (`python -m backend.worker --interval 60`)
   - Ingest NodePort: `http://<node-ip>:30103/api/ingest`
   - Ingress HTTP NodePort: `http://<node-ip>:31561`
+
+- **Lightweight Monitoring Stack (`light-mon`)**:
+  - Namespace: `monitoring`
+  - Release: `light-mon` (Chart: `prometheus-community/kube-prometheus-stack` deployed via Helm with `--skip-crds -f values-lightweight.yaml`, Revision: 5)
+  - Configuration: [values-lightweight.yaml](file:///home/ubuntu/Viettel/OtelTrace/values-lightweight.yaml)
+  - Components Enabled:
+    - Prometheus (`light-mon-kube-prometheus-prometheus`, retention 2d, 30s scrape interval, ephemeral emptyDir storage)
+    - Grafana (`light-mon-grafana`, NodePort `32080`, `http://<NODE_IP>:32080`, adminPassword: `admin`, persistence disabled)
+    - Prometheus Operator (`light-mon-kube-prometheus-operator`)
+  - Additional Scrape Target:
+    - Job: `tracescope` scraping `https://trace.n2d.id.vn:443/metrics` (SNI/TLS verified)
+  - Disabled Components: `alertmanager`, `nodeExporter`, `kubeStateMetrics` (trimmed for minimal resource footprint)
+
+
+
 
 ---
 
@@ -51,9 +100,11 @@
   - `run_server.sh status` verifies connectivity directly to NodePort 32073.
 - **Worker Stages (`backend/worker.py`)**:
   1. `sync_elasticsearch`: Incremental trace reader (`ElasticsearchReader`) pulls APM transaction hits from NodePort 32073, normalizes them via `normalize_otel_record`, and persists them into ClickHouse `traces` table with checkpoint deduplication.
+     - **ELK `enduser.id` Extraction**: Automatically extracts username from `enduser.id`, `labels.enduser.id`, `labels.enduser_id`, `enduser: {id}`, `attributes: [{"key": "enduser.id", ...}]`, `user.id`, `user.name`, and search `fields["enduser.id"]`. Sets `principal_name = enduser.id`, `identity_source = "enduser_id"`, and `principal_id = "<env>:<enduser.id>"`.
+     - **ELK Trace Search Isolation**: `ElasticsearchTraceRepository.list_traces()` strictly filters for `processor.event: ["transaction", "span"]` or `exists: trace.id` and excludes `processor.event: "metric"`. Prevents non-trace metric documents from generating synthetic hash IDs that fail resolution in `/traces/{id}`. `get_trace()` includes `_id` fallback in search.
   2. `aggregate_traces`: Bounded 1m/5m rollups computed across newly ingested traces.
   3. `rebuild_baselines`: Rolling median & MAD baseline recomputation.
-  4. `detect_anomalies`: Detectors 1-8 evaluated across updated metric buckets.
+  4. `detect_anomalies`: Detectors evaluated across updated metric buckets (including `unusual_access`, `unusual_time`, `user_new_source_ip`, `ip_new_user`).
   5. `process_principal_intelligence`: Identity behavioral change detection and incident scoring.
 
 ---
@@ -835,6 +886,259 @@ When running `./deploy/docker/build_and_push.sh xhatsu101/tracescope 0.3.3`, the
   - Model generated fluent, professional Vietnamese for `statement`, `alternatives`, `explanation`, and `rationale`.
   - Exact code enums and evidence IDs (`source-0`, `related_changes-*`, `attached_baseline-*`) were preserved.
   - Pydantic validation via `InvestigationRunner._validate_reply` succeeded with **0 errors**.
-- Automated test suite: 14/14 LLM investigation unit tests passed; full suite passed.
+---
 
+## 20. Architectural Strategy for `-anonymous-` (Unauthenticated Traffic) & Review Guide
 
+### 1. Context & Architectural Problem
+- Unauthenticated transactions (missing auth headers, public API calls, health probes, crawlers) are currently assigned `principal_name = "-anonymous-"` (or `"unknown"`).
+- Because thousands of unrelated clients share this single pseudo-user, `-anonymous-` fans out to hundreds of source IPs and target services, inflating its behavioral score to 100 and polluting the "Top Risky Accounts" cohort.
+- Furthermore, the User Directory (`/users`) lists `-anonymous-` as if it were a real employee or service account.
+
+### 2. Proposed Strategy: "Pseudo-Entity Segregation"
+- **Data Invariant**: Retain all trace data and metric rollups for `-anonymous-` without dropping rows, guaranteeing 100% accurate service throughput (TPS), error rates, and p50/p95/p99 latency metrics.
+- **Behavioral & Identity Engine**: Exclude `-anonymous-` from user risk scoring (behavior_score = 0). Shift unauthenticated threat detection to **Source IP Anomaly** (`caller_ip: unusual_access`, `ip_new_endpoint`) and **Endpoint Security** (401/403 `auth_failure_burst`).
+- **User Directory**: Default to filtering out `-anonymous-` from `/api/v1/users`, with an explicit toggle `include_anonymous=true` and a neutral badge `[Public / Unauthenticated Traffic]`.
+
+### 3. Review Artifacts Generated
+- **Comprehensive Architecture Plan**: [`PLAN_ANONYMOUS_USER_HANDLING.md`](file:///home/ubuntu/.gemini/antigravity-cli/brain/b7e6946a-d567-447c-8b05-0313a8ad8f01/PLAN_ANONYMOUS_USER_HANDLING.md).
+- **Codex (GPT-6 ASTRA Medium) Review Guide & Prompt**: [`GUIDE_PLAN_CODEX_REVIEW.md`](file:///home/ubuntu/.gemini/antigravity-cli/brain/b7e6946a-d567-447c-8b05-0313a8ad8f01/GUIDE_PLAN_CODEX_REVIEW.md).
+
+---
+
+## 21. Completed Implementation: F5 Load Balancer IP Resolution & Anonymous Traffic Segregation
+
+### 1. F5 Load Balancer IP Resolution without Client Guessing
+- **Core Principle**: Do NOT guess client IP when telemetry only sees the F5 load balancer address without trusted `X-Forwarded-For` or `X-Real-IP`.
+- **Quality Attributes (`backend/app/models/trace.py`, `backend/app/services/normalization.py`)**:
+  - `observed_ip = F5 IP`: The physical network connection peer.
+  - `effective_client_ip = "unavailable"`: Never falsely set to F5 IP.
+  - `ip_resolution = "load_balancer_unresolved"`: Explicitly states LB hop is unresolved.
+  - `client_identity_quality = "low"`
+  - `context_quality`: 4-tier ladder (`high`, `medium`, `low`, `very_low`).
+- **Infrastructure IP Categorization (`backend/config.py`)**:
+  - Configurable categories: `known_f5` (`OTEL_KNOWN_F5`), `known_lb` (`OTEL_KNOWN_LB`), `known_reverse_proxy` (`OTEL_KNOWN_REVERSE_PROXY`), `known_nat` (`OTEL_KNOWN_NAT`).
+  - Helper `is_known_infrastructure_ip(ip)`: Detects explicit infrastructure addresses without conflating general internal private LAN client IPs (e.g. `10.0.0.2`).
+- **IP Behavioral Suppression Behind Unresolved LBs**:
+  - `backend/app/services/principal_relationships.py`: Unresolved LB/F5 IPs are suppressed from `NEW_SOURCE_IP`, `NEW_PRINCIPAL_ON_SOURCE`, and `NEW_IP_CALLER_PAIR`. F5 is never recorded as an individual user's personal source IP in `principal_sources`.
+  - `backend/app/services/anomaly_detection.py`: When `source_ip` is an unresolved LB/F5, `user_new_source_ip` and `ip_new_user` are suppressed.
+
+### 2. Anonymous Traffic Handling (`user = -anonymous-`)
+- **Core Principle**: `-anonymous-` is a Traffic Class, NOT a user identity.
+- **Identity Analytics Exclusion**:
+  - Excluded from `principals` table bootstrapping, baselines, and relationship generation (`principal_name NOT IN ('unknown', '-anonymous-', 'anonymous', '')`).
+  - Excluded from `UserRepository().list_users()` by default (accessible via `include_anonymous=True`).
+  - Excluded from `UserRepository().analytics()`: Never appears in `most_active`, `most_changed`, `shared_credentials`, or `dormant_reactivated`.
+  - Never assigned a user risk score, never creates user security incidents.
+- **100% Telemetry Analytics Retention**:
+  - Retains all traces, metric rollups, TPS, RPS, error rates, p50/p95/p99 latency, and service topology dependencies.
+  - `UserRepository().summary()` reports `anonymous_requests` and `anonymous_traffic_percentage` (e.g., 9.0% anonymous vs 91.0% identified traffic).
+- **Endpoint-Centric Anonymous Anomaly Detection**:
+  - Combined worst-case (`anonymous + unresolved F5`) shifts from user-centric to **Endpoint & Traffic-centric behavioral analysis**:
+    - `anonymous_new_endpoint`: Novel endpoint accessed anonymously.
+    - `auth_failure_burst`: 401/403 authorization bursts.
+    - Emits structured Anonymous Anomaly Events (`principal_name = None`, `metadata = {"traffic_class": "anonymous"}`).
+- **Frontend Glanceable Visibility (`frontend/src/pages/Overview.tsx`)**:
+  - Added live header pill: `Lưu lượng Định danh: 91.0% | Ẩn danh: 9.0%` with full Vietnamese localization.
+
+### 3. Verification & Safety Test Results
+- **Pytest Suite**: **174/174 tests passed** (`.venv/bin/python -m pytest tests/ -q` in 02:20).
+  - Verified F5 unresolved IP handling and quality ladder (`tests/test_f5_lb_normalization.py`).
+  - Verified F5 IP anomaly suppression and anonymous user isolation (`tests/test_user_ip_anomalies.py`).
+  - Verified identity normalization and security incident boundaries (`tests/test_identity_normalization_and_incidents.py`).
+- **Curl & JavaScript Safety Suite**: **48/48 tests passed** (`sh backend/scripts/curl_test_all_pages.sh`).
+- **Frontend Build**: Built cleanly with Vite and TypeScript compiler (`tsc -b && vite build` in 10.77s).
+- **Port 30102 Status**: Online, healthy, serving all 20 SPA routes and 28 backing APIs.
+
+---
+
+## 13. OpenTelemetry Collector Telemetry Metrics Migration Fix
+
+### Issue Encountered
+`otel-collector` pod in namespace `observability` crashed on startup with:
+```text
+Error: failed to get config: cannot unmarshal the configuration: decoding failed due to the following error(s):
+'service.telemetry.metrics' decoding failed due to the following error(s):
+'migration.MetricsConfigV030' has invalid keys: address, no need for metrics
+```
+
+### Root Cause
+1. **Schema Migration (`migration.MetricsConfigV030`)**: In OpenTelemetry Collector Contrib (`otel/opentelemetry-collector-contrib:latest`), `service.telemetry.metrics.address` is deprecated/removed and replaced with `readers` specifying pull/push exporters.
+2. **Invalid YAML Key (`no need for metrics`)**: Raw text `no need for metrics` was unquoted and uncommented under `metrics:`, causing YAML to parse it as an invalid dictionary key.
+
+### Applied Configuration (`/home/ubuntu/agy/otel-obi/otel-collector.yaml`)
+Configured modern Prometheus metrics reader on port 8888 (matching the existing Service `otel-collector` port 8888 and Deployment containerPort 8888):
+```yaml
+      telemetry:
+        logs:
+          level: info
+        metrics:
+          readers:
+            - pull:
+                exporter:
+                  prometheus:
+                    host: 0.0.0.0
+                    port: 8888
+```
+*(If internal metrics are not needed, `level: none` can be used instead).*
+- Validated with Python YAML parser across all 4 documents in `/home/ubuntu/agy/otel-obi/otel-collector.yaml`.
+
+---
+
+## 14. Web Prometheus Metrics Exposition (`/metrics`)
+
+### Implementation Overview
+Exposes standard Prometheus 0.0.4 text exposition format at `GET /metrics` on port 30102 (and all roles):
+- **Web Application Performance Metrics**:
+  - `http_requests_total{method, handler, status}`: Real-time request counts partitioned by HTTP method, parameterized route template, and status code.
+  - `http_request_duration_seconds_bucket{method, handler, le}`: Full request latency histogram with standard buckets (`0.005` to `10.0` and `+Inf`), plus `_sum` and `_count`.
+  - `http_requests_in_progress`: Current active in-flight request gauge.
+- **Process & System Metrics**:
+  - `process_resident_memory_bytes`: Accurate RSS memory usage directly from Linux `/proc/self/statm`.
+  - `process_cpu_seconds_total`: Total user and system CPU time spent.
+  - `process_start_time_seconds` & `process_uptime_seconds`.
+- **Ingestion & Engine Telemetry**:
+  - `tracescope_ingest_writer_queue_depth`, `tracescope_ingest_writer_alive`, `tracescope_ingest_writer_committed_total`, `tracescope_ingest_writer_batches_total`.
+  - `tracescope_service_info{version="0.3.3", role="...", backend="..."}`.
+- **Estate & ClickHouse Counters**:
+  - `nt_otel_server_spans_total`, `nt_requests_total`, `nt_nodes_reporting`, etc., preserved for backward compatibility.
+- **High Cardinality Protection**:
+  - Parameterized route templates resolved from Starlette ASGI scope (`/api/v1/services/{service}`).
+  - Arbitrary UUIDs, transaction IDs, and hex hashes masked to `{id}`.
+  - 404 unrouted scanners collapsed into `not_found`.
+
+### Kubernetes & Prometheus Scraping Configuration
+1. **Standard Service Annotations (`deploy/k8s/31-api-service.yaml` & `deploy/helm/tracescope/templates/api-service.yaml`)**:
+   ```yaml
+   annotations:
+     prometheus.io/scrape: "true"
+     prometheus.io/port: "30102"
+     prometheus.io/path: "/metrics"
+   ```
+2. **Prometheus Operator ServiceMonitor (`deploy/k8s/35-prometheus-servicemonitor.example.yaml`)**:
+   Ready for Prometheus Operator / `kube-prometheus-stack` scraping every 15s.
+3. **Standalone Prometheus Scrape Job (`prometheus.yml`)**:
+   ```yaml
+   scrape_configs:
+     - job_name: 'tracescope-web'
+       scrape_interval: 15s
+       metrics_path: '/metrics'
+       static_configs:
+         - targets: ['<host-or-node-ip>:30102']
+   ```
+
+### Worker Cadence Domain Metrics Update (Decoupled from HTTP Scrapes)
+- **Problem Avoided**: Running heavy ClickHouse aggregations (`SELECT count() FROM traces`, `SELECT SUM(...) FROM metric_buckets`, `SELECT principal_name ...`) on every 15-second Prometheus scrape causes unnecessary CPU and I/O load on the database.
+- **Worker Stage (`update_prometheus_metrics`)**:
+  - `backend.worker` executes the heavy aggregations **strictly once per worker cycle** (e.g. every 60s or upon worker invocation).
+  - Snapshot is written to ClickHouse checkpoint `checkpoints(source='worker_prometheus_metrics')` and cached to `/tmp/tracescope_worker_metrics.json`.
+- **Fast HTTP Scrape (0 DB Load)**:
+  - `GET /metrics` directly reads the cached worker snapshot in memory or from local cache in sub-millisecond time.
+  - Zero heavy ClickHouse queries executed during Prometheus scraping.
+  - In-memory web request metrics (`http_requests_total`, `http_request_duration_seconds`, `process_*`) update live with incoming HTTP traffic.
+  - Exposes `tracescope_worker_last_run_timestamp_seconds` and `tracescope_worker_cycle_duration_seconds`.
+
+### Verification & Testing
+- `tests/test_prometheus_metrics.py`: 6/6 passed.
+- Full pytest test suite: **178/178 passed** in 02:06.
+- Worker end-to-end integration verified: `python -m backend.worker --once` successfully executed stage `update_prometheus_metrics`.
+- Live verified on `http://127.0.0.1:30102/metrics` exposing `tracescope_worker_last_run_timestamp_seconds` and precomputed domain counters without database delay.
+
+---
+
+### Pure TPS & Historical Baseline Chart Refactor (Overview Dashboard)
+- **Problem**:
+  - The Overview series chart hardcoded `"baseline_rps": rps` in `backend/repository.py:dashboard_series`, causing the baseline line to be completely identical to the observed throughput.
+  - The chart mixed TPS with 5xx error rate and dual Y-axes, confusing users looking strictly at traffic volume and historical expectations.
+- **Backend Fix (`backend/repository.py`)**:
+  - `dashboard_series` now queries `baseline_metrics` (`rps_median`) grouped by `(hour_of_day, day_of_week)` matching the active filter (service, account, operation, or system-wide sum across all services).
+  - Each point's `baseline_rps` and `baseline_tps` reflect true historical median expectations with graceful fallback to historical medians.
+  - `dashboard_summary` returns `baseline_rps` and `baseline_tps` for the aggregate window.
+- **Frontend Refactor (`frontend/src/pages/Overview.tsx` & `i18n.tsx`)**:
+  - Refactored panel to "Tốc độ Thông lượng Định danh & Chuẩn Lịch sử" (`Identity Traffic Velocity & Historical Baseline`).
+  - Action header shows `TPS: {observed_tps} • Chuẩn Lịch sử: {baseline_tps}`.
+  - Removed 5xx error rate line and secondary right Y-axis, rendering a clean, pure TPS area chart with purple dashed historical baseline.
+  - Tooltip formatted strictly for TPS (`{val} tps`).
+  - End-to-end verified with `curl_test_all_pages.sh` (48/48 passed, 0 JS errors).
+
+---
+
+### 7-Day & 30-Day Global Time Range Redesign & Multi-Grain Downsampling
+- **Global Header Control (`frontend/src/App.tsx`)**:
+  - Added `7d` (168h) and `30d` (720h) presets alongside `1h`, `3h`, `6h`, `24h`.
+  - Added `Math.abs(rangeHours - hours) <= 1` active state check and hover title tooltips.
+  - Dynamic Rollup Badge: shows `60s rollup` for $\le 36\text{h}$, `5m rollup` for $36\text{h} < \Delta \le 192\text{h}$, and `1h rollup` for $> 192\text{h}$.
+- **User Topology Presets (`frontend/src/pages/user/UserTopologyTab.tsx`)**:
+  - Added `7d` and `30d` filter buttons alongside `5m`, `1h`, `24h`, and `all`.
+- **Backend Dynamic Downsampling (`backend/repository.py` & `backend/app/repositories/user_repository.py`)**:
+  - Automatically downsamples `dashboard_series` into 5-minute buckets for 7d (giving ~627 points) and 1-hour buckets for 30d (giving ~275 points), avoiding 43,200-point payload transfers.
+  - Automatically downsamples `user_repository:performance` into 5m or 1h buckets for multi-day queries.
+- **Chart Date Formatting (`Overview.tsx`, `UserOverviewTab.tsx`, `UserActivityTab.tsx`)**:
+  - XAxis displays `M/D HH:mm` when range $> 24\text{h}$ and Tooltip displays full locale date+time.
+- **Verification**:
+  - Vite build passed (`npm run build`).
+  - 48/48 curl and JS safety tests passed (`sh backend/scripts/curl_test_all_pages.sh`).
+  - API responses for 7d and 30d verified working cleanly.
+
+---
+
+### Anomaly Detail Incident Time Horizon Line Graph Fix (2026-09-18)
+- **Problem**:
+  - Investigating finding URLs such as `http://129.150.59.233:30102/anomalies/6130971176347858?start=1789687202539&from=1789687202539&end=1789698062539&to=1789698062539&timezone=UTC&comparison=previous` rendered a completely blank/empty chart in "Incident Time Horizon: Actual vs Expected Baseline".
+- **Root Causes**:
+  1. **Series Timestamps**: Backend returned raw seconds `bucket_start` (~1.789e9) whereas Recharts XAxis and `ReferenceArea` expected milliseconds (~1.789e12).
+  2. **Series Data Keys**: Backend raw series provided `{requests, errors, error_rate, latency_avg, latency_p95}` with no `rps` or `actual` keys. The frontend was doing `<Area dataKey={metric} />` where `metric = "rps"`, causing all points to evaluate to `undefined` Y-values.
+  3. **Time Range Filter Disconnect**: Backend ignored incoming query parameters (`start`, `end`, `from`, `to`) and only queried a default 1-hour window around the initial anomaly record, returning fewer or misaligned buckets for user-selected ranges.
+- **Remediation**:
+  1. **Backend (`backend/app/api/anomalies.py`)**:
+     - Added query parameters `from`, `to`, `start`, `end` to `GET /api/v1/anomalies/{anomaly_id}` using `_parse_time_ms`.
+     - Enriched each series point with:
+       - `timestamp_ms`: Canonical millisecond epoch (`bucket_start * 1000`).
+       - `rps` & `tps`: Normalized throughput (`requests / 60.0`).
+       - `actual`: Metric-type aligned value (latency p95 for latency anomalies, error rate % for error anomalies, rps/tps for volume anomalies).
+       - `expected`: Baseline value (`item.baseline_value` or 0.0).
+  2. **Frontend (`frontend/src/pages/Anomalies.tsx`)**:
+     - Hooked `useFilters()` into `AnomalyDetailPage` and appended `?${queryString(filters)}` to the query URL.
+     - Added robust normalization map across `chartData`:
+       - Automatically converts seconds to milliseconds if timestamp $< 10^{10}$.
+       - Derives fallback `rps`, `p95_ms`, `http_5xx_rate`, `actual`, and `expected` baseline.
+       - Configured `metric` to accurately track `"p95_ms"`, `"http_5xx_rate"`, or `"rps"`.
+- **Verification**:
+  - `curl -s "http://127.0.0.1:30102/api/v1/anomalies/6130971176347858?start=1789687202539..."` returns 35 series points with full `timestamp_ms`, `rps`, `actual`, and `expected`.
+  - Frontend built cleanly without warnings (`tsc -b && vite build`).
+  - Pytest API and analytics tests passed (16/16 passed).
+- Port 30102 live and verified.
+
+### Interactive Service Topology (implemented 2026-09-18)
+- Added migration `backend/clickhouse_migrations/008_interactive_topology.sql` with bounded five-minute service, API, principal, principal/IP, and current topology tables. The migration also persists normalized source-IP/attribution and request/response byte fields on sanitized trace rows.
+- The analytics worker materializes only the bounded event-time slice in ClickHouse mode. Elasticsearch/ELK mode uses the interactive topology repository's server-side composite/runtime aggregations and does not write application traces into ClickHouse for topology reads.
+- Added interactive topology contracts under `/api/v1/topology/services`, service API expansion, API principal expansion, service/API/principal metrics, and cursor-paginated principal IPs. Responses include direct/inferred evidence, confidence, operational metrics, anonymous attribution, and previous-window change indicators.
+- Added the React `Service Topology` route at `/topology`: service-only initial graph, explicit lazy branch expansion, stable parent-relative positioning, separate node/edge inspection, and paginated principal IP context in the side panel.
+- Task verification: focused topology tests **5/5**, existing analytics/API/LB/user-IP slice **43/43**, frontend `npm run lint`, and frontend `npm run build` passed. A build-size advisory remains from the pre-existing single-bundle frontend shape.
+
+### Full-Canvas Topology Interaction Redesign (2026-09-18)
+- `/topology` is an edge-to-edge route canvas with floating time, graph legend, change, and attribution controls.
+- The object detail window is absent by default and floats on the right only after node/edge selection.
+- Navigation: wheel or `+`/`-` zoom (50%-250%), drag blank canvas to pan, click the percentage or double-click blank canvas to reset.
+- Service, API, and principal node statistics are vertically stacked inside each graph card.
+- Node cards are independently draggable without coordinate boundaries; edges follow their new positions, and the grid remains visible throughout extended panning.
+- Node inspectors render a TPS time-series chart from ClickHouse or Elasticsearch detail buckets.
+- TPS detail charts render a smooth curve over fixed five-minute buckets regardless of the selected observation-window length.
+- Topology time selection is now a seven-day slider with 2,016 five-minute steps; range preset buttons are no longer used on the topology page.
+- Sidebar transitions leaving `/topology` use a full route load, eliminating the stale-canvas state where the URL changed but React Router continued rendering topology; verified with the inspector open.
+- Canvas z-indexes are isolated below the fixed sidebar, preserving navigation to all other routes while the graph or inspector is active.
+- Vietnamese canvas labels and accessibility names are included.
+- Verified with frontend lint/build, HTTP 200 route/API checks, and **18/18** Playwright pages. The topology browser assertion covers zoom/reset, inspector open timing, and sidebar navigation from `/topology` to `/services`.
+## Topology API connection focus (2026-09-18)
+
+- The full-page topology canvas shows service-to-service relationships by default.
+- Clicking an expanded API card queries and overlays its exact observed caller-service connections for the selected five-minute window.
+- Contextual API wires disappear when the API is no longer selected; no service-wide relationship is inferred as API-specific.
+- Endpoint: `GET /api/v1/topology/services/{service}/api-connections?api=<api>&window=5m` (also accepts bounded `from`/`to`).
+
+## Topology fast-travel search (2026-09-18)
+
+- The topology title panel includes a type-ahead search for services, APIs, and users.
+- Search covers the full seven-day slider horizon through `GET /api/v1/topology/search?q=...&window=7d`.
+- Selecting a result jumps to its latest observed five-minute slice, expands the required service/API path, centers the result card, and opens its floating detail inspector.
+- Selected cards use the highest node z-layer, and selected relationship wires are rendered last within the SVG relationship layer.

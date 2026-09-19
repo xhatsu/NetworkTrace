@@ -5,6 +5,10 @@ metadata:
   labels:
     {{- include "tracescope.labels" . | nindent 4 }}
     app.kubernetes.io/component: api
+  annotations:
+    prometheus.io/scrape: "true"
+    prometheus.io/port: "30102"
+    prometheus.io/path: "/metrics"
 spec:
   type: ClusterIP
   selector:
