@@ -13,7 +13,7 @@ import {
 } from "recharts";
 import { Activity, AlertOctagon, ArrowRight, Server, UserRound } from "lucide-react";
 import { api, queryString } from "../api";
-import { ErrorState, Loading, MetricCard, Page, Panel, chartTooltip, n } from "../components";
+import { ErrorState, Loading, MetricCard, Page, Panel, TpsLineChart, chartTooltip, n } from "../components";
 import { useFilters } from "../App";
 import { useI18n } from "../i18n";
 import type { SeriesPoint, Summary } from "../types";
@@ -47,10 +47,10 @@ type ChangeEvent = {
 };
 
 const SCORE_COLORS = {
-  low: "#22c55e",
-  medium: "#f59e0b",
-  high: "#f97316",
-  critical: "#e11d48",
+  low: "#73bf69",
+  medium: "#f2cc0c",
+  high: "#ff9830",
+  critical: "#f2495c",
 };
 
 function formatTime(value: number, timezone: string) {
@@ -156,13 +156,22 @@ export function OverviewPage() {
 
   return (
     <Page eyebrow={t("Observability Dashboard")} title={t("Operational Overview")} description={t("Status, changes, and the services or users behind them.")} actions={<button onClick={() => nav("/anomalies")} className="btn-cyan text-xs"><AlertOctagon size={14} />{t("Open anomalies")}</button>}>
-      <div className="mb-4 flex flex-wrap items-center justify-between gap-2 rounded-lg border border-cyan-500/25 bg-cyan-500/10 px-3.5 py-2.5 text-xs"><div className="flex items-center gap-2 font-semibold text-cyan-300"><Activity size={14} />{t("Live dashboard window")}</div><div className="font-mono text-[#94a3b8]">{t("5-minute buckets · 7-day history")}</div></div>
+      <div className="mb-3 flex flex-wrap items-center justify-between gap-2 border border-[#2a2d30] bg-[#181b1f] px-3 py-2 text-xs"><div className="flex items-center gap-2 font-semibold text-[#5794f2]"><Activity size={14} />{t("Live dashboard window")}</div><div className="font-mono text-[#7b7d80]">{t("5-minute buckets · 7-day history")}</div></div>
 
-      <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
-        <MetricCard label={t("Total TPS")} value={n(totalTps, 2)} detail={t("Current five-minute throughput")} accent="cyan" />
-        <MetricCard label={t("Total Users")} value={n(totalUsers, 0)} detail={t("Observed identities")} accent="indigo" />
-        <MetricCard label={t("Total Services")} value={n(totalServices, 0)} detail={`${n(abnormalServices.length, 0)} ${t("in bad health")}`} tone={abnormalServices.length ? "bad" : "good"} accent="amber" />
-        <MetricCard label={t("Abnormal Changes")} value={n(abnormalCount, 0)} detail={t("Behavior changes in current window")} tone={abnormalCount ? "bad" : "good"} accent="purple" />
+      <div className="grid gap-3">
+        <Panel title={t("Total TPS")} subtitle={t("Five-minute buckets · last seven days")} action={<span className="font-mono text-[11px] font-semibold text-[#5794f2]">{n(totalTps, 2)} TPS</span>}>
+          <TpsLineChart data={points} />
+        </Panel>
+        <div className="grid grid-cols-2 gap-2 sm:grid-cols-4 xl:grid-cols-8">
+          <MetricCard label={t("Requests")} value={n(summary.total_requests || 0, 0)} detail={t("Observed volume")} accent="sky" />
+          <MetricCard label={t("Success") } value={`${Math.max(0, 100 - currentErrorPercent).toFixed(2)}%`} detail={t("HTTP success") } tone="good" accent="emerald" />
+          <MetricCard label={t("TPS")} value={n(totalTps, 2)} detail={t("Current throughput")} accent="sky" />
+          <MetricCard label={t("Error") } value={`${currentErrorPercent.toFixed(2)}%`} detail={t("HTTP 5xx") } tone={currentErrorPercent > 1 ? "bad" : "normal"} accent="rose" />
+          <MetricCard label={t("P95") } value={`${n(currentP95, 0)} ms`} detail={t("Tail latency")} accent="violet" />
+          <MetricCard label={t("Services")} value={n(totalServices, 0)} detail={`${n(abnormalServices.length, 0)} ${t("attention")}`} tone={abnormalServices.length ? "bad" : "normal"} accent="amber" />
+          <MetricCard label={t("Users")} value={n(totalUsers, 0)} detail={t("Observed identities")} accent="purple" />
+          <MetricCard label={t("Changes")} value={n(abnormalCount, 0)} detail={t("Current window")} tone={abnormalCount ? "bad" : "good"} accent="rose" />
+        </div>
       </div>
 
       <Panel title={t("Important Changes")} subtitle={t("Highest-value changes detected in the current window.")} className="mt-4" action={<button onClick={() => nav("/anomalies")} className="text-[11px] font-semibold text-cyan-300 hover:text-white">{t("View all")} <ArrowRight size={12} className="inline" /></button>}>
@@ -170,9 +179,8 @@ export function OverviewPage() {
       </Panel>
 
       <div className="mt-4 grid gap-4 xl:grid-cols-2">
-        <Panel title={t("Total TPS")} subtitle={t("Five-minute buckets · last seven days")} action={<span className="font-mono text-xs font-bold text-cyan-300">{n(totalTps, 2)} TPS</span>}><div className="h-[250px] p-3"><ResponsiveContainer><LineChart data={chartPoints} margin={{ top: 8, right: 12, bottom: 4, left: 0 }}><CartesianGrid stroke="rgba(255,255,255,0.06)" vertical={false} /><XAxis dataKey="timestamp_ms" tickFormatter={(value) => formatTime(value, filters.timezone)} minTickGap={44} stroke="#766e92" /><YAxis width={42} unit=" tps" stroke="#766e92" /><Tooltip {...chartTooltip} formatter={(value: any) => [`${Number(value || 0).toFixed(2)} TPS`, t("Total TPS")]} labelFormatter={(value: any) => formatTooltipTime(value, filters.timezone)} /><Line type="monotone" dataKey="tps" stroke="#06b6d4" strokeWidth={2} dot={false} name={t("Total TPS")} /></LineChart></ResponsiveContainer></div></Panel>
-        <Panel title={t("Error %")} subtitle={t("HTTP 5xx error rate in five-minute buckets")} action={<span className="font-mono text-xs font-bold text-rose-300">{currentErrorPercent.toFixed(2)}%</span>}><div className="h-[250px] p-3"><ResponsiveContainer><LineChart data={chartPoints} margin={{ top: 8, right: 12, bottom: 4, left: 0 }}><CartesianGrid stroke="rgba(255,255,255,0.06)" vertical={false} /><XAxis dataKey="timestamp_ms" tickFormatter={(value) => formatTime(value, filters.timezone)} minTickGap={44} stroke="#766e92" /><YAxis width={42} unit="%" stroke="#766e92" /><Tooltip {...chartTooltip} formatter={(value: any) => [`${Number(value || 0).toFixed(2)}%`, t("Error %")]} labelFormatter={(value: any) => formatTooltipTime(value, filters.timezone)} /><Line type="monotone" dataKey="error_percent" stroke="#e11d48" strokeWidth={2} dot={false} name={t("Error %")} /></LineChart></ResponsiveContainer></div></Panel>
-        <Panel title={t("P95 latency")} subtitle={t("Tail latency in five-minute buckets")} action={<span className="font-mono text-xs font-bold text-violet-300">{n(currentP95, 0)} ms</span>}><div className="h-[250px] p-3"><ResponsiveContainer><LineChart data={chartPoints} margin={{ top: 8, right: 12, bottom: 4, left: 0 }}><CartesianGrid stroke="rgba(255,255,255,0.06)" vertical={false} /><XAxis dataKey="timestamp_ms" tickFormatter={(value) => formatTime(value, filters.timezone)} minTickGap={44} stroke="#766e92" /><YAxis width={42} unit=" ms" stroke="#766e92" /><Tooltip {...chartTooltip} formatter={(value: any) => [`${Number(value || 0).toFixed(0)} ms`, t("P95 latency")]} labelFormatter={(value: any) => formatTooltipTime(value, filters.timezone)} /><Line type="monotone" dataKey="p95_ms" stroke="#8b5cf6" strokeWidth={2} dot={false} name={t("P95 latency")} /></LineChart></ResponsiveContainer></div></Panel>
+        <Panel title={t("Error %")} subtitle={t("HTTP 5xx error rate in five-minute buckets")} action={<span className="font-mono text-xs font-bold text-rose-300">{currentErrorPercent.toFixed(2)}%</span>}><div className="h-[250px] p-3"><ResponsiveContainer><LineChart data={chartPoints} margin={{ top: 8, right: 12, bottom: 4, left: 0 }}><CartesianGrid stroke="rgba(255,255,255,0.06)" vertical={false} /><XAxis dataKey="timestamp_ms" tickFormatter={(value) => formatTime(value, filters.timezone)} minTickGap={44} stroke="#7b7d80" /><YAxis width={42} unit="%" stroke="#7b7d80" /><Tooltip {...chartTooltip} formatter={(value: any) => [`${Number(value || 0).toFixed(2)}%`, t("Error %")]} labelFormatter={(value: any) => formatTooltipTime(value, filters.timezone)} /><Line type="monotone" dataKey="error_percent" stroke="#f2495c" strokeWidth={2} dot={false} name={t("Error %")} /></LineChart></ResponsiveContainer></div></Panel>
+        <Panel title={t("P95 latency")} subtitle={t("Tail latency in five-minute buckets")} action={<span className="font-mono text-xs font-bold text-violet-300">{n(currentP95, 0)} ms</span>}><div className="h-[250px] p-3"><ResponsiveContainer><LineChart data={chartPoints} margin={{ top: 8, right: 12, bottom: 4, left: 0 }}><CartesianGrid stroke="rgba(255,255,255,0.06)" vertical={false} /><XAxis dataKey="timestamp_ms" tickFormatter={(value) => formatTime(value, filters.timezone)} minTickGap={44} stroke="#7b7d80" /><YAxis width={42} unit=" ms" stroke="#7b7d80" /><Tooltip {...chartTooltip} formatter={(value: any) => [`${Number(value || 0).toFixed(0)} ms`, t("P95 latency")]} labelFormatter={(value: any) => formatTooltipTime(value, filters.timezone)} /><Line type="monotone" dataKey="p95_ms" stroke="#b877d9" strokeWidth={2} dot={false} name={t("P95 latency")} /></LineChart></ResponsiveContainer></div></Panel>
       </div>
 
       <div className="mt-4 grid gap-4 xl:grid-cols-2">

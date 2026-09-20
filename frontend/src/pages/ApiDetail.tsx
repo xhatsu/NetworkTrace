@@ -12,7 +12,7 @@ import {
 } from "recharts";
 import { Activity, ArrowLeft, Network, Users } from "lucide-react";
 import { api, queryString } from "../api";
-import { ErrorState, Loading, MetricCard, Page, Panel, chartTooltip, n, pct } from "../components";
+import { ErrorState, Loading, MetricCard, Page, Panel, TpsLineChart, chartTooltip, n, pct } from "../components";
 import { useFilters } from "../App";
 import { useI18n } from "../i18n";
 
@@ -152,6 +152,15 @@ export function ApiDetailPage() {
         <span className={`rounded border px-2 py-1 font-semibold uppercase ${changeStatus === "changed" || changeStatus === "new" ? "border-amber-500/40 bg-amber-500/10 text-amber-300" : "border-emerald-500/40 bg-emerald-500/10 text-emerald-300"}`}>{changeStatus}</span>
       </div>
 
+      <Panel
+        title={t("TPS")}
+        subtitle={t("Observed API throughput over the selected window")}
+        className="mt-3"
+        action={<span className="font-mono text-[11px] text-[#5794f2]">{n(series[series.length - 1]?.tps || 0, 2)} TPS</span>}
+      >
+        <TpsLineChart data={series.map(({ timestamp_ms, tps }) => ({ timestamp_ms, tps }))} />
+      </Panel>
+
       <div className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-4">
         <MetricCard label={t("TPS")} value={n(metrics.tps, 2)} detail={t("Observed API throughput")} accent="sky" />
         <MetricCard label={t("Requests")} value={n(metrics.request_count, 0)} detail={t("Selected seven-day window")} accent="cyan" />
@@ -160,11 +169,8 @@ export function ApiDetailPage() {
       </div>
 
       <div className="mt-4 grid gap-4 lg:grid-cols-2">
-        <Panel title={t("TPS over time")} subtitle={t("Five-minute API buckets over the selected history")}>
-          <ApiLineChart data={series} dataKey="tps" color="#38bdf8" unit="TPS" label={t("TPS")} />
-        </Panel>
         <Panel title={t("P95 latency over time")} subtitle={t("Tail latency in milliseconds") }>
-          <ApiLineChart data={series} dataKey="p95_ms" color="#a78bfa" unit="ms" label={t("P95 Latency")} />
+          <ApiLineChart data={series} dataKey="p95_ms" color="#b877d9" unit="ms" label={t("P95 Latency")} />
         </Panel>
       </div>
 

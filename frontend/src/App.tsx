@@ -94,28 +94,28 @@ function SideNav() {
   const groups = [
     {
       label: "Overview",
-      accent: "cyan" as const,
-      headerClass: "text-cyan-400 font-bold",
-      dotClass: "bg-cyan-400",
-      activeClass: "bg-cyan-500/20 border border-cyan-400/60 text-white font-bold",
-      pillClass: "bg-cyan-400",
-      iconActiveClass: "text-cyan-300",
-      focusRing: "focus-visible:ring-cyan-400",
-      hoverClass: "hover:bg-cyan-500/10 hover:text-white",
+      accent: "blue" as const,
+      headerClass: "text-blue-400 font-bold",
+      dotClass: "bg-blue-400",
+      activeClass: "bg-blue-500/15 border border-blue-400/70 text-white font-bold",
+      pillClass: "bg-blue-400",
+      iconActiveClass: "text-blue-300",
+      focusRing: "focus-visible:ring-blue-400",
+      hoverClass: "hover:bg-blue-500/10 hover:text-white",
       links: [
         [LayoutDashboard, "Dashboard", "/dashboard"],
       ],
     },
     {
       label: "Monitor",
-      accent: "violet" as const,
-      headerClass: "text-violet-400 font-bold",
-      dotClass: "bg-violet-400",
-      activeClass: "bg-violet-500/20 border border-violet-400/60 text-white font-bold",
-      pillClass: "bg-violet-400",
-      iconActiveClass: "text-violet-300",
-      focusRing: "focus-visible:ring-violet-400",
-      hoverClass: "hover:bg-violet-500/10 hover:text-white",
+      accent: "blue" as const,
+      headerClass: "text-blue-400 font-bold",
+      dotClass: "bg-blue-400",
+      activeClass: "bg-blue-500/15 border border-blue-400/70 text-white font-bold",
+      pillClass: "bg-blue-400",
+      iconActiveClass: "text-blue-300",
+      focusRing: "focus-visible:ring-blue-400",
+      hoverClass: "hover:bg-blue-500/10 hover:text-white",
       links: [
         [Boxes, "Services", "/services"],
         [Users, "Users", "/users"],
@@ -125,14 +125,14 @@ function SideNav() {
     },
     {
       label: "Investigate",
-      accent: "sky" as const,
-      headerClass: "text-sky-400 font-bold",
-      dotClass: "bg-sky-400",
-      activeClass: "bg-sky-500/20 border border-sky-400/60 text-white font-bold",
-      pillClass: "bg-sky-400",
-      iconActiveClass: "text-sky-300",
-      focusRing: "focus-visible:ring-sky-400",
-      hoverClass: "hover:bg-sky-500/10 hover:text-white",
+      accent: "blue" as const,
+      headerClass: "text-blue-400 font-bold",
+      dotClass: "bg-blue-400",
+      activeClass: "bg-blue-500/15 border border-blue-400/70 text-white font-bold",
+      pillClass: "bg-blue-400",
+      iconActiveClass: "text-blue-300",
+      focusRing: "focus-visible:ring-blue-400",
+      hoverClass: "hover:bg-blue-500/10 hover:text-white",
       links: [
         [Activity, "Traces", "/traces"],
       ],
@@ -154,25 +154,25 @@ function SideNav() {
   ] as const;
 
   return (
-    <aside className="fixed inset-y-0 left-0 z-50 hidden w-[190px] flex-col border-r border-[#262838] bg-[#0c0e17] py-4 md:flex shadow-md">
+    <aside className="app-rail fixed inset-y-0 left-0 z-50 hidden w-[58px] flex-col border-r border-[#2a2d30] bg-[#111217] py-3 md:flex">
       {/* Brand mark */}
-      <div className="mb-6 flex items-center gap-2.5 px-4">
-        <div className="grid h-10 w-10 place-items-center rounded-xl bg-indigo-600 border border-indigo-400/40 text-white font-bold">
+      <div className="mb-5 flex items-center gap-2 px-3">
+        <div className="grid h-8 w-8 shrink-0 place-items-center rounded-[2px] bg-blue-600 border border-blue-400/50 text-white font-bold">
           <Activity size={20} strokeWidth={2.8} />
         </div>
-        <div>
-          <div className="text-sm font-bold text-white tracking-tight">TraceScope</div>
-          <div className="text-[9px] uppercase tracking-wider text-cyan-300 font-bold">{t("Intelligence")}</div>
+        <div className="rail-label">
+          <div className="text-sm font-bold text-[#d8d9da] tracking-tight">TraceScope</div>
+          <div className="text-[9px] uppercase tracking-wider text-blue-300 font-bold">{t("Intelligence")}</div>
         </div>
       </div>
 
       {/* Nav items */}
-      <nav className="flex w-full flex-1 flex-col gap-4 px-2">
+      <nav className="flex w-full flex-1 flex-col gap-3 px-2">
         {groups.map((group) => (
           <div key={group.label}>
-            <div className={`mb-1.5 flex items-center gap-1.5 px-2.5 text-[9px] uppercase tracking-[.14em] ${group.headerClass}`}>
+            <div className={`mb-1.5 flex items-center gap-1.5 px-2 text-[9px] uppercase tracking-[.14em] ${group.headerClass}`}>
               <span className={`h-1.5 w-1.5 rounded-full ${group.dotClass}`} />
-              <span>{t(group.label)}</span>
+              <span className="rail-section-label">{t(group.label)}</span>
             </div>
             <div className="space-y-1">
               {group.links.map(([Icon, label, to]) => (
@@ -185,7 +185,7 @@ function SideNav() {
                     window.location.assign(to);
                   }}
                   className={({ isActive }) =>
-                    `group relative flex h-9 w-full items-center gap-2.5 rounded-lg px-2.5 text-xs font-semibold transition duration-150 focus-visible:outline-none focus-visible:ring-2 ${group.focusRing} ${
+                    `group relative flex h-8 w-full items-center gap-2 rounded-[2px] px-2 text-xs font-semibold transition duration-150 focus-visible:outline-none focus-visible:ring-2 ${group.focusRing} ${
                       isActive
                         ? group.activeClass
                         : `text-[#cbd5e1] ${group.hoverClass}`
@@ -205,7 +205,7 @@ function SideNav() {
                             : "text-[#94a3b8] group-hover:text-white transition-colors"
                         }
                       />
-                      <span>{t(label)}</span>
+                      <span className="rail-label">{t(label)}</span>
                     </>
                   )}
                 </NavLink>
@@ -216,17 +216,17 @@ function SideNav() {
       </nav>
 
       {/* Database/Storage status */}
-      <div className="flex items-center gap-2 px-4 text-[10px] text-[#cbd5e1] border-t border-[#262838] pt-3">
+      <div className="flex items-center gap-2 px-3 text-[10px] text-[#a7a9ab] border-t border-[#2a2d30] pt-3">
         <div
           title="ClickHouse Store · Real-Time Analytics"
-          className="relative grid h-8 w-8 place-items-center rounded-lg border border-emerald-500/50 bg-emerald-500/20 text-emerald-300"
+          className="relative grid h-7 w-7 shrink-0 place-items-center rounded-[2px] border border-green-500/50 bg-green-500/10 text-green-300"
         >
           <Database size={14} />
           <span className="absolute -top-0.5 -right-0.5 h-2 w-2 rounded-full bg-emerald-400" />
         </div>
-        <div className="flex flex-col">
-          <span className="text-white font-bold leading-none">ClickHouse</span>
-          <span className="text-[9px] text-emerald-300 font-bold mt-0.5">● {t("Connected")}</span>
+        <div className="rail-label flex flex-col">
+          <span className="text-[#d8d9da] font-bold leading-none">ClickHouse</span>
+          <span className="text-[9px] text-green-300 font-bold mt-0.5">● {t("Connected")}</span>
         </div>
       </div>
     </aside>
@@ -257,29 +257,29 @@ function FilterBar() {
   );
 
   return (
-    <div className="border-b border-[#262838] bg-[#0c0e17] px-4 py-2.5 md:px-8">
+    <div className="toolbar px-3 py-1.5 md:px-4">
       <div className="flex flex-wrap items-center justify-between gap-3">
         {/* Left: Branding, Status & Global Search */}
         <div className="flex items-center gap-3">
           <div className="flex items-center gap-2">
-            <span className="text-sm font-bold tracking-tight text-white">TraceScope</span>
+            <span className="text-xs font-bold tracking-tight text-[#d8d9da]">TraceScope / {t("Overview")}</span>
           </div>
 
           {/* Quick Global Search */}
           <form onSubmit={handleGlobalSearch} className="relative hidden lg:block">
-            <Search className="absolute left-2.5 top-2 text-[#94a3b8]" size={13} />
+            <Search className="absolute left-2.5 top-2 text-[#7b7d80]" size={13} />
             <input
               type="text"
               placeholder={t("Search service, API, user, or trace ID...")}
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              className="h-7 w-64 rounded-lg border border-[#262838] bg-[#141622] pl-8 pr-3 text-xs text-white placeholder:text-[#94a3b8] focus:border-cyan-400 focus:outline-none"
+              className="toolbar-control h-7 w-64 pl-8 pr-3 text-[11px] placeholder:text-[#7b7d80] focus:border-blue-400 focus:outline-none"
             />
           </form>
         </div>
 
         {/* Fixed operational window: current five-minute bucket with seven-day history. */}
-        <div className="flex items-center gap-2 rounded-lg border border-cyan-500/35 bg-cyan-500/10 px-3 py-1.5 text-xs font-semibold text-cyan-300">
+        <div className="flex items-center gap-2 border border-blue-500/35 bg-blue-500/10 px-2.5 py-1 text-[10px] font-semibold text-blue-300">
           <Clock size={13} />
           <span>{t("Current: 5m · History: 7d", "Hiện tại: 5 phút · Lịch sử: 7 ngày")}</span>
         </div>
@@ -307,7 +307,7 @@ function FilterBar() {
             aria-pressed={theme === "light"}
             title={theme === "dark" ? t("Switch to light mode", "Chuyển sang chế độ sáng") : t("Switch to dark mode", "Chuyển sang chế độ tối")}
             onClick={toggleTheme}
-            className="flex items-center gap-1.5 rounded-lg border border-[#262838] bg-[#141622] px-2.5 py-1 text-xs font-bold text-white transition hover:border-amber-400/70 hover:bg-[#1a1d2e] focus:outline-none focus-visible:ring-2 focus-visible:ring-amber-400"
+            className="toolbar-control flex items-center gap-1.5 px-2.5 py-1 text-[11px] font-bold transition hover:border-orange-400 focus:outline-none focus-visible:ring-2 focus-visible:ring-orange-400"
           >
             {theme === "dark" ? <Sun size={13} className="text-amber-300" /> : <Moon size={13} className="text-indigo-500" />}
             <span className="hidden xl:inline">{theme === "dark" ? t("Light", "Sáng") : t("Dark", "Tối")}</span>
@@ -317,11 +317,11 @@ function FilterBar() {
             aria-label="Timezone"
             value={filters.timezone}
             onChange={(e) => setFilter("timezone", e.target.value)}
-            className="btn bg-[#141622] border-[#262838] text-white cursor-pointer"
+            className="btn toolbar-control cursor-pointer"
           >
-            <option value="UTC" className="bg-[#141622]">UTC</option>
-            <option value="Asia/Ho_Chi_Minh" className="bg-[#141622]">Asia/Ho Chi Minh</option>
-            <option value="local" className="bg-[#141622]">Browser Local</option>
+            <option value="UTC" className="bg-[#181b1f]">UTC</option>
+            <option value="Asia/Ho_Chi_Minh" className="bg-[#181b1f]">Asia/Ho Chi Minh</option>
+            <option value="local" className="bg-[#181b1f]">Browser Local</option>
           </select>
 
           <div className="chip font-mono text-[10px] font-bold text-emerald-300 border-emerald-500/40 bg-emerald-500/15">
@@ -333,7 +333,7 @@ function FilterBar() {
 
       {/* Expanded filter panel */}
       {showFilters && (
-        <div className="mt-3 grid grid-cols-2 gap-2 border-t border-white/15 pt-3 sm:grid-cols-3 lg:grid-cols-6 animate-in fade-in duration-150">
+        <div className="mt-2 grid grid-cols-2 gap-2 border-t border-[#2a2d30] pt-2 sm:grid-cols-3 lg:grid-cols-6 animate-in fade-in duration-150">
           {[
             ["service", "Service", "focus:border-indigo-400"],
             ["operation", "Operation", "focus:border-violet-400"],
@@ -352,7 +352,7 @@ function FilterBar() {
                   placeholder={`All ${label.toLowerCase()}s`}
                   value={filters[key as keyof Filters] || ""}
                   onChange={(e) => setFilter(key as keyof Filters, e.target.value)}
-                  className={`w-full rounded-md border border-white/20 bg-black/40 px-2.5 py-1 text-xs text-white placeholder:text-[#94a3b8] ${focusClass} focus:outline-none`}
+                  className={`toolbar-control w-full px-2 py-1 text-[11px] placeholder:text-[#7b7d80] ${focusClass} focus:outline-none`}
                 />
                 {filters[key as keyof Filters] && (
                   <button
@@ -374,9 +374,9 @@ function FilterBar() {
 function Layout() {
   const location = useLocation();
   return (
-    <div className="min-h-screen bg-[#0b0914] text-[#f8fafc]">
+    <div className="min-h-screen bg-[#0b0c0e] text-[#d8d9da]">
       <SideNav />
-      <main className="md:pl-[190px]">
+      <main className="md:pl-[58px]">
         <header className="sticky top-0 z-20">
           <FilterBar />
         </header>
@@ -464,7 +464,7 @@ export default function App() {
     document.documentElement.dataset.theme = theme;
     document.documentElement.style.colorScheme = theme;
     const themeColor = document.querySelector('meta[name="theme-color"]');
-    if (themeColor) themeColor.setAttribute("content", theme === "light" ? "#f5f7fb" : "#08090a");
+    if (themeColor) themeColor.setAttribute("content", theme === "light" ? "#f5f7fb" : "#0b0c0e");
     try {
       window.localStorage.setItem("tracescope-theme", theme);
     } catch {

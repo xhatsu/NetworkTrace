@@ -22,6 +22,7 @@ import {
   MetricCard,
   Page,
   Panel,
+  TpsLineChart,
   chartTooltip,
   n,
   pct,
@@ -57,6 +58,10 @@ export function ServicesPage() {
   const query = useQuery({
     queryKey: ["services", qs],
     queryFn: () => api<{ items: Service[] }>(`/api/v1/services?${qs}&limit=500`),
+  });
+  const estateSeriesQuery = useQuery({
+    queryKey: ["service-estate-tps", qs],
+    queryFn: () => api<{ items: SeriesPoint[] }>(`/api/v1/dashboard/series?${qs}`),
   });
   const filteredItems = [...(query.data?.items || [])].filter((s) => {
     if (!filterQuery) return true;
@@ -94,6 +99,15 @@ export function ServicesPage() {
       {query.isLoading ? (
         <Loading />
       ) : (
+        <>
+        <Panel
+          title={t("Estate TPS")}
+          subtitle={t("Observed throughput across the selected service estate")}
+          className="mb-3"
+          action={<span className="font-mono text-[11px] text-[#5794f2]">{t("Live")}</span>}
+        >
+          <TpsLineChart data={estateSeriesQuery.data?.items || []} />
+        </Panel>
         <Panel
           title={`${filteredItems.length} ${t("Across")} ${query.data?.items.length || 0} ${t("Registered Services")}`}
           subtitle={t("Operational health and observed traffic by service")}
@@ -145,6 +159,7 @@ export function ServicesPage() {
             </table>
           </div>
         </Panel>
+        </>
       )}
     </Page>
   );
@@ -279,6 +294,10 @@ export function ServiceDetailPage() {
   const accounts = d.accounts || ((d as any).principals || []).map((p: any) => ({ username: p.name, requests: p.requests }));
   const instances = d.instances || [];
   const series = normalizeServiceSeries(d.series);
+  const latestTps = series.length ? series[series.length - 1].tps : 0;
+  const bandwidthMetrics = (d as any).bandwidth?.metrics || (d as any).health || {};
+  const bandwidthBytesPerSecond = Number(bandwidthMetrics.bandwidth_bytes_per_second || 0);
+  const formatMiBRate = (value: number) => `${(Math.max(0, Number(value) || 0) / (1024 * 1024)).toFixed(2)} MiB/s`;
   const attentionOperations = [...operations]
     .sort((a, b) => {
       const failureDelta = (b.failure_rate || 0) - (a.failure_rate || 0);
@@ -309,7 +328,15 @@ export function ServiceDetailPage() {
         </button>
       }
     >
-      <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+      <Panel
+        title={t("TPS")}
+        subtitle={t("Observed service throughput over the selected window")}
+        action={<span className="font-mono text-[11px] text-[#5794f2]">{n(latestTps, 2)} TPS</span>}
+      >
+        <TpsLineChart data={series} />
+      </Panel>
+
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-5">
         <MetricCard
           label={t("Observed Volume")}
           value={n(total)}
@@ -331,6 +358,12 @@ export function ServiceDetailPage() {
           value={pct(fail)}
           detail={`n=${n(total)} ${t("requests")}`}
           tone={fail > 0.02 ? "bad" : "normal"}
+        />
+        <MetricCard
+          label={t("Bandwidth")}
+          value={formatMiBRate(bandwidthBytesPerSecond)}
+          detail={t("Request + response throughput")}
+          accent="sky"
         />
       </div>
 
@@ -363,19 +396,6 @@ export function ServiceDetailPage() {
       </Panel>
 
       <div className="mt-4 grid gap-4 lg:grid-cols-2">
-        <Panel
-          title={t("Observed Throughput (TPS)")}
-          subtitle={t("Service TPS over time")}
-        >
-          <ServiceTrendChart
-            data={series}
-            dataKey="tps"
-            color="#818cf8"
-            unit="TPS"
-            label={t("Observed Throughput (TPS)")}
-          />
-        </Panel>
-
         <Panel
           title={t("P95 Latency")}
           subtitle={t("Service latency over time")}

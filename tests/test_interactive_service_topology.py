@@ -10,12 +10,14 @@ from backend.main import app
 from backend.repository import StorageRepository
 from backend.app.repositories.interactive_topology_repository import (
     InteractiveTopologyRepository,
+    bandwidth_fields,
     canonical_api,
     canonical_principal,
     decode_cursor,
     encode_cursor,
 )
 from backend.app.repositories.trace_repository import TraceRepository
+from backend.app.repositories.user_repository import UserRepository
 from backend.app.services.aggregation import aggregate_traces
 from backend.app.services.normalization import classify_source_ip_role, normalize_otel_record
 
@@ -46,6 +48,16 @@ def test_topology_normalization_and_cursor_contracts():
     cursor = encode_cursor(["10.0.0.1", "payment", "payment/charge", "orders"])
     assert decode_cursor(cursor) == ["10.0.0.1", "payment", "payment/charge", "orders"]
     assert classify_source_ip_role("10.240.147.249")[0] == "load_balancer"
+    assert bandwidth_fields(120, 480, 60) == {
+        "request_bytes": 120,
+        "response_bytes": 480,
+        "total_bytes": 600,
+        "request_bytes_per_second": 2.0,
+        "response_bytes_per_second": 8.0,
+        "bandwidth_bytes_per_second": 10.0,
+        "bandwidth_bits_per_second": 80.0,
+    }
+    assert bandwidth_fields(-1, "invalid", 0)["bandwidth_bits_per_second"] == 0.0
 
 
 def test_materialized_topology_has_metrics_evidence_anonymous_and_ip_status(tmp_path):
@@ -87,6 +99,10 @@ def test_materialized_topology_has_metrics_evidence_anonymous_and_ip_status(tmp_
     detail = repo.service_metrics("payment", window)
     assert detail["series"]
     assert detail["series"][0]["tps"] > 0
+    assert detail["metrics"]["total_bytes"] == 2400
+    assert detail["metrics"]["bandwidth_bytes_per_second"] == 4.0
+    assert detail["metrics"]["bandwidth_bits_per_second"] == 32.0
+    assert detail["series"][0]["bandwidth_bytes_per_second"] == 8.0
 
     apis = repo.service_apis("payment", window)
     assert apis["nodes"]
@@ -96,6 +112,17 @@ def test_materialized_topology_has_metrics_evidence_anonymous_and_ip_status(tmp_
     assert all(edge["target"] == f"api:payment:{apis['nodes'][0]['api']}" for edge in connections["edges"])
     principals = repo.api_principals("payment", apis["nodes"][0]["api"], window)
     assert {node["name"] for node in principals["nodes"]} >= {"partner-a", "-anonymous-"}
+    api_detail = repo.api_metrics(apis["nodes"][0]["api"], window, "payment")
+    assert api_detail["metrics"]["bandwidth_bytes_per_second"] == 4.0
+    principal_detail = repo.principal_metrics("partner-a", window)
+    assert principal_detail["metrics"]["total_bytes"] == 1800
+    assert principal_detail["metrics"]["bandwidth_bytes_per_second"] == 3.0
+    services = repo.principal_services("partner-a", window)
+    assert [node["name"] for node in services["nodes"]] == ["payment"]
+    assert services["parent"]["type"] == "principal"
+    user_apis = repo.principal_service_apis("partner-a", "payment", window)
+    assert [node["name"] for node in user_apis["nodes"]] == ["payment/{id}"]
+    assert user_apis["parent"]["type"] == "service"
     ips = repo.principal_ips("partner-a", window, 1, None)
     assert ips["items"]
     assert ips["items"][0]["is_load_balancer"] is False
@@ -105,6 +132,17 @@ def test_materialized_topology_has_metrics_evidence_anonymous_and_ip_status(tmp_
     assert len(page2["items"]) == 1
     if page2["next_cursor"]:
         assert repo.principal_ips("partner-a", window, 1, page2["next_cursor"])["items"] == []
+
+    performance = UserRepository(str(db_path)).performance(
+        "partner-a",
+        start_ms=window["start_ms"],
+        end_ms=window["end_ms"],
+        bucket_size=300,
+    )
+    assert performance["bandwidth"]["total_bytes"] == 1800
+    assert performance["bandwidth"]["bandwidth_bytes_per_second"] == 3.0
+    assert performance["series"][0]["bandwidth_bytes_per_second"] == 6.0
+    assert performance["kpis"]["current_5m"]["bandwidth_bits_per_second"] == 48.0
 
 
 def test_topology_api_rejects_invalid_window_without_store_access():
@@ -128,6 +166,8 @@ def test_elasticsearch_topology_series_always_uses_five_minute_buckets(tmp_path)
             "doc_count": 600,
             "latency": {"values": {"95.0": 42.0}},
             "errors": {"doc_count": 6},
+            "request_bytes": {"value": 3000},
+            "response_bytes": {"value": 6000},
         }]}}}
 
     repo._es_request = fake_request
@@ -136,6 +176,9 @@ def test_elasticsearch_topology_series_always_uses_five_minute_buckets(tmp_path)
     histogram = captured["aggs"]["timeline"]["date_histogram"]
     assert histogram["fixed_interval"] == "5m"
     assert series[0]["tps"] == 2.0
+    assert captured["aggs"]["timeline"]["aggs"]["request_bytes"]["sum"]["field"] == "topology.request_bytes"
+    assert series[0]["total_bytes"] == 9000
+    assert series[0]["bandwidth_bytes_per_second"] == 30.0
 
 
 def test_topology_api_surface_is_bounded_and_backward_compatible():
@@ -148,6 +191,9 @@ def test_topology_api_surface_is_bounded_and_backward_compatible():
         "/api/v1/topology/services/payment/metrics?window=5m",
         f"/api/v1/topology/apis/{quote('payment/charge', safe='')}/metrics?service=payment&window=5m",
         "/api/v1/topology/principals/partner-a/metrics?window=5m",
+        "/api/v1/topology/principals/partner-a/services?window=5m",
+        "/api/v1/topology/principals/partner-a/services/payment/apis?window=5m",
+        "/api/v1/services/payment/bandwidth?from=1789700000000&to=1789700300000",
         "/api/v1/topology/principals/partner-a/ips?window=5m&page_size=1",
     ]
 
@@ -160,4 +206,12 @@ def test_topology_api_surface_is_bounded_and_backward_compatible():
     assert all(response.status_code == 200 for response in responses), [response.text for response in responses]
     assert {"query", "items", "window"} <= responses[0].json().keys()
     assert {"nodes", "edges", "window"} <= responses[1].json().keys()
+    for response in responses[5:8]:
+        assert {
+            "request_bytes_per_second",
+            "response_bytes_per_second",
+            "bandwidth_bytes_per_second",
+            "bandwidth_bits_per_second",
+        } <= response.json()["metrics"].keys()
+    assert {"metrics", "series", "window", "backend"} <= responses[-2].json().keys()
     assert {"items", "next_cursor", "window"} <= responses[-1].json().keys()

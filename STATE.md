@@ -209,15 +209,16 @@ The user workspace has been completely redesigned around 6 user-centric operatio
 
 ### Navigation & Layout Standard
 - **System Navigation**: Clean left SideNav with `Dashboard` (`/dashboard`), `Users Hub` (`/users`), `Anomalies` (`/anomalies`), `Services` (`/services`), `Traces` (`/traces`), `Agent Fleet` (`/agent-stats`). The redundant generic service-to-service topology (`/topology`) has been removed from navigation and redirects cleanly to `/users`; user-centric access topology is strictly served within the user workspace at `/users/:principal/topology`.
+- **TPS chart invariant**: `/services`, `/services/:name`, API detail routes, and every `/users/:principal/*` workspace route render the scoped TPS line graph as the first operational panel above detail metrics and tables.
 - **User Workspace Banner (`UserLayout.tsx`)**:
   - Sticky entity header with user avatar, display name, account classification, risk level badge, current 5m RPS, error rate, and active targets.
   - In-header **Quick Account Switcher** dropdown for jumping between users.
   - Distinct 6-tab navigation bar with route-synchronized active state indicator.
-- **Color, Contrast & Non-Glossy Styling Standard**:
-  - Clean, matte dark surfaces: Deep dark canvas `#0c0d14`, cards `#141622`, side navigation `#0c0e17`, borders `#262838`.
+  - **Color, Contrast & Non-Glossy Styling Standard**:
+  - Grafana-style matte dark surfaces: Canvas `#0b0c0e`, panels `#111217`, raised controls `#181b1f`, compact side rail `#111217`, borders `#2a2d30` / `#34373b`.
   - Zero glossy effects: No `radial-gradient` background sheens, no `backdrop-blur` frosted glass overlays, and zero neon `shadow-[0_0_...` glowing reflections.
   - Crisp high-contrast text (`#ffffff` headers, `#f1f5f9` primary data, `#94a3b8` labels). Zero washed-out or dim text.
-  - Clear solid accent badges: Cyan (`#00f0ff` / `border-cyan-500/40 bg-cyan-500/10`), Emerald (`#00e676` / `border-emerald-500/40 bg-emerald-500/10`), Amber (`#ffab00` / `border-amber-500/40 bg-amber-500/10`), Rose (`#ff1744` / `border-rose-500/40 bg-rose-500/10`), Violet (`#b388ff` / `border-violet-500/40 bg-violet-500/10`).
+  - Semantic accent badges: Green (`#73bf69`) for healthy, blue (`#5794f2`) for primary telemetry, orange (`#ff9830`) for warnings, red (`#f2495c`) for failures, and purple (`#b877d9`) for secondary series.
 
 ### Redesigned Identity Observability Dashboard (`/`)
 The primary system dashboard (`Overview.tsx`) has been redesigned to focus strictly on **User and Identity Statistics** (relieving redundant service/infrastructure monitoring handled by external systems):
@@ -1187,3 +1188,22 @@ Exposes standard Prometheus 0.0.4 text exposition format at `GET /metrics` on po
 - Compact KPI/info cards use four cards per desktop row, including the dashboard's Total TPS card and its three companion cards.
 - Updated service inventory, unknown-user attribution, topology IP cards, user intelligence summaries, agent stats, traces, anomalies, and user workspace metric ribbons; functional topology/table layouts remain intact.
 - Frontend lint and production build passed.
+
+## Monitoring UI Refactor (2026-09-19)
+
+- The primary `/` route now redirects to `/dashboard`; sidebar navigation is organized as Dashboard, Services, Users, Topology, Changes, Traces, and Agent Fleet. The legacy `/unknown-users` route remains available but is no longer a primary navigation item.
+- The default dashboard is organized around status and change investigation: KPI summary, important changes, five-minute TPS/error/p95 trends over seven-day history, service/user hotspots, and secondary abnormal-score distribution. The unavailable bandwidth series was not fabricated and no backend/API contract was changed.
+- Services use an operational table and service detail surfaces prioritized operations. A subordinate API drilldown route (`/services/:service/apis/:api`) reuses existing topology metrics, principal, and caller APIs and keeps the Service → API → User path intact.
+- User workspace headers and tabs are compacted; important changes and new relationships are surfaced before detailed charts. Topology node cards and history controls are less dense while preserving lazy expansion and the inspector.
+- The grouped anomaly view now leads with eight operational columns (severity, what changed, identity, service/API, current vs baseline, since/duration, status, actions), while raw findings and expandable incident slices remain available.
+- Visible terminology uses “Unattributed Traffic” / “Identity Attribution” for unknown identity observations without changing backend semantics; explicit 401/403 authentication failures remain distinct.
+- Changes are frontend-only. Validation completed with `npm run lint`, `npm run build`, and `git diff --check`; unrelated backend, test, and report files remain unstaged.
+
+## Service/API/User Bandwidth Backend (2026-09-19)
+
+- Service, API, and principal topology metrics now expose cumulative `request_bytes`, `response_bytes`, and `total_bytes`, plus explicit rates: `request_bytes_per_second`, `response_bytes_per_second`, `bandwidth_bytes_per_second`, and `bandwidth_bits_per_second`.
+- Five-minute topology series expose the same bandwidth fields for line-chart use. ClickHouse reads the existing bounded topology byte rollups; Elasticsearch uses runtime byte extraction and server-side sum aggregations without copying application traces into ClickHouse.
+- `GET /api/v1/services/{service}/bandwidth` provides a dedicated service bandwidth response with window totals and five-minute series. Existing service detail health includes the bandwidth totals/rates and a nested `bandwidth` payload.
+- `GET /api/v1/users/{principal}/performance` now includes bandwidth fields per bucket, a top-level bandwidth summary, current/baseline five-minute bandwidth KPIs, and `bandwidth_pct` delta. API drilldowns receive the same fields through the existing topology API metrics response.
+- Units are explicit: byte totals are bytes, `*_bytes_per_second` values are bytes/second, and `bandwidth_bits_per_second` is bits/second. Missing byte telemetry remains zero and is never inferred from request counts.
+- Verification: focused interactive topology/bandwidth tests passed **5/5**; API and behavioral regressions passed **19/19**; Python compilation and `git diff --check` passed.

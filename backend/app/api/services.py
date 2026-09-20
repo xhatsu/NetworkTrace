@@ -5,9 +5,52 @@ from typing import Any, Dict, List, Optional
 from fastapi import APIRouter, HTTPException, Query
 from backend.app.repositories.db_context import get_connection
 from backend.app.repositories.aggregate_repository import AggregateRepository
+from backend.app.repositories.interactive_topology_repository import InteractiveTopologyRepository
 from backend.app.repositories.topology_repository import TopologyRepository
 
 router = APIRouter(prefix="/api/v1", tags=["services"])
+
+BANDWIDTH_FIELDS = (
+    "request_bytes",
+    "response_bytes",
+    "total_bytes",
+    "request_bytes_per_second",
+    "response_bytes_per_second",
+    "bandwidth_bytes_per_second",
+    "bandwidth_bits_per_second",
+)
+
+
+def _bandwidth_window(start_sec: int, end_sec: int) -> Dict[str, Any]:
+    return {
+        "start_ms": start_sec * 1000,
+        "end_ms": end_sec * 1000,
+        "duration_seconds": max(1, end_sec - start_sec),
+        "label": "custom",
+        "baseline": "previous_window",
+    }
+
+
+def _bandwidth_payload(service: str, start_sec: int, end_sec: int) -> Dict[str, Any]:
+    detail = InteractiveTopologyRepository().service_metrics(
+        service,
+        _bandwidth_window(start_sec, end_sec),
+    )
+    metrics = detail.get("metrics") or {}
+    return {
+        "service": service,
+        "window": _bandwidth_window(start_sec, end_sec),
+        "metrics": {field: metrics.get(field, 0) for field in BANDWIDTH_FIELDS},
+        "series": [
+            {
+                "bucket_start": item.get("bucket_start"),
+                "timestamp_ms": item.get("timestamp_ms"),
+                **{field: item.get(field, 0) for field in BANDWIDTH_FIELDS},
+            }
+            for item in (detail.get("series") or [])
+        ],
+        "backend": detail.get("backend", "clickhouse"),
+    }
 
 def _time_window(from_t: Optional[int], to_t: Optional[int]) -> tuple[int, int]:
     if from_t and to_t:
@@ -177,6 +220,8 @@ def get_service_detail(
 
     agg_repo = AggregateRepository()
     series = agg_repo.query_series(start_sec, end_sec, bucket_size=60, service=service)
+    bandwidth = _bandwidth_payload(service, start_sec, end_sec)
+    bandwidth_metrics = bandwidth["metrics"]
 
     total_reqs = (summary_row["total_requests"] if summary_row else 0) or 0
     return {
@@ -189,7 +234,8 @@ def get_service_detail(
             "total_requests": total_reqs,
             "error_rate": (summary_row["error_rate"] if summary_row else 0.0) or 0.0,
             "p95_latency_ms": (summary_row["p95_latency"] if summary_row else 0.0) or 0.0,
-            "avg_latency_ms": (summary_row["avg_latency"] if summary_row else 0.0) or 0.0
+            "avg_latency_ms": (summary_row["avg_latency"] if summary_row else 0.0) or 0.0,
+            **bandwidth_metrics,
         },
         "operations": operations,
         "principals": principals,
@@ -199,8 +245,19 @@ def get_service_detail(
         "incoming": incoming,
         "dependencies": dependencies,
         "outgoing": outgoing,
-        "series": series
+        "series": series,
+        "bandwidth": bandwidth,
     }
+
+
+@router.get("/services/{service}/bandwidth")
+def get_service_bandwidth(
+    service: str,
+    from_time: Optional[int] = Query(None, alias="from"),
+    to_time: Optional[int] = Query(None, alias="to"),
+) -> Dict[str, Any]:
+    start_sec, end_sec = _time_window(from_time, to_time)
+    return _bandwidth_payload(service, start_sec, end_sec)
 
 @router.get("/services/{service}/metrics")
 def get_service_metrics(

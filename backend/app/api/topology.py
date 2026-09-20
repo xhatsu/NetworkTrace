@@ -186,6 +186,29 @@ def interactive_principal_metrics(
     return repo.principal_metrics(principal, resolved)
 
 
+@router.get("/topology/principals/{principal}/services", response_model=TopologyExpansionResponse)
+def interactive_principal_services(
+    principal: str,
+    window: str = Query("5m"),
+    from_time: Optional[str] = Query(None, alias="from"),
+    to_time: Optional[str] = Query(None, alias="to"),
+) -> Dict[str, Any]:
+    repo, resolved = _interactive_window(window, from_time, to_time)
+    return repo.principal_services(principal, resolved)
+
+
+@router.get("/topology/principals/{principal}/services/{service}/apis", response_model=TopologyExpansionResponse)
+def interactive_principal_service_apis(
+    principal: str,
+    service: str,
+    window: str = Query("5m"),
+    from_time: Optional[str] = Query(None, alias="from"),
+    to_time: Optional[str] = Query(None, alias="to"),
+) -> Dict[str, Any]:
+    repo, resolved = _interactive_window(window, from_time, to_time)
+    return repo.principal_service_apis(principal, service, resolved)
+
+
 @router.get("/topology/principals/{principal}/ips", response_model=PrincipalIpPageResponse)
 def interactive_principal_ips(
     principal: str,

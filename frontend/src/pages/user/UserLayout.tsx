@@ -29,6 +29,7 @@ import {
 } from "lucide-react";
 import { api, queryString } from "../../api";
 import { useFilters } from "../../App";
+import { Panel, TpsLineChart, n } from "../../components";
 import { useI18n } from "../../i18n";
 
 export function UserLayout() {
@@ -62,6 +63,22 @@ export function UserLayout() {
     queryFn: () => api<any>(`/api/v1/users?limit=200`),
     staleTime: 60_000,
   });
+
+  // Keep the scoped TPS trend visible above every user workspace tab. The
+  // overview tab shares this query key, so this does not create a second
+  // request when the tab is mounted.
+  const { data: performance } = useQuery({
+    queryKey: ["user-performance", principal, filters],
+    queryFn: () =>
+      api<any>(`/api/v1/users/${encodeURIComponent(principal)}/performance?${queryString(filters)}`),
+    enabled: !!principal,
+  });
+  const tpsSeries = (performance?.series || [])
+    .map((row: any) => ({
+      timestamp_ms: Number(row.timestamp_ms ?? Number(row.bucket_start ?? 0) * 1000),
+      tps: Number(row.tps ?? row.rps ?? 0),
+    }))
+    .filter((row: { timestamp_ms: number; tps: number }) => Number.isFinite(row.timestamp_ms) && row.timestamp_ms > 0);
 
   // Update principal type
   const updateTypeMutation = useMutation({
@@ -343,6 +360,15 @@ export function UserLayout() {
           </div>
         </div>
       </div>
+
+      <Panel
+        title={t("TPS")}
+        subtitle={t("Observed user throughput over the selected window")}
+        className="mb-3"
+        action={<span className="font-mono text-[11px] text-[#5794f2]">{n(tpsSeries[tpsSeries.length - 1]?.tps || 0, 2)} TPS</span>}
+      >
+        <TpsLineChart data={tpsSeries} />
+      </Panel>
 
       {/* Compact user investigation navigation */}
       <div className="mb-5 flex flex-wrap gap-1.5 border-b border-[rgba(255,255,255,0.16)] pb-2">

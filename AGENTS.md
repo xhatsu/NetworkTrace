@@ -99,15 +99,16 @@
 - **Tech Stack**: React 19, Vite, TypeScript, Tailwind CSS, TanStack Query, Recharts, HTML5 Canvas.
 - **Design System & Typography**: Clean, matte, non-glossy glanceable observability monitor design system.
   - Typography: 100% standard font scaling, 12px Recharts axis ticks, crisp typography hierarchy.
-  - Surfaces: Clean matte dark canvas (`#0c0d14`), elevated panels (`#141622`), side navigation (`#0c0e17`).
+  - Surfaces: Grafana-style matte canvas (`#0b0c0e`), panels (`#111217`), raised controls (`#181b1f`), compact side rail (`#111217`).
   - Zero Glossy Effects: Eliminated all `radial-gradient` ambient sheens, `backdrop-blur` frosted glass filters, and glowing `shadow-[0_0_...` neon halos.
-  - Borders: Crisp, flat borders `#262838`.
+  - Borders: Crisp, flat borders `#2a2d30` with stronger control borders `#34373b`; no card shadows.
   - Multi-Accent Palette:
-    - User Intelligence & Identity: Crisp Cyan (`#00f0ff`).
-    - Observability & Services: Sentry Violet / Indigo (`#8b5cf6`, `#6366f1`).
-    - Infrastructure & Fleet: Golden Amber (`#f59e0b`, `#fbbf24`).
-    - Performance & Signals: Sky Blue for Throughput/RPS, Emerald for TPS/Optimal Latency, Violet for p95, Rose for 5xx/Errors.
-  - Multi-Color Visualizations: Multi-percentile AreaCharts (Rose p99, Amber p95, Mint p50), distinct `Cell` fills for account volumes, 4-tier latency heatmap color ramp (<100ms emerald, 100-250ms cyan, 250-500ms amber, >500ms rose), and group-coded topology nodes and edge states without specular sheen.
+    - Healthy / successful: Green (`#73bf69`).
+    - Primary telemetry / informational: Blue (`#5794f2`).
+    - Warning / elevated: Orange (`#ff9830`).
+    - Failure / critical: Red (`#f2495c`).
+    - Secondary series: Purple (`#b877d9`); baseline/grid: muted gray (`#303236`).
+  - Multi-Color Visualizations: Restrained low-opacity fills, compact legends, HTTP status mapping (2xx green, 3xx blue, 4xx orange, 5xx red), and semantic topology nodes/edges without specular sheen.
 - **Built Output**: `frontend/dist` served directly by FastAPI on port 30102.
 - **Navigation & Pages**:
   - `Overview` (`/`): User Behavioral Observability Dashboard focusing strictly on identity behavior: 8 User KPIs, traffic velocity vs error dynamics, risk cohort distribution, prioritized anomalous accounts with 1-click workspace inspector, shared credentials, and live change/incident triage.
@@ -127,6 +128,7 @@
       6. `Anomalies & Investigations` (`/users/:principal/investigations`): Triage queue, trigger hypotheses, BEFORE vs NOW metrics comparison table, causal relationship chain, and operator review controls.
     - Global Feeds & Analytics: `/user-changes`, `/user-graph`, `/user-analytics`, `/incidents`.
   - `Infrastructure`: `Agent Fleet` (`/agent-stats`) and `Agent Drilldown` (`/agent-stats/:node`) with interactive time-series dashboards.
+  - **TPS chart invariant**: `/services`, `/services/:name`, API detail routes, and every `/users/:principal/*` workspace route render the scoped TPS line graph as the first operational panel above detail metrics and tables.
   - Global Search in header: Search services, principals, or jump directly to trace waterfall by ID.
   - **Localization (i18n)**: Full, authentic Vietnamese localization across all 17 pages, charts, tables, cards, and modals with persistent language switcher (`🇻🇳 VI` / `🇬🇧 EN`) defaulting to Vietnamese.
 
@@ -845,3 +847,22 @@
 - Compact KPI/info cards (for example Total TPS, Total Users, Total Services, and Abnormal Changes) use four cards per desktop row; larger cards and charts still wrap after two.
 - Data tables and topology canvases retain their functional layouts.
 - This is a frontend-only responsive layout change. Verification: TypeScript lint and production build passed.
+
+## 36. Monitoring UI Refactor (2026-09-19)
+
+- The primary `/` route now redirects to `/dashboard`; sidebar navigation is organized as Dashboard, Services, Users, Topology, Changes, Traces, and Agent Fleet. The legacy `/unknown-users` route remains available but is no longer a primary navigation item.
+- The default dashboard is organized around status and change investigation: KPI summary, important changes, five-minute TPS/error/p95 trends over seven-day history, service/user hotspots, and secondary abnormal-score distribution. The unavailable bandwidth series was not fabricated and no backend/API contract was changed.
+- Services use an operational table and service detail surfaces prioritized operations. A subordinate API drilldown route (`/services/:service/apis/:api`) reuses existing topology metrics, principal, and caller APIs and keeps the Service → API → User path intact.
+- User workspace headers and tabs are compacted; important changes and new relationships are surfaced before detailed charts. Topology node cards and history controls are less dense while preserving lazy expansion and the inspector.
+- The grouped anomaly view now leads with eight operational columns (severity, what changed, identity, service/API, current vs baseline, since/duration, status, actions), while raw findings and expandable incident slices remain available.
+- Visible terminology uses “Unattributed Traffic” / “Identity Attribution” for unknown identity observations without changing backend semantics; explicit 401/403 authentication failures remain distinct.
+- Changes are frontend-only. Validation completed with `npm run lint`, `npm run build`, and `git diff --check`; unrelated backend, test, and report files remain unstaged.
+
+## 37. Service/API/User Bandwidth Backend (2026-09-19)
+
+- Service, API, and principal topology metrics now expose cumulative `request_bytes`, `response_bytes`, and `total_bytes`, plus explicit rates: `request_bytes_per_second`, `response_bytes_per_second`, `bandwidth_bytes_per_second`, and `bandwidth_bits_per_second`.
+- Five-minute topology series expose the same bandwidth fields for line-chart use. ClickHouse reads the existing bounded topology byte rollups; Elasticsearch uses runtime byte extraction and server-side sum aggregations without copying application traces into ClickHouse.
+- `GET /api/v1/services/{service}/bandwidth` provides a dedicated service bandwidth response with window totals and five-minute series. Existing service detail health includes the bandwidth totals/rates and a nested `bandwidth` payload.
+- `GET /api/v1/users/{principal}/performance` now includes bandwidth fields per bucket, a top-level bandwidth summary, current/baseline five-minute bandwidth KPIs, and `bandwidth_pct` delta. API drilldowns receive the same fields through the existing topology API metrics response.
+- Units are explicit: byte totals are bytes, `*_bytes_per_second` values are bytes/second, and `bandwidth_bits_per_second` is bits/second. Missing byte telemetry remains zero and is never inferred from request counts.
+- Verification: focused interactive topology/bandwidth tests passed **5/5**; API and behavioral regressions passed **19/19**; Python compilation and `git diff --check` passed.

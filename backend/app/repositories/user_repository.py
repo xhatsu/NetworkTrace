@@ -8,6 +8,7 @@ from typing import Any, Optional
 
 from backend.config import settings
 from backend.app.repositories.db_context import db_transaction, get_connection
+from backend.app.repositories.interactive_topology_repository import bandwidth_fields
 
 
 class UserRepository:
@@ -593,6 +594,7 @@ class UserRepository:
                     return {
                         "principal_name": principal,
                         "series": [],
+                        "bandwidth": bandwidth_fields(0, 0, max(1, ((end_ms or 0) - (start_ms or 0)) / 1000.0)),
                         "kpis": {"current_5m": {}, "baseline_5m": {}, "deltas": {}},
                         "burstiness": 1.0,
                         "available_sources": available_sources,
@@ -632,7 +634,9 @@ class UserRepository:
                     countIf(http_status >= 200 AND http_status < 300) as s_2xx,
                     countIf(http_status >= 400 AND http_status < 500) as s_4xx,
                     countIf(http_status >= 500 OR outcome = 'failure') as s_5xx,
-                    countIf(http_status = 408 OR http_status = 504) as s_timeout
+                    countIf(http_status = 408 OR http_status = 504) as s_timeout,
+                    sum(coalesce(request_bytes, 0)) as request_bytes,
+                    sum(coalesce(response_bytes, 0)) as response_bytes
                 FROM traces
                 WHERE principal_name = ? AND timestamp_ms >= ? AND timestamp_ms < ?{source_where}
                 GROUP BY bucket_start
@@ -654,6 +658,7 @@ class UserRepository:
             for s in series:
                 for k in ("rps", "requests_per_min", "error_rate", "latency_p50", "latency_p95", "latency_p99", "latency_avg"):
                     s[k] = _clean(s.get(k))
+                s.update(bandwidth_fields(s.get("request_bytes"), s.get("response_bytes"), effective_bucket_s))
 
             # Calculate burstiness
             rps_values = [s.get("rps", 0.0) for s in series]
@@ -735,6 +740,7 @@ class UserRepository:
                         "errors": 0, "error_rate": 0.0,
                         "latency_p50": 0.0, "latency_p95": 0.0, "latency_p99": 0.0, "latency_avg": 0.0,
                         "s_2xx": 0, "s_4xx": 0, "s_5xx": 0, "s_timeout": 0,
+                        **bandwidth_fields(0, 0, effective_bucket_s),
                         "baseline_rps": base_rps_val, "baseline_error_rate": base_err_val, "baseline_p95": base_p95_val,
                         "rps_score": 0,
                         "anomaly_score": ev_sc,
@@ -771,7 +777,9 @@ class UserRepository:
                     uniqExact(caller_service) as callers,
                     uniqExact(target_service) as targets,
                     uniqExact(operation) as operations,
-                    uniqExact(caller_ip) as source_ips
+                    uniqExact(caller_ip) as source_ips,
+                    sum(coalesce(request_bytes, 0)) as request_bytes,
+                    sum(coalesce(response_bytes, 0)) as response_bytes
                 FROM traces
                 WHERE principal_name = ? AND timestamp_ms >= ? AND timestamp_ms < ?{source_where}
             """, cur_params).fetchone()
@@ -785,10 +793,12 @@ class UserRepository:
             cur_targets = int(cur_raw.get("targets") or 0)
             cur_ops = int(cur_raw.get("operations") or 0)
             cur_sources = int(cur_raw.get("source_ips") or 0)
+            cur_bandwidth = bandwidth_fields(cur_raw.get("request_bytes"), cur_raw.get("response_bytes"), 300)
 
             cur_dict = {
                 "requests": cur_req, "rps": cur_rps, "error_rate": cur_err, "p95": cur_p95,
-                "callers": cur_callers, "targets": cur_targets, "operations": cur_ops, "source_ips": cur_sources
+                "callers": cur_callers, "targets": cur_targets, "operations": cur_ops, "source_ips": cur_sources,
+                **cur_bandwidth,
             }
 
             # Baseline 5m averages
@@ -800,11 +810,20 @@ class UserRepository:
             base_targets = max(1, round(cur_targets * 0.7))
             base_ops = max(1, round(cur_ops * 0.7))
             base_sources = max(1, round(cur_sources * 0.8))
+            five_minute_scale = 300.0 / max(1, effective_bucket_s)
+            base_request_bytes = round(
+                sum(s.get("request_bytes", 0) for s in series) / max(len(series), 1) * five_minute_scale
+            )
+            base_response_bytes = round(
+                sum(s.get("response_bytes", 0) for s in series) / max(len(series), 1) * five_minute_scale
+            )
+            base_bandwidth = bandwidth_fields(base_request_bytes, base_response_bytes, 300)
 
             base_dict = {
                 "requests": base_requests, "rps": base_rps, "error_rate": base_err,
                 "p95": base_p95, "callers": base_callers, "targets": base_targets,
-                "operations": base_ops, "source_ips": base_sources, "anomaly_score": 0
+                "operations": base_ops, "source_ips": base_sources, "anomaly_score": 0,
+                **base_bandwidth,
             }
 
             deltas = {
@@ -816,6 +835,11 @@ class UserRepository:
                 "targets_diff": cur_targets - base_targets,
                 "operations_diff": cur_ops - base_ops,
                 "source_ips_diff": cur_sources - base_sources,
+                "bandwidth_pct": _clean(round(
+                    (cur_bandwidth["bandwidth_bytes_per_second"] - base_bandwidth["bandwidth_bytes_per_second"])
+                    / max(base_bandwidth["bandwidth_bytes_per_second"], 0.01) * 100.0,
+                    1,
+                )),
             }
 
             # Link current window anomaly score including smoothed RPS surge
@@ -835,9 +859,16 @@ class UserRepository:
             cur_dict["anomaly_count"] = cur_ev_count + (1 if cur_rps_surge > 0 else 0)
             deltas["anomaly_score_diff"] = cur_dict["anomaly_score"] - base_dict["anomaly_score"]
 
+            bandwidth_summary = bandwidth_fields(
+                sum(s.get("request_bytes", 0) for s in series),
+                sum(s.get("response_bytes", 0) for s in series),
+                max(1, (end - start) / 1000.0),
+            )
+
             return {
                 "principal_name": principal,
                 "series": series,
+                "bandwidth": bandwidth_summary,
                 "kpis": {
                     "current_5m": cur_dict,
                     "baseline_5m": base_dict,
@@ -1386,5 +1417,3 @@ class UserRepository:
                 "top_sources": top_sources,
                 "recent_traces": recent_traces,
             }
-
-

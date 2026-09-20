@@ -64,6 +64,12 @@ export function UserOverviewTab() {
     }
   };
 
+  const formatMiBRate = (value: any) => {
+    const bytesPerSecond = Number(value || 0);
+    if (!Number.isFinite(bytesPerSecond) || bytesPerSecond <= 0) return "0.00 MiB/s";
+    return `${(bytesPerSecond / (1024 * 1024)).toFixed(2)} MiB/s`;
+  };
+
   // Fetch performance series and Current 5m vs Baseline KPIs
   const { data: perfData, isLoading: perfLoading } = useQuery({
     queryKey: ["user-performance", principal, filters],
@@ -76,6 +82,7 @@ export function UserOverviewTab() {
   const cur = kpis.current_5m || {};
   const deltas = kpis.deltas || {};
   const series = perfData?.series || [];
+  const sourceIps: any[] = perfData?.available_sources || [];
 
   // Recent changes from profile
   const recentChanges: any[] = (profile?.changes || []).slice(0, 5);
@@ -128,8 +135,8 @@ export function UserOverviewTab() {
         </div>
       </div>
 
-      {/* Changes and relationship evidence stay above the charts so the page answers what changed first. */}
-      <div className="grid gap-4 lg:grid-cols-2">
+      {/* Important changes stay above the charts so the page answers what changed first. */}
+      <div className="grid gap-4">
         <div className="rounded-xl border border-rose-500/25 bg-[#171329] p-4 shadow-sm">
           <div className="mb-3 flex items-center justify-between">
             <div className="flex items-center gap-2">
@@ -162,31 +169,47 @@ export function UserOverviewTab() {
           )}
         </div>
 
-        <div className="rounded-xl border border-violet-500/25 bg-[#171329] p-4 shadow-sm">
-          <div className="mb-3 flex items-center justify-between">
-            <div className="flex items-center gap-2">
-              <Network size={15} className="text-violet-300" />
-              <h3 className="text-xs font-bold uppercase tracking-wider text-white">{t("New Relationships")}</h3>
-            </div>
-            <button onClick={() => nav(`/users/${encodeURIComponent(principal)}/topology`)} className="text-[11px] font-semibold text-violet-300 hover:underline">{t("Explore topology")}</button>
-          </div>
-          <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
-            {[
-              [t("Callers"), newCallers.length, "text-violet-300"],
-              [t("Targets"), newTargets.length, "text-cyan-300"],
-              [t("Operations"), newOperations.length, "text-emerald-300"],
-            ].map(([label, value, color]) => (
-              <div key={String(label)} className="rounded-lg border border-white/10 bg-white/[0.03] px-3 py-2">
-                <div className="text-[10px] uppercase tracking-wider text-[#94a3b8]">{label}</div>
-                <div className={`mt-1 font-mono text-lg font-bold ${color}`}>{value}</div>
-              </div>
-            ))}
-          </div>
-        </div>
       </div>
 
-      {/* 8 Lightweight KPI Cards */}
-      <div className="grid grid-cols-2 gap-3 sm:grid-cols-4 lg:grid-cols-4">
+      {/* Primary user signals: keep the throughput trend beside the main KPI block. */}
+      <div className="grid gap-5 lg:grid-cols-2 lg:items-stretch">
+        <div className="rounded-xl border border-[rgba(255,255,255,0.18)] bg-[#171329] p-4 shadow-md">
+          <div className="mb-3 flex items-center justify-between">
+            <div>
+              <h3 className="text-xs font-bold uppercase tracking-wider text-white">
+                {t("TPS vs Baseline")}
+              </h3>
+              <p className="text-[11px] text-[#cbd5e1]">{t("Throughput rate vs historical baseline")}</p>
+            </div>
+            <span className="rounded-md border border-cyan-500/40 bg-cyan-500/20 px-2 py-0.5 text-[10px] font-bold text-cyan-200">
+              {t("Live")}
+            </span>
+          </div>
+
+          <div className="h-56 w-full">
+            <ResponsiveContainer width="100%" height="100%">
+              <LineChart data={series} margin={{ top: 5, right: 10, left: -20, bottom: 0 }}>
+                <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.08)" />
+                <XAxis dataKey="bucket_start" tickFormatter={formatTick} stroke="#cbd5e1" fontSize={11} />
+                <YAxis stroke="#cbd5e1" fontSize={11} />
+                <Tooltip
+                  contentStyle={{ backgroundColor: "#18142c", borderColor: "rgba(255,255,255,0.2)", borderRadius: 8 }}
+                  formatter={(val: any, name: any, item: any) => {
+                    const key = item?.dataKey || "";
+                    const isObserved = key === "rps" || name === "Observed TPS" || name === "Observed RPS" || String(name).toLowerCase().includes("observed");
+                    return [`${Number(val || 0).toFixed(2)} tps`, isObserved ? t("Observed TPS") : t("Baseline TPS")];
+                  }}
+                  labelFormatter={formatTooltip}
+                />
+                <Legend iconSize={8} wrapperStyle={{ fontSize: 11, paddingTop: 4 }} />
+                <Line type="monotone" dataKey="rps" name={t("Observed TPS")} stroke="#00f0ff" strokeWidth={2.5} dot={false} activeDot={{ r: 5, fill: "#00f0ff" }} />
+                <Line type="monotone" dataKey="baseline_rps" name={t("Baseline TPS")} stroke="#b388ff" strokeWidth={1.8} strokeDasharray="4 4" dot={false} />
+              </LineChart>
+            </ResponsiveContainer>
+          </div>
+        </div>
+
+        <div className="grid h-full min-h-[348px] auto-rows-fr grid-cols-2 gap-3">
         {/* 1. Requests */}
         <div className="rounded-xl border border-[rgba(255,255,255,0.16)] bg-[#171329] p-3.5 shadow-sm transition hover:border-cyan-400/50">
           <div className="text-[11px] font-bold uppercase tracking-wider text-[#94a3b8]">{t("Requests")}</div>
@@ -263,154 +286,43 @@ export function UserOverviewTab() {
           </div>
         </div>
 
-        {/* 5. Callers */}
-        <div className="rounded-xl border border-[rgba(255,255,255,0.16)] bg-[#171329] p-3.5 shadow-sm transition hover:border-cyan-400/50">
-          <div className="text-[11px] font-bold uppercase tracking-wider text-[#94a3b8]">{t("Callers")}</div>
-          <div className="mt-1 font-mono text-xl font-bold text-violet-300">
-            {cur.callers ?? 0}
-          </div>
-          <div className="mt-2 flex items-center gap-1">
-            <span
-              className={`inline-flex items-center rounded px-1.5 py-0.5 text-[10px] font-bold border ${
-                (deltas.callers_diff || 0) > 0
-                  ? "text-amber-300 bg-amber-500/15 border-amber-500/40"
-                  : "text-[#cbd5e1] bg-white/5 border-white/10"
-              }`}
-            >
-              {(deltas.callers_diff || 0) >= 0 ? `+${deltas.callers_diff || 0}` : deltas.callers_diff}
-            </span>
-            <span className="text-[10px] text-[#94a3b8]">{t("diff")}</span>
-          </div>
         </div>
+      </div>
 
-        {/* 6. Targets */}
-        <div className="rounded-xl border border-[rgba(255,255,255,0.16)] bg-[#171329] p-3.5 shadow-sm transition hover:border-cyan-400/50">
-          <div className="text-[11px] font-bold uppercase tracking-wider text-[#94a3b8]">{t("Targets")}</div>
-          <div className="mt-1 font-mono text-xl font-bold text-cyan-300">
-            {cur.targets ?? 0}
+      {/* Source IP evidence replaces relationship-count cards with concrete origins. */}
+      <div className="rounded-xl border border-[rgba(255,255,255,0.18)] bg-[#171329] p-4 shadow-md">
+        <div className="mb-3 flex items-center justify-between gap-3">
+          <div>
+            <h3 className="text-xs font-bold uppercase tracking-wider text-white">{t("Source IPs")}</h3>
+            <p className="mt-0.5 text-[11px] text-[#cbd5e1]">{t("Observed network origins for this user")}</p>
           </div>
-          <div className="mt-2 flex items-center gap-1">
-            <span
-              className={`inline-flex items-center rounded px-1.5 py-0.5 text-[10px] font-bold border ${
-                (deltas.targets_diff || 0) > 0
-                  ? "text-amber-300 bg-amber-500/15 border-amber-500/40"
-                  : "text-[#cbd5e1] bg-white/5 border-white/10"
-              }`}
-            >
-              {(deltas.targets_diff || 0) >= 0 ? `+${deltas.targets_diff || 0}` : deltas.targets_diff}
-            </span>
-            <span className="text-[10px] text-[#94a3b8]">{t("diff")}</span>
-          </div>
+          <span className="rounded-md border border-amber-500/40 bg-amber-500/15 px-2 py-0.5 font-mono text-[10px] font-bold text-amber-200">
+            {sourceIps.length} {t("origins")}
+          </span>
         </div>
-
-        {/* 7. Operations */}
-        <div className="rounded-xl border border-[rgba(255,255,255,0.16)] bg-[#171329] p-3.5 shadow-sm transition hover:border-cyan-400/50">
-          <div className="text-[11px] font-bold uppercase tracking-wider text-[#94a3b8]">{t("Operations")}</div>
-          <div className="mt-1 font-mono text-xl font-bold text-emerald-300">
-            {cur.operations ?? 0}
+        {sourceIps.length ? (
+          <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
+            {sourceIps.slice(0, 12).map((source: any) => (
+              <div key={`${source.ip || "unknown"}-${source.role || "source"}`} className="rounded-lg border border-white/10 bg-white/[0.03] px-3 py-2.5">
+                <div className="flex items-center justify-between gap-2">
+                  <span className="truncate font-mono text-xs font-semibold text-cyan-200">{source.ip || "—"}</span>
+                  {source.is_load_balancer && <span className="shrink-0 rounded border border-amber-500/40 bg-amber-500/15 px-1 py-0.5 text-[9px] font-bold text-amber-200">LB</span>}
+                </div>
+                <div className="mt-1 flex items-center justify-between gap-2 text-[10px] text-[#94a3b8]">
+                  <span>{Number(source.requests || 0).toLocaleString()} {t("requests")}</span>
+                  <span className="truncate text-right">{source.role_label || source.role || t("Observed source")}</span>
+                </div>
+              </div>
+            ))}
           </div>
-          <div className="mt-2 flex items-center gap-1">
-            <span
-              className={`inline-flex items-center rounded px-1.5 py-0.5 text-[10px] font-bold border ${
-                (deltas.operations_diff || 0) > 0
-                  ? "text-amber-300 bg-amber-500/15 border-amber-500/40"
-                  : "text-[#cbd5e1] bg-white/5 border-white/10"
-              }`}
-            >
-              {(deltas.operations_diff || 0) >= 0 ? `+${deltas.operations_diff || 0}` : deltas.operations_diff}
-            </span>
-            <span className="text-[10px] text-[#94a3b8]">{t("diff")}</span>
-          </div>
-        </div>
-
-        {/* 8. Source IPs (Secondary Supporting Context) */}
-        <div className="rounded-xl border border-dashed border-[#383b52] bg-[#12141f] p-3.5 shadow-sm transition hover:border-amber-400/50">
-          <div className="flex items-center justify-between">
-            <div className="text-[11px] font-bold uppercase tracking-wider text-[#94a3b8]">{t("Source IPs")}</div>
-            <span className="text-[9px] uppercase tracking-wider font-mono text-[#94a3b8] bg-[#1a1d2e] px-1 py-0.5 rounded">{t("Secondary")}</span>
-          </div>
-          <div className="mt-1 font-mono text-xl font-bold text-slate-300">
-            {cur.source_ips ?? 0}
-          </div>
-          <div className="mt-2 flex items-center gap-1">
-            <span
-              className={`inline-flex items-center rounded px-1.5 py-0.5 text-[10px] font-bold border ${
-                (deltas.source_ips_diff || 0) > 0
-                  ? "text-amber-300 bg-amber-500/15 border-amber-500/40"
-                  : "text-[#cbd5e1] bg-white/5 border-white/10"
-              }`}
-            >
-              {(deltas.source_ips_diff || 0) >= 0 ? `+${deltas.source_ips_diff || 0}` : deltas.source_ips_diff}
-            </span>
-            <span className="text-[10px] text-[#94a3b8]">{t("diff · context")}</span>
-          </div>
-        </div>
+        ) : (
+          <div className="rounded-lg border border-dashed border-white/10 px-3 py-4 text-center text-xs text-[#94a3b8]">{t("No source IP observations in this window.")}</div>
+        )}
       </div>
 
       {/* Below the cards: 4 Distinct High-Contrast Line Charts in 2 lines (2 cards per line) */}
       <div className="grid grid-cols-1 gap-5 lg:grid-cols-2">
-        {/* Chart 1: TPS vs Baseline Line */}
-        <div className="rounded-xl border border-[rgba(255,255,255,0.18)] bg-[#171329] p-4 shadow-md">
-          <div className="mb-3 flex items-center justify-between">
-            <div>
-              <h3 className="text-xs font-bold uppercase tracking-wider text-white">
-                {t("TPS vs Baseline")}
-              </h3>
-              <p className="text-[11px] text-[#cbd5e1]">{t("Throughput rate vs historical baseline")}</p>
-            </div>
-            <span className="rounded-md bg-cyan-500/20 px-2 py-0.5 text-[10px] font-bold text-cyan-200 border border-cyan-500/40">
-              {t("Live")}
-            </span>
-          </div>
-
-          <div className="h-56 w-full">
-            <ResponsiveContainer width="100%" height="100%">
-              <LineChart data={series} margin={{ top: 5, right: 10, left: -20, bottom: 0 }}>
-                <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.08)" />
-                <XAxis
-                  dataKey="bucket_start"
-                  tickFormatter={formatTick}
-                  stroke="#cbd5e1"
-                  fontSize={11}
-                />
-                <YAxis stroke="#cbd5e1" fontSize={11} />
-                <Tooltip
-                  contentStyle={{ backgroundColor: "#18142c", borderColor: "rgba(255,255,255,0.2)", borderRadius: 8 }}
-                  formatter={(val: any, name: any, item: any) => {
-                    const key = item?.dataKey || "";
-                    const isObserved = key === "rps" || name === "Observed TPS" || name === "Observed RPS" || String(name).toLowerCase().includes("observed");
-                    if (isObserved) {
-                      return [`${Number(val || 0).toFixed(2)} tps`, t("Observed TPS")];
-                    }
-                    return [`${Number(val || 0).toFixed(2)} tps`, t("Baseline TPS")];
-                  }}
-                  labelFormatter={formatTooltip}
-                />
-                <Legend iconSize={8} wrapperStyle={{ fontSize: 11, paddingTop: 4 }} />
-                <Line
-                  type="monotone"
-                  dataKey="rps"
-                  name={t("Observed TPS")}
-                  stroke="#00f0ff"
-                  strokeWidth={2.5}
-                  dot={false}
-                  activeDot={{ r: 5, fill: "#00f0ff" }}
-                />
-                <Line
-                  type="monotone"
-                  dataKey="baseline_rps"
-                  name={t("Baseline TPS")}
-                  stroke="#b388ff"
-                  strokeWidth={1.8}
-                  strokeDasharray="4 4"
-                  dot={false}
-                />
-              </LineChart>
-            </ResponsiveContainer>
-          </div>
-        </div>
-
-        {/* Chart 2: Error Rate Line */}
+        {/* Chart 1: Error Rate Line */}
         <div className="rounded-xl border border-[rgba(255,255,255,0.18)] bg-[#171329] p-4 shadow-md">
           <div className="mb-3 flex items-center justify-between">
             <div>
@@ -459,7 +371,7 @@ export function UserOverviewTab() {
           </div>
         </div>
 
-        {/* Chart 3: P95 Latency Line */}
+        {/* Chart 2: P95 Latency Line */}
         <div className="rounded-xl border border-[rgba(255,255,255,0.18)] bg-[#171329] p-4 shadow-md">
           <div className="mb-3 flex items-center justify-between">
             <div>
@@ -514,6 +426,46 @@ export function UserOverviewTab() {
                   strokeWidth={1.8}
                   strokeDasharray="4 4"
                   dot={false}
+                />
+              </LineChart>
+            </ResponsiveContainer>
+          </div>
+        </div>
+
+        {/* Chart 3: Bandwidth Line */}
+        <div className="rounded-xl border border-[rgba(255,255,255,0.18)] bg-[#171329] p-4 shadow-md">
+          <div className="mb-3 flex items-center justify-between">
+            <div>
+              <h3 className="text-xs font-bold uppercase tracking-wider text-white">
+                {t("Bandwidth Over Time")}
+              </h3>
+              <p className="text-[11px] text-[#cbd5e1]">{t("Request and response throughput")}</p>
+            </div>
+            <span className="rounded-md border border-sky-500/40 bg-sky-500/20 px-2 py-0.5 text-[10px] font-bold text-sky-200">
+              MiB/s
+            </span>
+          </div>
+
+          <div className="h-56 w-full">
+            <ResponsiveContainer width="100%" height="100%">
+              <LineChart data={series} margin={{ top: 5, right: 10, left: -20, bottom: 0 }}>
+                <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.08)" />
+                <XAxis dataKey="bucket_start" tickFormatter={formatTick} stroke="#cbd5e1" fontSize={11} />
+                <YAxis stroke="#cbd5e1" fontSize={11} tickFormatter={formatMiBRate} width={68} />
+                <Tooltip
+                  contentStyle={{ backgroundColor: "#18142c", borderColor: "rgba(255,255,255,0.2)", borderRadius: 8 }}
+                  formatter={(val: any) => [formatMiBRate(val), t("Bandwidth")]}
+                  labelFormatter={formatTooltip}
+                />
+                <Legend iconSize={8} wrapperStyle={{ fontSize: 11, paddingTop: 4 }} />
+                <Line
+                  type="monotone"
+                  dataKey="bandwidth_bytes_per_second"
+                  name={t("Bandwidth")}
+                  stroke="#38bdf8"
+                  strokeWidth={2.5}
+                  dot={false}
+                  activeDot={{ r: 5, fill: "#38bdf8" }}
                 />
               </LineChart>
             </ResponsiveContainer>

@@ -1,5 +1,14 @@
 import type { ReactNode } from "react";
 import {
+  CartesianGrid,
+  Line,
+  LineChart,
+  ResponsiveContainer,
+  Tooltip,
+  XAxis,
+  YAxis,
+} from "recharts";
+import {
   AlertTriangle,
   ArrowDownRight,
   ArrowUpRight,
@@ -25,21 +34,21 @@ export function Page({
   actions?: ReactNode;
 }) {
   return (
-    <div className="mx-auto max-w-[1640px] px-4 py-6 md:px-8">
-      <div className="mb-6 flex flex-wrap items-end justify-between gap-4 border-b border-[rgba(255,255,255,0.12)] pb-5">
+    <div className="console-page mx-auto max-w-[1640px] px-3 py-4 md:px-5">
+      <div className="page-heading mb-4 flex flex-wrap items-center justify-between gap-3 border-b border-[#2a2d30] pb-3">
         <div>
-          <div className="mb-1.5 flex items-center gap-2">
-            <span className="h-1.5 w-1.5 rounded-full bg-violet-500" />
-            <span className="text-[11px] font-semibold uppercase tracking-[0.12em] text-violet-400">
+          <div className="mb-1 flex items-center gap-2">
+            <span className="h-1.5 w-1.5 rounded-full bg-blue-500" />
+            <span className="page-eyebrow text-[10px] font-semibold uppercase tracking-[0.12em] text-[#5794f2]">
               {eyebrow}
             </span>
           </div>
-          <h2 className="text-2xl font-semibold tracking-[-0.03em] text-[#f5f3fa]">
+          <h2 className="text-xl font-semibold tracking-[-0.02em] text-[#d8d9da]">
             {title}
           </h2>
-          <p className="mt-1 max-w-3xl text-sm text-[#c4bdd9]">{description}</p>
+          <p className="mt-0.5 max-w-3xl text-xs text-[#a7a9ab]">{description}</p>
         </div>
-        {actions && <div className="flex items-center gap-2.5">{actions}</div>}
+        {actions && <div className="flex items-center gap-2">{actions}</div>}
       </div>
       {children}
     </div>
@@ -60,12 +69,12 @@ export function Panel({
   action?: ReactNode;
 }) {
   return (
-    <section className={`card overflow-hidden bg-[#141622] border border-[#262838] ${className}`}>
-      <header className="flex items-center justify-between border-b border-[#262838] bg-[#181a28] px-5 py-3.5">
+    <section className={`panel overflow-hidden ${className}`}>
+      <header className="panel-header flex min-h-9 items-center justify-between border-b border-[#2a2d30] px-3 py-2">
         <div>
-          <h3 className="text-xs font-semibold uppercase tracking-[0.05em] text-[#f5f3fa]">{title}</h3>
+          <h3 className="panel-title text-[11px] font-semibold uppercase tracking-[0.06em] text-[#d8d9da]">{title}</h3>
           {subtitle && (
-            <p className="mt-0.5 text-[11px] text-[#c4bdd9]">{subtitle}</p>
+            <p className="panel-subtitle mt-0.5 text-[10px] text-[#7b7d80]">{subtitle}</p>
           )}
         </div>
         {action}
@@ -91,60 +100,47 @@ export function MetricCard({
   delta?: number;
 }) {
   const toneClasses = {
-    normal: "text-[#f5f3fa]",
-    good: "text-[#34d399]",
-    bad: "text-[#fb7185]",
+    normal: "text-[#d8d9da]",
+    good: "text-[#73bf69]",
+    bad: "text-[#f2495c]",
   };
 
   const borderAccent = {
-    normal: "hover:border-[#383b52]",
-    good: "hover:border-emerald-500/60",
-    bad: "hover:border-rose-500/60",
+    normal: "hover:border-[#34373b]",
+    good: "hover:border-[#73bf69]",
+    bad: "hover:border-[#f2495c]",
   };
 
   const topBorderClasses = {
-    sky: "border-t-2 border-t-sky-400",
-    emerald: "border-t-2 border-t-emerald-400",
-    violet: "border-t-2 border-t-violet-400",
-    indigo: "border-t-2 border-t-indigo-400",
-    amber: "border-t-2 border-t-amber-400",
-    rose: "border-t-2 border-t-rose-400",
-    cyan: "border-t-2 border-t-cyan-400",
+    sky: "border-t-2 border-t-blue-400",
+    emerald: "border-t-2 border-t-green-400",
+    violet: "border-t-2 border-t-purple-400",
+    indigo: "border-t-2 border-t-blue-400",
+    amber: "border-t-2 border-t-orange-400",
+    rose: "border-t-2 border-t-red-400",
+    cyan: "border-t-2 border-t-blue-400",
     purple: "border-t-2 border-t-purple-400",
   };
 
-  const dotClasses = {
-    sky: "bg-sky-400",
-    emerald: "bg-emerald-400",
-    violet: "bg-violet-400",
-    indigo: "bg-indigo-400",
-    amber: "bg-amber-400",
-    rose: "bg-rose-400",
-    cyan: "bg-cyan-400",
-    purple: "bg-purple-400",
-  };
-
   const cardTopBorder = accent ? topBorderClasses[accent] : "";
-  const dotColor = accent ? dotClasses[accent] : "bg-white/20 group-hover:bg-violet-400";
 
   return (
-    <div className={`card group relative overflow-hidden bg-[#1a172a] p-4 transition-all duration-200 ${cardTopBorder} ${borderAccent[tone]}`}>
+    <div className={`metric-panel group relative overflow-hidden p-3 transition-all duration-150 ${cardTopBorder} ${borderAccent[tone]}`}>
       <div className="flex items-center justify-between">
-        <span className="text-[10px] font-semibold uppercase tracking-[0.08em] text-[#9e96b8]">
+        <span className="metric-label text-[10px] font-semibold uppercase tracking-[0.08em] text-[#a7a9ab]">
           {label}
         </span>
-        <div className={`h-2 w-2 rounded-full transition ${dotColor}`} />
       </div>
       
       <div
-        className={`mt-2.5 font-mono text-[22px] font-semibold tracking-[-0.03em] tabular-nums ${toneClasses[tone]}`}
+        className={`metric-value mt-2 font-mono text-[28px] font-semibold leading-none tracking-[-0.04em] tabular-nums ${toneClasses[tone]}`}
       >
         {value}
       </div>
       
-      <div className="mt-2 flex items-center gap-1.5 text-[11px] text-[#c4bdd9]">
+      <div className="metric-meta mt-2 flex min-h-4 items-center gap-1.5 text-[10px] text-[#7b7d80]">
         {delta != null && !isNaN(Number(delta)) && (
-          <span className={`inline-flex items-center gap-0.5 font-mono font-medium ${Number(delta) >= 0 ? "text-[#fb7185]" : "text-[#34d399]"}`}>
+          <span className={`inline-flex items-center gap-0.5 font-mono font-medium ${Number(delta) >= 0 ? "text-[#f2495c]" : "text-[#73bf69]"}`}>
             {Number(delta) >= 0 ? <TrendingUp size={12} /> : <TrendingDown size={12} />}
             {Math.abs(Number(delta)).toFixed(1)}%
           </span>
@@ -158,9 +154,9 @@ export function MetricCard({
 export function Loading() {
   const { t } = useI18n();
   return (
-    <div className="card grid min-h-64 place-items-center bg-[#1a172a] border border-[rgba(255,255,255,0.12)] p-8 text-sm text-[#c4bdd9]">
+    <div className="panel grid min-h-48 place-items-center p-8 text-sm text-[#a7a9ab]">
       <div className="flex flex-col items-center gap-3">
-        <LoaderCircle className="animate-spin text-violet-400" size={24} />
+        <LoaderCircle className="animate-spin text-blue-400" size={22} />
         <span className="text-xs font-medium tracking-wide">{t("Aggregating real-time telemetry…")}</span>
       </div>
     </div>
@@ -170,13 +166,13 @@ export function Loading() {
 export function ErrorState({ message }: { message: string }) {
   const { t } = useI18n();
   return (
-    <div className="card flex min-h-48 flex-col items-center justify-center gap-3 bg-[#1a172a] border border-rose-500/30 p-6 text-center text-sm text-[#fb7185]">
-      <div className="grid h-10 w-10 place-items-center rounded-full bg-rose-500/15 border border-rose-500/30">
+    <div className="panel flex min-h-40 flex-col items-center justify-center gap-3 p-6 text-center text-sm text-[#f2495c]">
+      <div className="grid h-8 w-8 place-items-center rounded-full border border-red-500/40 bg-red-500/10">
         <AlertTriangle size={18} />
       </div>
       <div className="max-w-md">
-        <div className="font-semibold text-[#f5f3fa]">{t("Telemetry Unavailable")}</div>
-        <div className="mt-1 text-xs text-[#c4bdd9]">{message}</div>
+        <div className="font-semibold text-[#d8d9da]">{t("Telemetry Unavailable")}</div>
+        <div className="mt-1 text-xs text-[#a7a9ab]">{message}</div>
       </div>
     </div>
   );
@@ -205,14 +201,41 @@ export const age = (ms: number | null) =>
 
 export const chartTooltip = {
   contentStyle: {
-    backgroundColor: "rgba(26, 23, 42, 0.96)",
-    backdropFilter: "blur(8px)",
-    border: "1px solid rgba(255, 255, 255, 0.18)",
-    borderRadius: "8px",
-    boxShadow: "0 10px 30px -5px rgba(0, 0, 0, 0.7)",
+    backgroundColor: "#181b1f",
+    border: "1px solid #34373b",
+    borderRadius: "2px",
+    boxShadow: "none",
     fontSize: "12px",
     padding: "8px 12px",
   },
-  labelStyle: { color: "#c4bdd9", fontWeight: 600, marginBottom: "4px" },
-  itemStyle: { color: "#f5f3fa", padding: "2px 0" },
+  labelStyle: { color: "#d8d9da", fontWeight: 600, marginBottom: "4px" },
+  itemStyle: { color: "#d8d9da", padding: "2px 0" },
 };
+
+export function TpsLineChart({
+  data,
+  label = "TPS",
+}: {
+  data: Array<{ timestamp_ms: number; tps: number }>;
+  label?: string;
+}) {
+  const { t } = useI18n();
+  if (!data.length) {
+    return <div className="grid h-40 place-items-center text-xs text-[#7b7d80]">{t("No telemetry points in the selected window")}</div>;
+  }
+  const latest = data[data.length - 1];
+  return (
+    <div className="tps-chart h-44 px-2 pb-2 pt-1">
+      <ResponsiveContainer>
+        <LineChart data={data} margin={{ top: 8, right: 10, bottom: 0, left: 0 }}>
+          <CartesianGrid stroke="#303236" vertical={false} />
+          <XAxis dataKey="timestamp_ms" type="number" domain={["dataMin", "dataMax"]} minTickGap={42} tick={{ fill: "#7b7d80", fontSize: 10 }} tickFormatter={(value) => new Date(Number(value)).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })} axisLine={{ stroke: "#2a2d30" }} tickLine={false} />
+          <YAxis width={42} tick={{ fill: "#7b7d80", fontSize: 10 }} axisLine={false} tickLine={false} tickFormatter={(value) => Number(value).toLocaleString()} />
+          <Tooltip {...chartTooltip} labelFormatter={(value) => new Date(Number(value)).toLocaleString()} formatter={(value: unknown) => [`${n(Number(value), 2)} TPS`, label]} />
+          <Line type="monotone" dataKey="tps" name={label} stroke="#5794f2" strokeWidth={2} dot={false} activeDot={{ r: 3, fill: "#d8d9da", stroke: "#5794f2" }} connectNulls />
+        </LineChart>
+      </ResponsiveContainer>
+      <div className="pointer-events-none -mt-5 pr-2 text-right font-mono text-[10px] text-[#a7a9ab]">{n(latest.tps, 2)} TPS</div>
+    </div>
+  );
+}

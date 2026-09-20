@@ -22,8 +22,13 @@ class TopologyMetrics(BaseModel):
     incomplete_count: int = 0
     request_bytes: int = 0
     response_bytes: int = 0
+    total_bytes: int = 0
     average_request_bytes: float = 0.0
     average_response_bytes: float = 0.0
+    request_bytes_per_second: float = 0.0
+    response_bytes_per_second: float = 0.0
+    bandwidth_bytes_per_second: float = 0.0
+    bandwidth_bits_per_second: float = 0.0
     unique_principals: int = 0
     unique_source_ips: int = 0
     anonymous_requests: int = 0
