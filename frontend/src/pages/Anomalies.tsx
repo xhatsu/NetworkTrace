@@ -1,6 +1,6 @@
 import { useState, useMemo, Fragment } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useNavigate, useParams } from "react-router-dom";
+import { Navigate, useNavigate, useParams } from "react-router-dom";
 import {
   Area,
   CartesianGrid,
@@ -1105,11 +1105,17 @@ export function AnomalyDetailPage() {
   const client = useQueryClient();
 
   const { filters } = useFilters();
-  const [timeHorizon] = useState<"7d">("7d");
+  const detailQuery = queryString(filters);
 
   const q = useQuery({
-    queryKey: ["anomaly", id, timeHorizon],
-    queryFn: () => api<Detail>(`/api/v1/anomalies/${id}?window=${timeHorizon}`),
+    queryKey: ["anomaly", id, detailQuery],
+    queryFn: () => api<Detail>(`/api/v1/anomalies/${id}?${detailQuery}`),
+  });
+  const changeFallback = useQuery({
+    queryKey: ["anomaly-change-fallback", id],
+    queryFn: () => api<{ id: number; principal_name: string }>(`/api/v1/user-changes/${encodeURIComponent(id)}`),
+    enabled: q.isError && (q.error as any)?.status === 404,
+    retry: false,
   });
   const relatedUsers = useQuery({
     queryKey: ["anomaly-users", id],
@@ -1153,6 +1159,9 @@ export function AnomalyDetailPage() {
   }
 
   if (q.error) {
+    if (changeFallback.data?.principal_name) {
+      return <Navigate to={`/users/${encodeURIComponent(changeFallback.data.principal_name)}/changes?change_id=${encodeURIComponent(String(changeFallback.data.id))}`} replace />;
+    }
     return (
       <Page eyebrow={t("Incident Investigation")} title={t("Telemetry Unavailable")} description="">
         <ErrorState message={q.error.message} />

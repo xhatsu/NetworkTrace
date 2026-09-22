@@ -201,14 +201,15 @@ function NodeIcon({ type }: { type: TopologyNode["type"] }) {
 }
 
 function MetricStrip({ metrics, vertical = false }: { metrics: Metrics; vertical?: boolean }) {
+  const { t } = useI18n();
   if (vertical) {
     const status = metrics.error_rate > 0.05
-      ? `${pct(metrics.error_rate)} errors`
+      ? `${pct(metrics.error_rate)} ${t("errors")}`
       : metrics.change?.status || "normal";
     return (
       <div className="flex items-center justify-between gap-3 pt-1">
         <div>
-          <div className="label">TPS</div>
+          <div className="label">{t("TPS")}</div>
           <div className="font-mono text-sm text-sky-300">{n(metrics.tps, 2)}</div>
         </div>
         <span className={`rounded border px-1.5 py-0.5 text-[9px] font-bold uppercase ${metrics.error_rate > 0.05 ? "border-rose-400/50 text-rose-300" : statusTone(metrics.change?.status)}`}>
@@ -220,10 +221,10 @@ function MetricStrip({ metrics, vertical = false }: { metrics: Metrics; vertical
   const metricClass = "";
   return (
     <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
-      <div className={metricClass}><div className="label">TPS</div><div className="font-mono text-sm text-sky-300">{n(metrics.tps, 2)}</div></div>
+      <div className={metricClass}><div className="label">{t("TPS")}</div><div className="font-mono text-sm text-sky-300">{n(metrics.tps, 2)}</div></div>
       <div className={metricClass}><div className="label">p95</div><div className="font-mono text-sm text-violet-300">{n(metrics.p95_latency_ms, 1)} ms</div></div>
-      <div className={metricClass}><div className="label">Errors</div><div className={`font-mono text-sm ${metrics.error_rate > 0.05 ? "text-rose-300" : "text-emerald-300"}`}>{pct(metrics.error_rate)}</div></div>
-      <div className={metricClass}><div className="label">Change</div><div className={`inline-flex rounded border px-1.5 py-0.5 text-[10px] font-bold uppercase ${statusTone(metrics.change?.status)}`}>{metrics.change?.status || "normal"}</div></div>
+      <div className={metricClass}><div className="label">{t("Errors")}</div><div className={`font-mono text-sm ${metrics.error_rate > 0.05 ? "text-rose-300" : "text-emerald-300"}`}>{pct(metrics.error_rate)}</div></div>
+      <div className={metricClass}><div className="label">{t("Change")}</div><div className={`inline-flex rounded border px-1.5 py-0.5 text-[10px] font-bold uppercase ${statusTone(metrics.change?.status)}`}>{metrics.change?.status || "normal"}</div></div>
     </div>
   );
 }
@@ -341,7 +342,7 @@ function GraphSurface({
     <div
       ref={surfaceRef}
       className="absolute inset-0 touch-none overflow-hidden bg-[#0c0d14] cursor-grab active:cursor-grabbing"
-      aria-label="Interactive service topology"
+      aria-label={t("Interactive service topology")}
       style={{
         backgroundImage: "url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='32' height='32' viewBox='0 0 32 32'%3E%3Cpath d='M32 0H0V32' fill='none' stroke='%231d2030' stroke-width='1'/%3E%3C/svg%3E\")",
         backgroundPosition: `${pan.x}px ${pan.y}px`,
@@ -518,12 +519,12 @@ function DetailPanel({
     tps: Number(point.tps || 0),
   }));
   return (
-    <aside className="absolute bottom-4 right-4 top-20 z-30 w-[min(380px,calc(100%-2rem))] overflow-y-auto rounded-lg border border-[#34384c] bg-[#141622]" aria-label="Topology object details" data-testid="topology-inspector">
+    <aside className="absolute bottom-4 right-4 top-20 z-30 w-[min(380px,calc(100%-2rem))] overflow-y-auto rounded-lg border border-[#34384c] bg-[#141622]" aria-label={t("Topology object details")} data-testid="topology-inspector">
       <div className="sticky top-0 z-10 flex items-start justify-between border-b border-[#262838] bg-[#181a28] px-4 py-3">
         <div><div className="label">{entity.type}</div><h3 className="mt-1 max-w-[270px] break-words text-base font-semibold text-white">{entity.name}</h3></div>
-        <button type="button" onClick={onClose} className="btn px-2" aria-label="Close topology detail panel"><X size={14} /></button>
+        <button type="button" onClick={onClose} className="btn px-2" aria-label={t("Close topology detail panel")}><X size={14} /></button>
       </div>
-      {detailLoading ? <Loading /> : detailError ? <div className="p-4"><ErrorState message="The selected topology detail could not be loaded." /></div> : (
+      {detailLoading ? <Loading /> : detailError ? <div className="p-4"><ErrorState message={t("The selected topology detail could not be loaded.")} /></div> : (
         <div className="space-y-4 p-4">
           <MetricStrip metrics={metrics} />
           <section>
@@ -538,16 +539,16 @@ function DetailPanel({
             )}
           </section>
           <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
-            <MetricCard label="Requests" value={n(metrics.request_count, 0)} detail="Observed in window" accent="sky" />
-            <MetricCard label="p99 latency" value={`${n(metrics.p99_latency_ms, 1)} ms`} detail={`p50 ${n(metrics.p50_latency_ms, 1)} ms`} accent="violet" />
-            <MetricCard label="Request bytes" value={n(metrics.request_bytes, 0)} detail={`${n(metrics.average_request_bytes, 0)} avg/request`} accent="cyan" />
-            <MetricCard label="Response bytes" value={n(metrics.response_bytes, 0)} detail={`${n(metrics.average_response_bytes, 0)} avg/response`} accent="indigo" />
+            <MetricCard label={t("Requests")} value={n(metrics.request_count, 0)} detail={t("Observed in window")} accent="sky" />
+            <MetricCard label={t("p99 latency")} value={`${n(metrics.p99_latency_ms, 1)} ms`} detail={`p50 ${n(metrics.p50_latency_ms, 1)} ms`} accent="violet" />
+            <MetricCard label={t("Request bytes")} value={n(metrics.request_bytes, 0)} detail={`${n(metrics.average_request_bytes, 0)} ${t("avg/request")}`} accent="cyan" />
+            <MetricCard label={t("Response bytes")} value={n(metrics.response_bytes, 0)} detail={`${n(metrics.average_response_bytes, 0)} ${t("avg/response")}`} accent="indigo" />
           </div>
-          <section><h4 className="label mb-2">Reliability</h4><div className="grid grid-cols-2 gap-2 text-xs"><div className="rounded border border-[#303449] p-2"><span className="text-[#94a3b8]">4xx</span><strong className="ml-2 text-amber-300">{pct(metrics.http_4xx_rate)}</strong></div><div className="rounded border border-[#303449] p-2"><span className="text-[#94a3b8]">5xx</span><strong className="ml-2 text-rose-300">{pct(metrics.http_5xx_rate)}</strong></div><div className="rounded border border-[#303449] p-2"><span className="text-[#94a3b8]">Timeouts</span><strong className="ml-2 text-white">{n(metrics.timeout_count, 0)}</strong></div><div className="rounded border border-[#303449] p-2"><span className="text-[#94a3b8]">Anonymous</span><strong className="ml-2 text-cyan-300">{n(metrics.anonymous_requests, 0)}</strong></div></div></section>
-          <section><h4 className="label mb-2">Evidence & change</h4><div className="space-y-2 text-xs text-[#cbd5e1]"><div className="flex items-center justify-between"><span>Observation</span><span className={`rounded border px-2 py-0.5 font-bold ${metrics.evidence_type === "direct" ? "border-emerald-400/50 text-emerald-300" : "border-violet-400/50 text-violet-300"}`}>{metrics.evidence_type} · {Math.round(metrics.confidence * 100)}%</span></div><div className="flex items-center justify-between"><span>Current vs previous</span><span className={`rounded border px-2 py-0.5 font-bold uppercase ${statusTone(metrics.change?.status)}`}>{metrics.change?.status || "normal"}</span></div><div className="text-[#94a3b8]">{metrics.evidence_types?.join(" · ") || "No evidence detail"}</div></div></section>
-          <section><h4 className="label mb-2">Observed time</h4><div className="grid grid-cols-2 gap-2 text-[11px] text-[#cbd5e1]"><div><span className="block text-[#94a3b8]">First seen</span>{formatTime(metrics.first_seen_ms)}</div><div><span className="block text-[#94a3b8]">Last seen</span>{formatTime(metrics.last_seen_ms)}</div></div></section>
+          <section><h4 className="label mb-2">{t("Reliability")}</h4><div className="grid grid-cols-2 gap-2 text-xs"><div className="rounded border border-[#303449] p-2"><span className="text-[#94a3b8]">4xx</span><strong className="ml-2 text-amber-300">{pct(metrics.http_4xx_rate)}</strong></div><div className="rounded border border-[#303449] p-2"><span className="text-[#94a3b8]">5xx</span><strong className="ml-2 text-rose-300">{pct(metrics.http_5xx_rate)}</strong></div><div className="rounded border border-[#303449] p-2"><span className="text-[#94a3b8]">{t("Timeouts")}</span><strong className="ml-2 text-white">{n(metrics.timeout_count, 0)}</strong></div><div className="rounded border border-[#303449] p-2"><span className="text-[#94a3b8]">{t("Anonymous")}</span><strong className="ml-2 text-cyan-300">{n(metrics.anonymous_requests, 0)}</strong></div></div></section>
+          <section><h4 className="label mb-2">{t("Evidence & change")}</h4><div className="space-y-2 text-xs text-[#cbd5e1]"><div className="flex items-center justify-between"><span>{t("Observation")}</span><span className={`rounded border px-2 py-0.5 font-bold ${metrics.evidence_type === "direct" ? "border-emerald-400/50 text-emerald-300" : "border-violet-400/50 text-violet-300"}`}>{metrics.evidence_type} · {Math.round(metrics.confidence * 100)}%</span></div><div className="flex items-center justify-between"><span>{t("Current vs previous")}</span><span className={`rounded border px-2 py-0.5 font-bold uppercase ${statusTone(metrics.change?.status)}`}>{metrics.change?.status || "normal"}</span></div><div className="text-[#94a3b8]">{metrics.evidence_types?.join(" · ") || t("No evidence detail")}</div></div></section>
+          <section><h4 className="label mb-2">{t("Observed time")}</h4><div className="grid grid-cols-2 gap-2 text-[11px] text-[#cbd5e1]"><div><span className="block text-[#94a3b8]">{t("First seen")}</span>{formatTime(metrics.first_seen_ms)}</div><div><span className="block text-[#94a3b8]">{t("Last seen")}</span>{formatTime(metrics.last_seen_ms)}</div></div></section>
           {selection.kind === "node" && selection.node.type === "principal" && (
-            <section><div className="mb-2 flex items-center justify-between"><h4 className="label">Source IP context</h4>{ipLoading && <RefreshCw size={13} className="animate-spin text-cyan-300" />}</div><div className="overflow-x-auto"><table className="w-full text-left text-[11px]"><thead><tr className="border-b border-[#303449] text-[#94a3b8]"><th className="px-1 py-2">IP</th><th className="px-1 py-2">TPS</th><th className="px-1 py-2">Role</th><th className="px-1 py-2">Status</th></tr></thead><tbody>{ips?.items.map((item) => <tr key={`${item.source_ip}-${item.service}-${item.api}`} className="border-b border-[#24283a]"><td className="px-1 py-2 font-mono text-white">{item.source_ip}</td><td className="px-1 py-2 text-sky-300">{n(item.tps, 2)}</td><td className="px-1 py-2"><span className={item.is_load_balancer ? "text-amber-300" : "text-emerald-300"}>{item.role_label}</span></td><td className="px-1 py-2">{item.is_new_ip ? <span className="text-cyan-300">NEW IP</span> : <span className="text-[#94a3b8]">Known</span>}</td></tr>)}</tbody></table></div>{!ips?.items.length && !ipLoading && <p className="py-3 text-xs text-[#94a3b8]">No source IP evidence in this window.</p>}{ips?.next_cursor && <button type="button" className="btn mt-3 w-full" onClick={onLoadMoreIps}>Load next IP page</button>}</section>
+            <section><div className="mb-2 flex items-center justify-between"><h4 className="label">{t("Source IP context")}</h4>{ipLoading && <RefreshCw size={13} className="animate-spin text-cyan-300" />}</div><div className="overflow-x-auto"><table className="w-full text-left text-[11px]"><thead><tr className="border-b border-[#303449] text-[#94a3b8]"><th className="px-1 py-2">IP</th><th className="px-1 py-2">TPS</th><th className="px-1 py-2">{t("Role")}</th><th className="px-1 py-2">{t("Status")}</th></tr></thead><tbody>{ips?.items.map((item) => <tr key={`${item.source_ip}-${item.service}-${item.api}`} className="border-b border-[#24283a]"><td className="px-1 py-2 font-mono text-white">{item.source_ip}</td><td className="px-1 py-2 text-sky-300">{n(item.tps, 2)}</td><td className="px-1 py-2"><span className={item.is_load_balancer ? "text-amber-300" : "text-emerald-300"}>{item.role_label}</span></td><td className="px-1 py-2">{item.is_new_ip ? <span className="text-cyan-300">{t("NEW IP")}</span> : <span className="text-[#94a3b8]">{t("Known")}</span>}</td></tr>)}</tbody></table></div>{!ips?.items.length && !ipLoading && <p className="py-3 text-xs text-[#94a3b8]">{t("No source IP evidence in this window.")}</p>}{ips?.next_cursor && <button type="button" className="btn mt-3 w-full" onClick={onLoadMoreIps}>{t("Load next IP page")}</button>}</section>
           )}
         </div>
       )}

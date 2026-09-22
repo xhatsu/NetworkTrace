@@ -153,6 +153,14 @@ async def changes(principal: Optional[str] = None, change_type: Optional[str] = 
         start_ms=start_ms,end_ms=end_ms,limit=limit,offset=offset)
 
 
+@router.get("/user-changes/{change_id}")
+async def change_detail(change_id: int):
+    result = UserRepository().get_change(change_id)
+    if not result:
+        raise HTTPException(404, "User change not found")
+    return result
+
+
 @router.patch("/user-changes/{change_id}", dependencies=[Depends(require_api_key)])
 async def update_change(change_id: int, body: ChangeUpdate):
     result = UserRepository().update_change(change_id,body.status)
@@ -271,4 +279,3 @@ def user_topology_endpoint(
 ):
     start_ms, end_ms = _window(from_time, to_time, start, end)
     return UserRepository().user_topology(principal, start_ms=start_ms, end_ms=end_ms)
-

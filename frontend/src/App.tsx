@@ -218,7 +218,7 @@ function SideNav() {
       {/* Database/Storage status */}
       <div className="flex items-center gap-2 px-3 text-[10px] text-[#a7a9ab] border-t border-[#2a2d30] pt-3">
         <div
-          title="ClickHouse Store · Real-Time Analytics"
+          title={t("ClickHouse Store · Real-Time Analytics")}
           className="relative grid h-7 w-7 shrink-0 place-items-center rounded-[2px] border border-green-500/50 bg-green-500/10 text-green-300"
         >
           <Database size={14} />
@@ -314,14 +314,14 @@ function FilterBar() {
           </button>
 
           <select
-            aria-label="Timezone"
+            aria-label={t("Timezone")}
             value={filters.timezone}
             onChange={(e) => setFilter("timezone", e.target.value)}
             className="btn toolbar-control cursor-pointer"
           >
             <option value="UTC" className="bg-[#181b1f]">UTC</option>
             <option value="Asia/Ho_Chi_Minh" className="bg-[#181b1f]">Asia/Ho Chi Minh</option>
-            <option value="local" className="bg-[#181b1f]">Browser Local</option>
+            <option value="local" className="bg-[#181b1f]">{t("Browser Local")}</option>
           </select>
 
           <div className="chip font-mono text-[10px] font-bold text-emerald-300 border-emerald-500/40 bg-emerald-500/15">

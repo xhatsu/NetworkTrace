@@ -289,6 +289,22 @@ class UserRepository:
                 except Exception: row["reason"] = {}
             return {"items": rows, "count": count, "total_unfiltered": total_unfiltered, "fallback_applied": False, "limit": limit, "offset": offset}
 
+    def get_change(self, change_id: int) -> dict[str, Any] | None:
+        """Return one behavioral change event for direct inspection and compatibility links."""
+        with get_connection(self.db_path) as db:
+            row = db.execute(
+                "SELECT * FROM principal_change_events FINAL WHERE id=? LIMIT 1",
+                (change_id,),
+            ).fetchone()
+            if not row:
+                return None
+            result = dict(row)
+            try:
+                result["reason"] = json.loads(result.pop("reason_json"))
+            except Exception:
+                result["reason"] = {}
+            return result
+
     def update_change(self, change_id: int, status: str) -> dict[str, Any] | None:
         return self.review_change(change_id, action="expected" if status == "expected" else "investigate" if status == "reviewed" else "data_quality" if status == "ignored" else "investigate")
 

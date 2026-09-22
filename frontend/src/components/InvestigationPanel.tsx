@@ -600,7 +600,7 @@ export function InvestigationPanel({
                       <p className="text-[#f5f3fa]">{rec.rationale}</p>
                       {rec.evidence_ids?.length > 0 && (
                         <div className="flex items-center gap-1 font-mono text-[10px] text-emerald-400/80">
-                          <span>Evidence:</span>
+                          <span>{t("Evidence")}</span>
                           {rec.evidence_ids.join(", ")}
                         </div>
                       )}
@@ -705,11 +705,12 @@ function ProgressStep({
 }
 
 function AssessmentPill({ assessment }: { assessment: string }) {
+  const { t } = useI18n();
   if (assessment === "explained") {
     return (
       <span className="inline-flex items-center gap-1 rounded border border-emerald-500/50 bg-emerald-500/20 px-2.5 py-0.5 text-xs font-bold uppercase text-emerald-300">
         <CheckCircle2 size={12} />
-        <span>Explained</span>
+        <span>{t("Explained")}</span>
       </span>
     );
   }
@@ -717,14 +718,14 @@ function AssessmentPill({ assessment }: { assessment: string }) {
     return (
       <span className="inline-flex items-center gap-1 rounded border border-amber-500/50 bg-amber-500/20 px-2.5 py-0.5 text-xs font-bold uppercase text-amber-300">
         <AlertTriangle size={12} />
-        <span>Partially Explained</span>
+        <span>{t("Partially Explained")}</span>
       </span>
     );
   }
   return (
     <span className="inline-flex items-center gap-1 rounded border border-slate-500/50 bg-slate-500/20 px-2.5 py-0.5 text-xs font-bold uppercase text-slate-300">
       <HelpCircle size={12} />
-      <span>Insufficient Evidence</span>
+      <span>{t("Insufficient Evidence")}</span>
     </span>
   );
 }

@@ -1,5 +1,5 @@
-import { useState } from "react";
-import { useOutletContext } from "react-router-dom";
+import { useEffect, useState } from "react";
+import { useLocation, useOutletContext } from "react-router-dom";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import {
   AlertOctagon,
@@ -42,6 +42,8 @@ export function UserChangesTab() {
   const { filters } = useFilters();
   const { t } = useI18n();
   const queryClient = useQueryClient();
+  const location = useLocation();
+  const requestedChangeId = new URLSearchParams(location.search).get("change_id");
   const [categoryFilter, setCategoryFilter] = useState<
     "all" | "behavioral" | "network_ip" | "distribution" | "resource" | "relationship"
   >("all");
@@ -54,8 +56,16 @@ export function UserChangesTab() {
       api<any>(`/api/v1/user-changes?principal=${encodeURIComponent(principal)}&${queryString(filters)}`),
     enabled: !!principal,
   });
+  const selectedChangeQuery = useQuery({
+    queryKey: ["user-change", requestedChangeId],
+    queryFn: () => api<any>(`/api/v1/user-changes/${encodeURIComponent(requestedChangeId || "")}`),
+    enabled: Boolean(requestedChangeId),
+  });
 
-  const rawChanges: any[] = changesData?.items || profile?.changes || [];
+  const rawChanges: any[] = [
+    ...(selectedChangeQuery.data ? [selectedChangeQuery.data] : []),
+    ...(changesData?.items || profile?.changes || []),
+  ];
   const seenFp = new Set<string>();
   const changes = rawChanges.filter((c) => {
     const key = c.fingerprint || `${c.change_type}|${c.target_service || ""}|${c.operation || ""}|${c.source_ip || ""}|${c.id}`;
@@ -63,6 +73,12 @@ export function UserChangesTab() {
     seenFp.add(key);
     return true;
   });
+
+  useEffect(() => {
+    if (!requestedChangeId || !changes.length || String(selectedChange?.id) === requestedChangeId) return;
+    const requestedChange = changes.find((change) => String(change.id) === requestedChangeId);
+    if (requestedChange) setSelectedChange(requestedChange);
+  }, [changes, requestedChangeId, selectedChange?.id]);
 
   // Review mutation
   const reviewMutation = useMutation({

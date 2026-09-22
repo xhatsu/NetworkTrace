@@ -175,7 +175,7 @@ export function UserLayout() {
             className="flex items-center gap-2 rounded-lg border border-[rgba(255,255,255,0.22)] bg-[#191530] px-3 py-1.5 text-xs font-semibold text-white shadow-sm transition hover:border-cyan-400 hover:bg-[#211c40]"
           >
             <Users size={14} className="text-cyan-400" />
-            <span className="text-[#94a3b8]">Switch Account:</span>
+            <span className="text-[#94a3b8]">{t("Switch Account:")}</span>
             <span className="font-mono text-white font-bold">{principal}</span>
             <ChevronDown size={14} className="text-[#cbd5e1]" />
           </button>
@@ -187,7 +187,7 @@ export function UserLayout() {
                 <input
                   type="text"
                   autoFocus
-                  placeholder="Filter users..."
+                  placeholder={t("Filter users...")}
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
                   className="w-full rounded-lg border border-[#2e3247] bg-[#0e1019] pl-8 pr-3 py-1.5 text-xs text-white placeholder:text-[#94a3b8] focus:border-cyan-400 focus:outline-none"
@@ -284,23 +284,23 @@ export function UserLayout() {
 
             {/* Principal Type dropdown selector */}
             <select
-              aria-label="Principal type"
+              aria-label={t("Principal type")}
               value={profile?.principal_type || "service_account"}
               onChange={(e) => updateTypeMutation.mutate(e.target.value)}
               className="rounded-xl border border-[#2e3247] bg-[#141622] px-3 py-1.5 text-xs font-bold text-white shadow-sm transition hover:border-cyan-400 focus:outline-none cursor-pointer"
             >
-              <option value="service_account" className="bg-[#141622]">Service Account</option>
-              <option value="human" className="bg-[#141622]">Human User</option>
-              <option value="system_account" className="bg-[#141622]">System Account</option>
-              <option value="shared_credential" className="bg-[#141622]">Shared Credential</option>
-              <option value="integration_account" className="bg-[#141622]">Integration Account</option>
-              <option value="unknown" className="bg-[#141622]">Unknown</option>
+              <option value="service_account" className="bg-[#141622]">{t("Service Account")}</option>
+              <option value="human" className="bg-[#141622]">{t("Human User")}</option>
+              <option value="system_account" className="bg-[#141622]">{t("System Account")}</option>
+              <option value="shared_credential" className="bg-[#141622]">{t("Shared Credential")}</option>
+              <option value="integration_account" className="bg-[#141622]">{t("Integration Account")}</option>
+              <option value="unknown" className="bg-[#141622]">{t("Unknown")}</option>
             </select>
 
             {/* Baseline learning status */}
             <div className="inline-flex items-center gap-1.5 rounded-xl border border-violet-500/40 bg-violet-500/15 px-3 py-1.5 text-xs font-bold text-violet-200">
               <Sparkles size={13} className="text-violet-300" />
-              <span>{profile?.learning_status === "learning" ? "Learning Baseline" : "Established Baseline"}</span>
+              <span>{profile?.learning_status === "learning" ? t("Learning Baseline") : t("Established Baseline")}</span>
             </div>
 
             {/* Behavioral Score Badge */}
@@ -314,8 +314,8 @@ export function UserLayout() {
               }`}
             >
               {isHighRisk ? <ShieldAlert size={14} /> : <Shield size={14} />}
-              <span>Anomaly Score: {score}/100</span>
-              <span className="opacity-80">({isHighRisk ? "HIGH" : isMedRisk ? "MEDIUM" : "LOW"})</span>
+              <span>{t("Anomaly Score")}: {score}/100</span>
+              <span className="opacity-80">({isHighRisk ? t("HIGH") : isMedRisk ? t("MEDIUM") : t("LOW")})</span>
             </div>
           </div>
         </div>
@@ -323,39 +323,39 @@ export function UserLayout() {
         {/* Mini stats ribbon */}
         <div className="mt-4 grid grid-cols-2 gap-2 border-t border-[rgba(255,255,255,0.12)] pt-3 text-xs sm:grid-cols-4 md:grid-cols-4">
           <div>
-            <span className="text-[10px] font-bold uppercase tracking-wider text-[#94a3b8]">Total Requests</span>
+            <span className="text-[10px] font-bold uppercase tracking-wider text-[#94a3b8]">{t("Total Requests")}</span>
             <div className="font-mono text-sm font-bold text-white">
               {(profile?.total_requests || 0).toLocaleString()}
             </div>
           </div>
           <div>
-            <span className="text-[10px] font-bold uppercase tracking-wider text-[#94a3b8]">Active Targets</span>
+            <span className="text-[10px] font-bold uppercase tracking-wider text-[#94a3b8]">{t("Active Targets")}</span>
             <div className="font-mono text-sm font-bold text-cyan-300">
-              {profile?.unique_targets ?? profile?.current?.targets?.length ?? 0} services
+              {profile?.unique_targets ?? profile?.current?.targets?.length ?? 0} {t("services")}
             </div>
           </div>
           <div>
-            <span className="text-[10px] font-bold uppercase tracking-wider text-[#94a3b8]">Active Callers</span>
+            <span className="text-[10px] font-bold uppercase tracking-wider text-[#94a3b8]">{t("Active Callers")}</span>
             <div className="font-mono text-sm font-bold text-violet-300">
-              {profile?.unique_callers ?? profile?.current?.callers?.length ?? 0} callers
+              {profile?.unique_callers ?? profile?.current?.callers?.length ?? 0} {t("callers")}
             </div>
           </div>
           <div>
-            <span className="text-[10px] font-bold uppercase tracking-wider text-[#94a3b8]">Active Operations</span>
+            <span className="text-[10px] font-bold uppercase tracking-wider text-[#94a3b8]">{t("Active Operations")}</span>
             <div className="font-mono text-sm font-bold text-emerald-300">
-              {profile?.unique_operations ?? profile?.current?.operations?.length ?? 0} endpoints
+              {profile?.unique_operations ?? profile?.current?.operations?.length ?? 0} {t("endpoints")}
             </div>
           </div>
           <div>
-            <span className="text-[10px] font-bold uppercase tracking-wider text-[#94a3b8]">Source IPs</span>
+            <span className="text-[10px] font-bold uppercase tracking-wider text-[#94a3b8]">{t("Source IPs")}</span>
             <div className="font-mono text-sm font-bold text-amber-300">
-              {profile?.unique_sources ?? profile?.current?.sources?.length ?? 0} IPs
+              {profile?.unique_sources ?? profile?.current?.sources?.length ?? 0} {t("IPs")}
             </div>
           </div>
           <div>
-            <span className="text-[10px] font-bold uppercase tracking-wider text-[#94a3b8]">Active Window</span>
+            <span className="text-[10px] font-bold uppercase tracking-wider text-[#94a3b8]">{t("Active Window")}</span>
             <div className="font-mono text-xs font-bold text-[#e2e8f0]">
-              {profile?.typical_active_window || "All Hours"}
+              {profile?.typical_active_window || t("All Hours")}
             </div>
           </div>
         </div>
@@ -419,7 +419,7 @@ export function UserLayout() {
           <div className="grid h-64 place-items-center rounded-2xl border border-[rgba(255,255,255,0.14)] bg-[#161228]">
             <div className="flex flex-col items-center gap-3">
               <div className="h-8 w-8 animate-spin rounded-full border-2 border-cyan-400 border-t-transparent" />
-              <span className="text-xs font-semibold text-cyan-200">Loading user intelligence signals...</span>
+              <span className="text-xs font-semibold text-cyan-200">{t("Loading user intelligence signals...")}</span>
             </div>
           </div>
         ) : profileError ? (

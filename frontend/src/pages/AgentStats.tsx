@@ -944,7 +944,7 @@ export function AgentNodeDetailPage() {
             subtitle={t("Kernel socket buffer packet drop % vs Agent shipping queue drop %")}
           >
             {chartPoints.length === 0 ? (
-              <div className="h-60 flex items-center justify-center text-xs text-[#6e7681]">No history</div>
+              <div className="h-60 flex items-center justify-center text-xs text-[#6e7681]">{t("No history")}</div>
             ) : (
               <div className="h-64 p-4">
                 <ResponsiveContainer width="100%" height="100%">
@@ -995,7 +995,7 @@ export function AgentNodeDetailPage() {
             subtitle={t("Pinned CPU consumption (1-core scale) and Resident Set Size (MB)")}
           >
             {chartPoints.length === 0 ? (
-              <div className="h-60 flex items-center justify-center text-xs text-[#6e7681]">No history</div>
+              <div className="h-60 flex items-center justify-center text-xs text-[#6e7681]">{t("No history")}</div>
             ) : (
               <div className="h-64 p-4">
                 <ResponsiveContainer width="100%" height="100%">
@@ -1044,7 +1044,7 @@ export function AgentNodeDetailPage() {
             subtitle={t("Queue buffer occupancy vs high-water mark")}
           >
             {chartPoints.length === 0 ? (
-              <div className="h-60 flex items-center justify-center text-xs text-[#6e7681]">No history</div>
+              <div className="h-60 flex items-center justify-center text-xs text-[#6e7681]">{t("No history")}</div>
             ) : (
               <div className="h-64 p-4">
                 <ResponsiveContainer width="100%" height="100%">
@@ -1088,7 +1088,7 @@ export function AgentNodeDetailPage() {
             subtitle={t("Packets captured vs parsed events emitted per window")}
           >
             {chartPoints.length === 0 ? (
-              <div className="h-60 flex items-center justify-center text-xs text-[#6e7681]">No history</div>
+              <div className="h-60 flex items-center justify-center text-xs text-[#6e7681]">{t("No history")}</div>
             ) : (
               <div className="h-64 p-4">
                 <ResponsiveContainer width="100%" height="100%">

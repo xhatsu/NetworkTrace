@@ -111,7 +111,7 @@
   - Multi-Color Visualizations: Restrained low-opacity fills, compact legends, HTTP status mapping (2xx green, 3xx blue, 4xx orange, 5xx red), and semantic topology nodes/edges without specular sheen.
 - **Built Output**: `frontend/dist` served directly by FastAPI on port 30102.
 - **Navigation & Pages**:
-  - `Overview` (`/`): User Behavioral Observability Dashboard focusing strictly on identity behavior: 8 User KPIs, traffic velocity vs error dynamics, risk cohort distribution, prioritized anomalous accounts with 1-click workspace inspector, shared credentials, and live change/incident triage.
+  - `Overview` (`/`): Operational landing page with TPS beside “What’s different right now,” five primary health KPIs, compact Top Services and Top Users tables, behavior-change history, and direct Service/API/User drill-down links.
   - `Topology` (Legacy `/topology`): Redundant generic service topology removed from primary navigation; redirects cleanly to `/users`. User access topology is served within the user workspace at `/users/:principal/topology`.
   - `Anomalies` (`/anomalies`, `/anomalies/:id`): Dual-mode Incident Episode list (`Group Incidents` vs `Raw Findings`) collapsing repetitive 5-minute alerts into aggregated continuous episodes with recurrence badges (`Nx recurrent`), time spans, duration, peak/latest values, and expandable slice accordions. Anomaly Detail with "WHAT CHANGED COMPARED WITH NORMAL?" explainability card, probable root cause, blast radius, and lifecycle action controls.
   - `Services` (`/services`, `/services/:name`): Service catalog, operation percentiles, caller graphs, instances.
@@ -122,7 +122,7 @@
     - `User Workspace & Layout` (`/users/:principal`): Sticky entity header with user avatar, type indicator, behavior score pill, current 5m RPS, active targets, quick account switcher dropdown, and 6 dedicated operational tabs:
       1. `User Overview` (`/users/:principal/overview`): Current 5m vs baseline deltas across 8 KPIs, 4 high-contrast line charts in a 2x2 grid (two lines, each line two cards: RPS vs base, error rate, p95 latency, Abnormality Score Spike scaled with high RPS deviation), mini change timeline, and relationship expansion summary.
       2. `Activity & Performance` (`/users/:principal/activity`): Throughput RPS, req/min volume, 100% stacked status distribution (2xx/4xx/5xx/timeout), multi-percentile latency area chart (p50/p95/p99), and interactive pinned time-slice inspector.
-      3. `Access & Topology` (`/users/:principal/topology`): Dedicated `User → Caller → Target` canvas topology graph, collapsible target operations breakdown, edge metrics inspector drawer.
+      3. `Access & Topology` (`/users/:principal/topology`): IP-first drilldown using `IP → User → Service → API`; select an IP to reveal the User, then Service and API, with the exact relationship and operational metrics shown below.
       4. `Behavior Changes` (`/users/:principal/changes`): Deviation-only behavioral shifts, before vs now category distribution bars, and 7-questions explainability timeline.
       5. `Usage Patterns` (`/users/:principal/patterns`): 24h × 7d activity heatmap, target services distribution bars, operations distribution bars, and behavioral scope time series.
       6. `Anomalies & Investigations` (`/users/:principal/investigations`): Triage queue, trigger hypotheses, BEFORE vs NOW metrics comparison table, causal relationship chain, and operator review controls.
@@ -130,7 +130,7 @@
   - `Infrastructure`: `Agent Fleet` (`/agent-stats`) and `Agent Drilldown` (`/agent-stats/:node`) with interactive time-series dashboards.
   - **TPS chart invariant**: `/services`, `/services/:name`, API detail routes, and every `/users/:principal/*` workspace route render the scoped TPS line graph as the first operational panel above detail metrics and tables.
   - Global Search in header: Search services, principals, or jump directly to trace waterfall by ID.
-  - **Localization (i18n)**: Full, authentic Vietnamese localization across all 17 pages, charts, tables, cards, and modals with persistent language switcher (`🇻🇳 VI` / `🇬🇧 EN`) defaulting to Vietnamese.
+  - **Localization (i18n)**: Canonical Vietnamese UI copy across active pages, charts, tables, cards, and modals with persistent language switcher (`🇻🇳 VI` / `🇬🇧 EN`) defaulting to Vietnamese. DevOps/product vocabulary remains English where it improves operator recognition (`Service`, `API`, `User`, `TPS`, `Latency`, `Trace`, `IP`, `Baseline`, `Agent`, and protocol/database names); surrounding explanatory copy is translated.
 
 ---
 
@@ -866,3 +866,8 @@
 - `GET /api/v1/users/{principal}/performance` now includes bandwidth fields per bucket, a top-level bandwidth summary, current/baseline five-minute bandwidth KPIs, and `bandwidth_pct` delta. API drilldowns receive the same fields through the existing topology API metrics response.
 - Units are explicit: byte totals are bytes, `*_bytes_per_second` values are bytes/second, and `bandwidth_bits_per_second` is bits/second. Missing byte telemetry remains zero and is never inferred from request counts.
 - Verification: focused interactive topology/bandwidth tests passed **5/5**; API and behavioral regressions passed **19/19**; Python compilation and `git diff --check` passed.
+
+## Anomaly vs Behavioral Change IDs (2026-09-22)
+
+- `anomaly_events.id` and `principal_change_events.id` are separate namespaces. Overview “What’s different” records come from `/api/v1/user-changes` and must open `/users/{principal}/changes?change_id=...`, not `/anomalies/{id}`.
+- `GET /api/v1/user-changes/{id}` provides direct lookup, and `AnomalyDetailPage` redirects legacy mislinked change IDs to the owning User Changes tab.

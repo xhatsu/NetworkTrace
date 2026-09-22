@@ -222,7 +222,7 @@ The user workspace has been completely redesigned around 6 user-centric operatio
 
 ### Redesigned Identity Observability Dashboard (`/`)
 The primary system dashboard (`Overview.tsx`) has been redesigned to focus strictly on **User and Identity Statistics** (relieving redundant service/infrastructure monitoring handled by external systems):
-- **8 User Signal KPIs**: Observed Identities, Active Accounts (5m), High-Risk Accounts (score $\ge$ 60), Medium-Risk Accounts (25-59), Baseline Drift, New Target Edges, New Ingress Callers, Active User Incidents.
+- **Operational landing hierarchy**: TPS is paired with “What’s different right now,” followed by five primary health KPIs, Top Services, Top Users, and behavior-change history.
 - **Identity Velocity vs Error Dynamics**: Dual-axis chart comparing attributed throughput RPS against HTTP failure proportions.
 - **Identity Risk Cohort Split**: Distribution of accounts across risk severity tiers and active transacting states.
 - **Actionable User Triage**: Prioritized user accounts ranked by anomaly score with 1-click `Inspect` buttons leading into the 6-tab user workspace (`/users/:principal/overview`).
@@ -410,6 +410,8 @@ In multi-line Recharts components, hover tooltips were rendering the same series
 ---
 
 ## 12. Complete Vietnamese Localization (i18n) & Language Toggle (2026-09-16)
+
+The active catalog now uses canonical Vietnamese copy while preserving operator-facing DevOps/product terms in English (`Service`, `API`, `User`, `TPS`, `Latency`, `Trace`, `IP`, `Baseline`, `Agent`, and protocol/database names). The English catalog is populated from the same key set so language switching does not expose stale missing-key fallbacks.
 
 ### Architecture & Implementation
 - **I18n Engine (`frontend/src/i18n.tsx`)**:
@@ -1152,7 +1154,7 @@ Exposes standard Prometheus 0.0.4 text exposition format at `GET /metrics` on po
   - `GET /api/v1/topology/principals/{principal}/services`
   - `GET /api/v1/topology/principals/{principal}/services/{service}/apis`
   - Existing `GET /api/v1/topology/principals/{principal}/ips?service=...&api=...` supplies the final IP evidence step.
-- The User topology page now reads these shared five-minute relationship facts directly. IPs are progressive detail and are not rendered as default topology nodes.
+- The User topology page now uses an IP-first progressive drilldown: `IP → User → Service → API`. The selected IP reveals the User, then scoped Service and API lists, followed by the exact relationship details and operational metrics.
 - No duplicate `user_service`/`service_user` tables were added. Both directions query the existing `topology_principal_edges_5m` and `topology_principal_ip_5m` rollups.
 - The sidebar taxonomy no longer labels the primary group as a System level; it is presented as Operational Views.
 - Focused topology repository/API contract tests pass **5/5**, and frontend TypeScript validation passes.
@@ -1207,3 +1209,10 @@ Exposes standard Prometheus 0.0.4 text exposition format at `GET /metrics` on po
 - `GET /api/v1/users/{principal}/performance` now includes bandwidth fields per bucket, a top-level bandwidth summary, current/baseline five-minute bandwidth KPIs, and `bandwidth_pct` delta. API drilldowns receive the same fields through the existing topology API metrics response.
 - Units are explicit: byte totals are bytes, `*_bytes_per_second` values are bytes/second, and `bandwidth_bits_per_second` is bits/second. Missing byte telemetry remains zero and is never inferred from request counts.
 - Verification: focused interactive topology/bandwidth tests passed **5/5**; API and behavioral regressions passed **19/19**; Python compilation and `git diff --check` passed.
+
+## Anomaly detail ID namespace fix (2026-09-22)
+
+- Root cause of `/anomalies/6739330567467241` returning `Anomaly not found`: the ID is a `principal_change_events` record (`CALLER_PRINCIPAL_SWITCH` for `partner_sales_broker`), not an `anomaly_events` record.
+- Added `GET /api/v1/user-changes/{change_id}` and `UserRepository.get_change()` for exact behavioral-change lookup.
+- Overview change cards now open `/users/{principal}/changes?change_id=...`; legacy direct anomaly links fall back to that User Changes tab after resolving the change ID.
+- Frontend type-check/build, backend Python compilation, and `git diff --check` passed. The public API was checked read-only: health is `200`, the supplied anomaly URL is `404`, and a current anomaly detail URL returns `200`.
