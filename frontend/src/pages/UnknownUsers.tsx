@@ -217,21 +217,17 @@ export function UnknownUsersPage() {
               <span>{t("Unattributed Traffic & Error Dynamics", "Biến Động Lưu Lượng Chưa Định Danh & Tỷ Lệ Lỗi")}</span>
             </h2>
             <p className="text-xs text-[#cbd5e1] mt-0.5">
-              {t("Transaction throughput (RPS) correlated with authentication failures (401/403) and 5xx server errors", "Thông lượng giao dịch (RPS) tương quan với lỗi xác thực (401/403) và lỗi máy chủ 5xx")}
+              {t("Requests without errors and failed requests from worker metrics", "Yêu cầu không lỗi và yêu cầu thất bại từ số liệu tổng hợp của worker")}
             </p>
           </div>
           <div className="flex items-center gap-4 text-xs font-mono text-[#94a3b8]">
             <span className="flex items-center gap-1.5">
               <span className="h-2 w-2 rounded-full bg-cyan-400" />
-              <span>{t("2xx Success", "Thành công 2xx")}</span>
+              <span>{t("Non-error requests", "Yêu cầu không lỗi")}</span>
             </span>
             <span className="flex items-center gap-1.5">
               <span className="h-2 w-2 rounded-full bg-rose-400" />
-              <span>{t("401/403 Auth Fail", "Lỗi Xác thực")}</span>
-            </span>
-            <span className="flex items-center gap-1.5">
-              <span className="h-2 w-2 rounded-full bg-amber-400" />
-              <span>{t("5xx Server Error", "Lỗi Máy chủ")}</span>
+              <span>{t("Failed requests", "Yêu cầu thất bại")}</span>
             </span>
           </div>
         </div>
@@ -269,20 +265,20 @@ export function UnknownUsersPage() {
                 labelFormatter={(ts: any) => (ts ? new Date(Number(ts)).toLocaleString() : "")}
               />
               <Area
-                type="monotone"
-                dataKey="s_2xx"
-                name={t("2xx Success", "Thành công 2xx")}
+                type="linear"
+                dataKey="non_error_requests"
+                name={t("Non-error requests", "Yêu cầu không lỗi")}
                 stroke="#00f0ff"
                 fill="url(#anonSuccessGrad)"
-                strokeWidth={2}
+                strokeWidth={1.25}
               />
               <Area
-                type="monotone"
-                dataKey="s_auth_fail"
-                name={t("401/403 Auth Failures", "Lỗi Xác Thực (401/403)")}
+                type="linear"
+                dataKey="error_requests"
+                name={t("Failed requests", "Yêu cầu thất bại")}
                 stroke="#f43f5e"
                 fill="url(#anonAuthFailGrad)"
-                strokeWidth={2}
+                strokeWidth={1.25}
               />
             </AreaChart>
           </ResponsiveContainer>

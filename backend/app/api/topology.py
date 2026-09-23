@@ -117,6 +117,19 @@ def interactive_service_graph(
     return repo.service_graph(resolved)
 
 
+@router.get("/topology/bandwidth")
+def interactive_bandwidth(
+    window: str = Query("30d"),
+    from_time: Optional[str] = Query(None, alias="from"),
+    to_time: Optional[str] = Query(None, alias="to"),
+    service: Optional[str] = None,
+    operation: Optional[str] = None,
+    account: Optional[str] = None,
+) -> Dict[str, Any]:
+    repo, resolved = _interactive_window(window, from_time, to_time)
+    return repo.bandwidth_metrics(resolved, {"service": service, "operation": operation, "account": account})
+
+
 @router.get("/topology/services/{service}/apis", response_model=TopologyExpansionResponse)
 def interactive_service_apis(
     service: str,

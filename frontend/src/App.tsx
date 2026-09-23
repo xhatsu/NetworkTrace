@@ -43,7 +43,7 @@ import { InteractiveTopologyPage } from "./pages/InteractiveTopology";
 import { UserDirectory } from "./pages/user/UserDirectory";
 import { UserLayout } from "./pages/user/UserLayout";
 import { UserOverviewTab } from "./pages/user/UserOverviewTab";
-import { UserActivityTab } from "./pages/user/UserActivityTab";
+import { UserActivityWorkspace } from "./pages/user/UserActivityWorkspace";
 import { UserTopologyTab } from "./pages/user/UserTopologyTab";
 import { UserChangesTab } from "./pages/user/UserChangesTab";
 import { UserPatternsTab } from "./pages/user/UserPatternsTab";
@@ -391,7 +391,7 @@ function Layout() {
             <Route path="/users/:principal" element={<UserLayout />}>
               <Route index element={<Navigate to="overview" replace />} />
               <Route path="overview" element={<UserOverviewTab />} />
-              <Route path="activity" element={<UserActivityTab />} />
+              <Route path="activity" element={<UserActivityWorkspace />} />
               <Route path="topology" element={<UserTopologyTab />} />
               <Route path="changes" element={<UserChangesTab />} />
               <Route path="patterns" element={<UserPatternsTab />} />

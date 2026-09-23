@@ -143,13 +143,23 @@ class InteractiveTopologyRepository:
 
     def data_bounds_ms(self) -> Tuple[Optional[int], Optional[int]]:
         if self.backend == "elasticsearch":
-            return self._es_bounds_ms()
+            with get_connection(self.db_path) as db:
+                row = db.execute(
+                    "SELECT min(bucket_start), max(bucket_start) FROM metric_buckets FINAL WHERE bucket_size = 300"
+                ).fetchone()
+            if not row or not row[1]:
+                return None, None
+            return _safe_int(row[0]) * 1000, _safe_int(row[1]) * 1000
         with get_connection(self.db_path) as db:
             row = db.execute(
                 "SELECT min(first_seen_ms), max(last_seen_ms) FROM topology_service_edges_5m FINAL"
             ).fetchone()
             if not row or row[0] is None:
-                row = db.execute("SELECT min(timestamp_ms), max(timestamp_ms) FROM traces").fetchone()
+                metric_row = db.execute(
+                    "SELECT min(bucket_start), max(bucket_start) FROM metric_buckets FINAL WHERE bucket_size = 300"
+                ).fetchone()
+                if metric_row and metric_row[1]:
+                    return _safe_int(metric_row[0]) * 1000, _safe_int(metric_row[1]) * 1000
         if not row or row[0] is None:
             return None, None
         return _safe_int(row[0]), _safe_int(row[1])
@@ -743,6 +753,37 @@ class InteractiveTopologyRepository:
         entity = {"id": f"service:{service}", "name": service, "type": "service", "service": service, "groups": {"traffic": {k: metrics[k] for k in ("tps", "request_count", "request_bytes", "response_bytes", "total_bytes", "average_request_bytes", "average_response_bytes", "request_bytes_per_second", "response_bytes_per_second", "bandwidth_bytes_per_second", "bandwidth_bits_per_second")}, "performance": {k: metrics[k] for k in ("p50_latency_ms", "p95_latency_ms", "p99_latency_ms")}, "reliability": {k: metrics[k] for k in ("error_rate", "http_4xx_rate", "http_5xx_rate", "timeout_count", "tcp_reset_count", "incomplete_count")}, "dependencies": {"caller_service_count": len(callers), "target_service_count": len(targets), "api_count": len(apis), "active_principal_count": metrics["unique_principals"]}, "change": metrics["change"]}}
         return {"entity": entity, "metrics": metrics, "series": self._series("topology_api_edges_5m", {"target_service": service}, window), "changes": {"baseline": metrics["change"].get("baseline")}, "anonymous": self._anonymous_summary(window), "backend": self.backend}
 
+    def bandwidth_metrics(self, window: Dict[str, Any], filters: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+        """Return system or filtered bandwidth from byte-aware topology rollups."""
+        filters = filters or {}
+        query_filters = {
+            "target_service": filters.get("service"),
+            "target_api": filters.get("operation"),
+            "principal": canonical_principal(filters["account"]) if filters.get("account") else None,
+        }
+        query_filters = {key: value for key, value in query_filters.items() if value}
+
+        if self.backend == "elasticsearch" or (settings.clickhouse_only_agent_traces and bool(self._es_repo.url)):
+            from backend.app.repositories.elasticsearch_bandwidth_repository import ElasticsearchBandwidthRepository
+            result = ElasticsearchBandwidthRepository().query(
+                window["start_ms"], window["end_ms"],
+                {"service": query_filters.get("target_service"),
+                 "operation": query_filters.get("target_api"),
+                 "account": query_filters.get("principal")},
+            )
+            return {**result, "window": window}
+        else:
+            table = "topology_principal_edges_5m" if query_filters.get("principal") else "topology_api_edges_5m"
+            rows = self._query_records(table, [], window["start_ms"], window["end_ms"], query_filters)
+            metrics = bandwidth_fields(
+                rows[0].get("request_bytes") if rows else 0,
+                rows[0].get("response_bytes") if rows else 0,
+                window["duration_seconds"],
+            )
+            series = self._series(table, query_filters, window)
+
+        return {"metrics": metrics, "series": series, "window": window, "backend": self.backend}
+
     def api_metrics(self, api: str, window: Dict[str, Any], service: Optional[str] = None) -> Dict[str, Any]:
         api = canonical_api(api, service or "")
         filters = {"target_api": api}
@@ -776,25 +817,58 @@ class InteractiveTopologyRepository:
             args.append(value)
         with get_connection(self.db_path) as db:
             rows = db.execute(f"SELECT bucket_start, sum(request_count) request_count, max(p95_latency_ms) p95_latency_ms, sum(error_count) error_count, sum(request_bytes) request_bytes, sum(response_bytes) response_bytes FROM {table} FINAL WHERE {' AND '.join(clauses)} GROUP BY bucket_start ORDER BY bucket_start", args).fetchall()
-        series = []
+        byte_rows = []
         for row in rows:
-            requests = _safe_int(row["request_count"])
-            series.append({
-                "bucket_start": _safe_int(row["bucket_start"]),
+            byte_rows.append({
                 "timestamp_ms": _safe_int(row["bucket_start"]) * 1000,
-                "tps": round(requests / 300.0, 3),
+                "request_bytes": row["request_bytes"],
+                "response_bytes": row["response_bytes"],
+            })
+        return self._merge_metric_series(window, filters, byte_rows)
+
+    def _merge_metric_series(
+        self, window: Dict[str, Any], filters: Dict[str, Any], byte_rows: List[Dict[str, Any]],
+    ) -> List[Dict[str, Any]]:
+        """Use metric_buckets for every transaction curve and byte rollups for bandwidth."""
+        from backend.app.repositories.aggregate_repository import AggregateRepository
+
+        metric_rows = AggregateRepository(self.db_path).query_series(
+            window["start_ms"] // 1000, (window["end_ms"] + 999) // 1000,
+            bucket_size=300, service=filters.get("target_service"),
+            principal=filters.get("principal"), caller=filters.get("caller_service"),
+            operation=filters.get("target_api"),
+        )
+        metrics_by_time: Dict[int, Dict[str, Any]] = {}
+        for row in metric_rows:
+            timestamp_ms = (_safe_int(row["bucket_start"]) // 300) * 300_000
+            metric = metrics_by_time.setdefault(timestamp_ms, {"requests": 0, "errors": 0, "latency_p95": 0.0})
+            metric["requests"] += _safe_int(row.get("requests"))
+            metric["errors"] += _safe_int(row.get("errors"))
+            metric["latency_p95"] = max(metric["latency_p95"], _safe_float(row.get("latency_p95")))
+        bytes_by_time = {
+            (_safe_int(row["timestamp_ms"]) // 300_000) * 300_000: row for row in byte_rows
+        }
+        series = []
+        for timestamp_ms in sorted(metrics_by_time.keys() | bytes_by_time.keys()):
+            metric = metrics_by_time.get(timestamp_ms) or {}
+            byte_row = bytes_by_time.get(timestamp_ms) or {}
+            requests = _safe_int(metric.get("requests"))
+            errors = _safe_int(metric.get("errors"))
+            series.append({
+                "bucket_start": timestamp_ms // 1000,
+                "timestamp_ms": timestamp_ms,
+                "tps": requests / 300.0,
                 "request_count": requests,
-                "p95_latency_ms": _safe_float(row["p95_latency_ms"]),
-                "error_rate": round(_safe_int(row["error_count"]) / max(1, requests), 4),
-                **bandwidth_fields(row["request_bytes"], row["response_bytes"], 300),
+                "error_count": errors,
+                "p95_latency_ms": _safe_float(metric.get("latency_p95")),
+                "error_rate": round(errors / max(1, requests), 4),
+                **bandwidth_fields(byte_row.get("request_bytes"), byte_row.get("response_bytes"), 300),
             })
         return series
 
     def principal_ips(self, principal: str, window: Dict[str, Any], page_size: int, cursor: Optional[str], service: Optional[str] = None, api: Optional[str] = None, filter_name: str = "all") -> Dict[str, Any]:
         principal = canonical_principal(principal)
         decoded = decode_cursor(cursor)
-        if self.backend == "elasticsearch":
-            return self._es_ips(principal, window, page_size, decoded, service, api, filter_name)
         clauses = ["bucket_start >= ?", "bucket_start < ?", "principal = ?"]
         args: List[Any] = [window["start_ms"] // 1000, window["end_ms"] // 1000, principal]
         if service:
@@ -946,56 +1020,32 @@ class InteractiveTopologyRepository:
         return {"window": window, "parent": parent, "nodes": nodes, "edges": [], "changes": {"baseline": "insufficient_history", "new_nodes": [], "disappeared_nodes": []}, "anonymous": {"total_requests": 0, "identified_requests": 0, "anonymous_requests": 0, "identified_request_percentage": 0.0, "anonymous_request_percentage": 0.0, "anonymous_tps": 0.0, "top_services": [], "top_apis": []}, "backend": self.backend}
 
     def _es_series(self, window: Dict[str, Any], filters: Dict[str, Any]) -> List[Dict[str, Any]]:
-        interval, interval_seconds = "5m", 300
-        body = {
-            "size": 0,
-            "runtime_mappings": self._es_runtime(),
-            "query": self._es_base_query(window, filters),
-            "aggs": {
-                "timeline": {
-                    "date_histogram": {"field": "@timestamp", "fixed_interval": interval, "min_doc_count": 1},
-                    "aggs": {
-                        "latency": {"percentiles": {"field": "topology.duration_ms", "percents": [95]}},
-                        "request_bytes": {"sum": {"field": "topology.request_bytes"}},
-                        "response_bytes": {"sum": {"field": "topology.response_bytes"}},
-                        "errors": {"filter": {"bool": {"should": [
-                            {"range": {"http.response.status_code": {"gte": 400}}},
-                            {"range": {"http_status": {"gte": 400}}},
-                            {"term": {"event.outcome": "failure"}},
-                        ], "minimum_should_match": 1}}},
-                    },
-                }
-            },
-        }
-        result = self._es_request(body) or {}
-        buckets = (((result.get("aggregations") or {}).get("timeline") or {}).get("buckets") or [])
-        series = []
-        for bucket in buckets:
-            timestamp_ms = _safe_int(bucket.get("key"))
-            request_count = _safe_int(bucket.get("doc_count"))
-            errors = _safe_int((bucket.get("errors") or {}).get("doc_count"))
-            p95 = ((bucket.get("latency") or {}).get("values") or {}).get("95.0", 0.0)
-            series.append({
-                "bucket_start": timestamp_ms // 1000,
-                "timestamp_ms": timestamp_ms,
-                "tps": round(request_count / interval_seconds, 3),
-                "request_count": request_count,
-                "p95_latency_ms": _safe_float(p95),
-                "error_rate": round(errors / max(1, request_count), 4),
-                **bandwidth_fields(
-                    (bucket.get("request_bytes") or {}).get("value", 0),
-                    (bucket.get("response_bytes") or {}).get("value", 0),
-                    interval_seconds,
-                ),
-            })
-        return series
+        from backend.app.repositories.elasticsearch_bandwidth_repository import ElasticsearchBandwidthRepository
+
+        start_ms, end_ms = window["start_ms"], window["end_ms"]
+        bandwidth_rows = ElasticsearchBandwidthRepository().query(start_ms, end_ms, {
+            "service": filters.get("target_service"),
+            "account": filters.get("principal"),
+            "operation": filters.get("target_api"),
+        }).get("series", [])
+        return self._merge_metric_series(window, filters, bandwidth_rows)
 
     def _es_detail(self, kind: str, value: str, api: str, window: Dict[str, Any]) -> Dict[str, Any]:
         filters = {"target_service": value} if kind == "service" else {"principal": value} if kind == "principal" else {"target_api": api}
-        dimensions = ["target_service"] if kind == "service" else ["principal"] if kind == "principal" else ["target_api"]
-        rows = self._es_rows(dimensions, window, filters)
-        metrics = self._metrics(rows[0] if rows else None, window["duration_seconds"])
-        return {"entity": {"name": value if kind != "api" else api, "type": kind, "service": value if kind == "service" else None, "api": api if kind == "api" else None, "principal": value if kind == "principal" else None}, "metrics": metrics, "series": self._es_series(window, filters), "changes": {"baseline": "insufficient_history"}, "anonymous": {}, "backend": self.backend}
+        if kind == "api" and value:
+            filters["target_service"] = value
+        series = self._es_series(window, filters)
+        requests = sum(point["request_count"] for point in series)
+        errors = sum(point["error_count"] for point in series)
+        request_bytes = sum(point["request_bytes"] for point in series)
+        response_bytes = sum(point["response_bytes"] for point in series)
+        summary = {
+            "request_count": requests, "error_count": errors,
+            "p95_latency_ms": max((point["p95_latency_ms"] for point in series), default=0),
+            "request_bytes": request_bytes, "response_bytes": response_bytes,
+        }
+        metrics = self._metrics(summary, window["duration_seconds"])
+        return {"entity": {"name": value if kind != "api" else api, "type": kind, "service": value if kind in ("service", "api") else None, "api": api if kind == "api" else None, "principal": value if kind == "principal" else None}, "metrics": metrics, "series": series, "changes": {"baseline": "insufficient_history"}, "anonymous": {}, "backend": self.backend}
 
     def _es_ips(self, principal: str, window: Dict[str, Any], page_size: int, cursor: Optional[List[str]], service: Optional[str], api: Optional[str], filter_name: str) -> Dict[str, Any]:
         # Runtime composite IP aggregation is intentionally bounded. It uses

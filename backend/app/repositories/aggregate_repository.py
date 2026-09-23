@@ -64,7 +64,9 @@ class AggregateRepository:
           SUM(error_count) as errors,
           ROUND(CASE WHEN SUM(request_count) > 0 THEN SUM(error_count) * 1.0 / SUM(request_count) ELSE 0 END, 4) as error_rate,
           ROUND(CASE WHEN SUM(request_count) > 0 THEN SUM(latency_sum) / SUM(request_count) ELSE 0 END, 2) as latency_avg,
-          ROUND(MAX(latency_p95), 2) as latency_p95
+          ROUND(MAX(latency_p50), 2) as latency_p50,
+          ROUND(MAX(latency_p95), 2) as latency_p95,
+          ROUND(MAX(latency_p99), 2) as latency_p99
         FROM metric_buckets FINAL
         WHERE {where}
         GROUP BY bucket_start

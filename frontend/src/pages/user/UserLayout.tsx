@@ -53,30 +53,28 @@ export function UserLayout() {
   } = useQuery({
     queryKey: ["user-detail", principal, filters],
     queryFn: () =>
-      api<any>(`/api/v1/users/${encodeURIComponent(principal)}?${queryString(filters)}`),
+      api<any>(`/api/v1/principals/${encodeURIComponent(principal)}?${queryString(filters)}`),
     enabled: !!principal,
   });
 
   // Fetch all users for quick switcher
   const { data: allUsers } = useQuery({
-    queryKey: ["users-list-quick"],
-    queryFn: () => api<any>(`/api/v1/users?limit=200`),
+    queryKey: ["users-list-quick", filters],
+    queryFn: () => api<any>(`/api/v1/principals?${queryString(filters, { limit: "200" })}`),
     staleTime: 60_000,
   });
 
-  // Keep the scoped TPS trend visible above every user workspace tab. The
-  // overview tab shares this query key, so this does not create a second
-  // request when the tab is mounted.
-  const { data: performance } = useQuery({
-    queryKey: ["user-performance", principal, filters],
+  // The scoped TPS trend reads the worker's retained five-minute rollups.
+  const { data: metricBuckets, isLoading: metricBucketsLoading } = useQuery({
+    queryKey: ["user-metric-buckets", principal, filters],
     queryFn: () =>
-      api<any>(`/api/v1/users/${encodeURIComponent(principal)}/performance?${queryString(filters)}`),
+      api<Array<{ bucket_start: number; requests: number }>>(`/api/v1/principals/${encodeURIComponent(principal)}/metrics?${queryString(filters, { bucket: "300" })}`),
     enabled: !!principal,
   });
-  const tpsSeries = (performance?.series || [])
-    .map((row: any) => ({
-      timestamp_ms: Number(row.timestamp_ms ?? Number(row.bucket_start ?? 0) * 1000),
-      tps: Number(row.tps ?? row.rps ?? 0),
+  const tpsSeries = (metricBuckets || [])
+    .map((row) => ({
+      timestamp_ms: Number(row.bucket_start) * 1000,
+      tps: Number(row.requests || 0) / 300,
     }))
     .filter((row: { timestamp_ms: number; tps: number }) => Number.isFinite(row.timestamp_ms) && row.timestamp_ms > 0);
 

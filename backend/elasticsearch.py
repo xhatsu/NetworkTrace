@@ -80,3 +80,85 @@ class ElasticsearchReader:
                     (json.dumps(cursor, separators=(",", ":")), int(time.time() * 1000)),
                 )
         return totals
+
+    def configure_retention(self, days: int | None = None) -> dict[str, Any]:
+        """Configure 7-day ILM policy, templates, and index settings on Elasticsearch cluster."""
+        if not self.url:
+            return {"status": "skipped", "message": "Elasticsearch not configured"}
+        retention_days = days if days is not None else settings.elasticsearch_retention_days
+        headers = {"Content-Type": "application/json"}
+        if self.api_key:
+            headers["Authorization"] = f"ApiKey {self.api_key}"
+        auth = (self.user, self.password) if not self.api_key and self.user and self.password else None
+
+        policy_name = f"tracescope-{retention_days}day-retention"
+        policy_body = {
+            "policy": {
+                "phases": {
+                    "delete": {
+                        "min_age": f"{retention_days}d",
+                        "actions": {
+                            "delete": {}
+                        }
+                    }
+                }
+            }
+        }
+        template_body = {
+            "index_patterns": ["apm-*", "traces-apm*", "tracescope-*"],
+            "template": {
+                "settings": {
+                    "index.lifecycle.name": policy_name
+                }
+            },
+            "priority": 200,
+        }
+        results: dict[str, Any] = {}
+        try:
+            with httpx.Client(base_url=self.url, verify=self.verify, timeout=30, headers=headers, auth=auth) as client:
+                r1 = client.put(f"/_ilm/policy/{policy_name}", json=policy_body)
+                results["policy"] = r1.status_code == 200
+                r2 = client.put(f"/_index_template/{policy_name}-template", json=template_body)
+                results["template"] = r2.status_code == 200
+                r3 = client.put(f"/_ilm/policy/apm-rollover-30-days", json=policy_body)
+                results["apm_policy_override"] = r3.status_code == 200
+                r4 = client.put(
+                    "/apm-*,tracescope-*/_settings?allow_no_indices=true&ignore_unavailable=true",
+                    json={"index": {"lifecycle.name": policy_name, "lifecycle.rollover_alias": None}},
+                )
+                results["applied_indices"] = r4.status_code == 200
+        except Exception as e:
+            results["error"] = str(e)
+        return results
+
+    def prune_expired_documents(self, days: int | None = None) -> dict[str, Any]:
+        """Prune documents older than retention window via asynchronous _delete_by_query."""
+        if not self.url:
+            return {"status": "skipped", "message": "Elasticsearch not configured"}
+        import time
+        retention_days = days if days is not None else settings.elasticsearch_retention_days
+        cutoff_ms = int(time.time() * 1000) - (retention_days * 86400 * 1000)
+        body = {
+            "query": {
+                "range": {
+                    "@timestamp": {
+                        "lt": cutoff_ms
+                    }
+                }
+            }
+        }
+        headers = {"Content-Type": "application/json"}
+        if self.api_key:
+            headers["Authorization"] = f"ApiKey {self.api_key}"
+        auth = (self.user, self.password) if not self.api_key and self.user and self.password else None
+        try:
+            with httpx.Client(base_url=self.url, verify=self.verify, timeout=30, headers=headers, auth=auth) as client:
+                resp = client.post(
+                    f"/{self.index}/_delete_by_query?conflicts=proceed&wait_for_completion=false",
+                    json=body,
+                )
+                if resp.status_code in (200, 202):
+                    return {"status": "success", "task": resp.json().get("task")}
+                return {"status": "error", "code": resp.status_code, "text": resp.text[:200]}
+        except Exception as e:
+            return {"status": "error", "message": str(e)}

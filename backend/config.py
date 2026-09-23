@@ -72,11 +72,13 @@ class Settings:
     storage_backend: str = os.getenv("OTEL_STORAGE_BACKEND", "clickhouse").lower()
     elasticsearch_url: str = os.getenv("OTEL_ES_URL", os.getenv("ELASTICSEARCH_URL", "")).rstrip("/")
     elasticsearch_index: str = os.getenv("OTEL_ES_INDEX", "apm-*,traces-apm*")
+    elasticsearch_bandwidth_index: str = os.getenv("OTEL_ES_BANDWIDTH_INDEX", "tracescope-bandwidth-5m-v1")
     elasticsearch_api_key: str = os.getenv("OTEL_ES_API_KEY", "")
     elasticsearch_user: str = os.getenv("OTEL_ES_USER", "")
     elasticsearch_password: str = os.getenv("OTEL_ES_PASSWORD", "")
     elasticsearch_verify_tls: bool = os.getenv("OTEL_ES_VERIFY_TLS", "false").lower() == "true"
     elasticsearch_timeout: float = float(os.getenv("OTEL_ES_TIMEOUT", "15.0"))
+    elasticsearch_retention_days: int = max(1, int(os.getenv("OTEL_ES_RETENTION_DAYS", "7")))
     demo_mode: bool = os.getenv("OTEL_DEMO_MODE", "true").lower() == "true"
     cors_origins: tuple[str, ...] = tuple(
         item.strip() for item in os.getenv(

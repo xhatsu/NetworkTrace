@@ -1261,22 +1261,24 @@ class UserRepository:
             # Time-series (adaptive bucket 60s, 300s, or 3600s)
             duration_h = max(0.1, ((end_ms or 0) - (start_ms or 0)) / 3600_000.0) if start_ms and end_ms else 24.0
             bucket_sec = 3600 if duration_h > 192.0 else (300 if duration_h > 36.0 else 60)
-            bucket_ms = bucket_sec * 1000
-
-            ts_params = [bucket_ms, bucket_ms, float(bucket_sec)] + params
+            source_bucket_sec = 300 if bucket_sec >= 300 else 60
+            series_where = "bucket_size = ? AND principal_name IN ('unknown', '-anonymous-', '')"
+            ts_params = [bucket_sec, bucket_sec, float(bucket_sec), source_bucket_sec]
+            if start_ms is not None and end_ms is not None:
+                series_where += " AND bucket_start >= ? AND bucket_start < ?"
+                ts_params.extend([start_ms // 1000, (end_ms + 999) // 1000])
             series_rows = db.execute(f"""
                 SELECT
-                    intDiv(timestamp_ms, ?) * ? as bucket_start,
-                    count() as requests,
-                    round(count() / ?, 2) as rps,
-                    countIf(http_status >= 200 AND http_status < 300) as s_2xx,
-                    countIf(http_status IN (401, 403)) as s_auth_fail,
-                    countIf(http_status >= 500 OR outcome = 'failure') as s_5xx,
-                    round(quantile(0.95)(duration_ms), 2) as latency_p95
-                FROM traces
-                WHERE {where}
-                GROUP BY bucket_start
-                ORDER BY bucket_start ASC
+                    intDiv(bucket_start, ?) * ? * 1000 as bucket_start_ms,
+                    sum(request_count) as requests,
+                    sum(request_count) / ? as rps,
+                    sum(request_count) - sum(error_count) as non_error_requests,
+                    sum(error_count) as error_requests,
+                    max(latency_p95) as latency_p95
+                FROM metric_buckets FINAL
+                WHERE {series_where}
+                GROUP BY bucket_start_ms
+                ORDER BY bucket_start_ms ASC
             """, ts_params).fetchall()
 
             series = []
@@ -1285,10 +1287,9 @@ class UserRepository:
                     "bucket_start": r[0],
                     "requests": r[1],
                     "rps": _clean(r[2]),
-                    "s_2xx": r[3],
-                    "s_auth_fail": r[4],
-                    "s_5xx": r[5],
-                    "latency_p95": _clean(r[6]),
+                    "non_error_requests": r[3],
+                    "error_requests": r[4],
+                    "latency_p95": _clean(r[5]),
                 })
 
             # Top target services

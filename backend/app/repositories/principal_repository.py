@@ -1,5 +1,6 @@
 """Query principal activity through aggregated dimensions, keeping identity pages responsive."""
 from __future__ import annotations
+import time
 from typing import Any, Dict, List, Optional
 from backend.app.repositories.db_context import get_connection
 
@@ -28,25 +29,6 @@ class PrincipalRepository:
                 LIMIT ?
             """, (start_sec, end_sec, limit)).fetchall()
 
-            # fallback to traces if metric_buckets empty
-            if not rows:
-                rows = db.execute("""
-                    SELECT
-                      principal_name,
-                      COUNT(*) as total_requests,
-                      SUM(CASE WHEN http_status >= 400 OR outcome = 'failure' THEN 1 ELSE 0 END) as total_errors,
-                      ROUND(SUM(CASE WHEN http_status >= 400 OR outcome = 'failure' THEN 1.0 ELSE 0 END) / COUNT(*), 4) as error_rate,
-                      ROUND(AVG(duration_ms), 2) as p95_latency,
-                      COUNT(DISTINCT target_service) as services_used,
-                      COUNT(DISTINCT operation) as operations_count,
-                      MAX(timestamp) as last_seen_sec
-                    FROM traces
-                    WHERE timestamp_ms >= ? AND timestamp_ms < ?
-                    GROUP BY principal_name
-                    ORDER BY total_requests DESC
-                    LIMIT ?
-                """, (start_sec * 1000, end_sec * 1000, limit)).fetchall()
-
             result = []
             for r in rows:
                 d = dict(r)
@@ -56,6 +38,10 @@ class PrincipalRepository:
 
     def get_principal_profile(self, principal_name: str, start_sec: int, end_sec: int) -> Optional[Dict[str, Any]]:
         with get_connection(self.db_path) as db:
+            metadata = db.execute(
+                "SELECT principal_type, last_seen, unique_sources FROM principals FINAL WHERE principal_name = ? LIMIT 1",
+                (principal_name,),
+            ).fetchone()
             # targets used
             targets = [dict(r) for r in db.execute("""
                 SELECT
@@ -107,13 +93,16 @@ class PrincipalRepository:
 
             total_reqs = sum(t["requests"] for t in targets)
             if total_reqs == 0 and not targets:
-                # check traces table
-                exists = db.execute("SELECT 1 FROM traces WHERE principal_name = ? LIMIT 1", (principal_name,)).fetchone()
-                if not exists:
-                    return None
+                return None
 
             return {
                 "principal_name": principal_name,
+                "principal_type": str(metadata["principal_type"]) if metadata else "unknown",
+                "status": "Active" if metadata and int(metadata["last_seen"] or 0) >= int(time.time() * 1000) - 15 * 60_000 else "Historical",
+                "unique_sources": int(metadata["unique_sources"] or 0) if metadata else 0,
+                "unique_targets": len(targets),
+                "unique_operations": len(operations),
+                "unique_callers": len(callers),
                 "targets": targets,
                 "operations": operations,
                 "callers": callers,

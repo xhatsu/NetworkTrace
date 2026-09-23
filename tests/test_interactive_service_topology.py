@@ -17,6 +17,7 @@ from backend.app.repositories.interactive_topology_repository import (
     encode_cursor,
 )
 from backend.app.repositories.trace_repository import TraceRepository
+from backend.app.repositories.principal_repository import PrincipalRepository
 from backend.app.repositories.user_repository import UserRepository
 from backend.app.services.aggregation import aggregate_traces
 from backend.app.services.normalization import classify_source_ip_role, normalize_otel_record
@@ -58,6 +59,19 @@ def test_topology_normalization_and_cursor_contracts():
         "bandwidth_bits_per_second": 80.0,
     }
     assert bandwidth_fields(-1, "invalid", 0)["bandwidth_bits_per_second"] == 0.0
+
+
+def test_principal_metrics_do_not_fall_back_to_raw_traces(tmp_path):
+    db_path = tmp_path / "principal-rollup-only.db"
+    StorageRepository(db_path).migrate()
+    trace = normalize_otel_record(_doc(901, "billing", "gateway", "POST /pay", "sale", "10.10.10.5"))
+    assert trace is not None
+    TraceRepository(str(db_path)).insert_traces([trace])
+    start_sec = trace.timestamp_ms // 1000 - 60
+    end_sec = start_sec + 120
+    repo = PrincipalRepository(str(db_path))
+    assert repo.list_principals(start_sec, end_sec) == []
+    assert repo.get_principal_profile("sale", start_sec, end_sec) is None
 
 
 def test_materialized_topology_has_metrics_evidence_anonymous_and_ip_status(tmp_path):
@@ -103,6 +117,12 @@ def test_materialized_topology_has_metrics_evidence_anonymous_and_ip_status(tmp_
     assert detail["metrics"]["bandwidth_bytes_per_second"] == 4.0
     assert detail["metrics"]["bandwidth_bits_per_second"] == 32.0
     assert detail["series"][0]["bandwidth_bytes_per_second"] == 8.0
+
+    dashboard_bandwidth = repo.bandwidth_metrics(window)
+    assert dashboard_bandwidth["metrics"]["bandwidth_bytes_per_second"] == 4.0
+    assert dashboard_bandwidth["series"][0]["bandwidth_bytes_per_second"] == 8.0
+    account_bandwidth = repo.bandwidth_metrics(window, {"account": "partner-a"})
+    assert account_bandwidth["metrics"]["bandwidth_bytes_per_second"] == 3.0
 
     apis = repo.service_apis("payment", window)
     assert apis["nodes"]
@@ -155,28 +175,30 @@ def test_topology_api_rejects_invalid_window_without_store_access():
     assert response.status_code == 422
 
 
-def test_elasticsearch_topology_series_always_uses_five_minute_buckets(tmp_path):
+def test_elasticsearch_topology_series_uses_worker_rollups_only(tmp_path, monkeypatch):
+    from backend.app.repositories.aggregate_repository import AggregateRepository
+    from backend.app.repositories.elasticsearch_bandwidth_repository import ElasticsearchBandwidthRepository
+
     repo = InteractiveTopologyRepository(str(tmp_path / "unused.db"))
-    captured = {}
+    captured = []
+    timestamp_ms = 1_789_699_800_000
+    def metric_query(_self, start, end, **filters):
+        captured.append((start, end, filters))
+        return [{"bucket_start": timestamp_ms // 1000, "requests": 600, "errors": 6, "latency_p95": 42}]
+    def bandwidth_query(_self, start, end, filters):
+        captured.append((start, end, filters))
+        return {"series": [{"timestamp_ms": timestamp_ms, "request_bytes": 3000, "response_bytes": 6000}]}
+    monkeypatch.setattr(AggregateRepository, "query_series", metric_query)
+    monkeypatch.setattr(ElasticsearchBandwidthRepository, "query", bandwidth_query)
+    repo._es_request = lambda _body: (_ for _ in ()).throw(AssertionError("raw APM query"))
+    series = repo._es_series({"start_ms": 1_789_000_000_000, "end_ms": 1_789_700_000_000, "duration_seconds": 700_000}, {"target_service": "payment"})
 
-    def fake_request(body):
-        captured.update(body)
-        return {"aggregations": {"timeline": {"buckets": [{
-            "key": 1_789_700_000_000,
-            "doc_count": 600,
-            "latency": {"values": {"95.0": 42.0}},
-            "errors": {"doc_count": 6},
-            "request_bytes": {"value": 3000},
-            "response_bytes": {"value": 6000},
-        }]}}}
-
-    repo._es_request = fake_request
-    series = repo._es_series({"start_ms": 1_789_000_000_000, "end_ms": 1_789_700_000_000, "duration_seconds": 700_000}, {})
-
-    histogram = captured["aggs"]["timeline"]["date_histogram"]
-    assert histogram["fixed_interval"] == "5m"
+    metric_call = next(call for call in captured if "bucket_size" in call[2])
+    bandwidth_call = next(call for call in captured if "bucket_size" not in call[2])
+    assert metric_call[2]["bucket_size"] == 300
+    assert metric_call[2]["service"] == "payment"
+    assert bandwidth_call[2]["service"] == "payment"
     assert series[0]["tps"] == 2.0
-    assert captured["aggs"]["timeline"]["aggs"]["request_bytes"]["sum"]["field"] == "topology.request_bytes"
     assert series[0]["total_bytes"] == 9000
     assert series[0]["bandwidth_bytes_per_second"] == 30.0
 
@@ -185,6 +207,7 @@ def test_topology_api_surface_is_bounded_and_backward_compatible():
     paths = [
         "/api/v1/topology/search?q=payment&window=7d",
         "/api/v1/topology/services?window=5m",
+        "/api/v1/topology/bandwidth?window=30d&from=1789700000000&to=1789700300000",
         "/api/v1/topology/services/payment/apis?window=5m",
         f"/api/v1/topology/services/payment/api-connections?api={quote('payment/charge', safe='')}&window=5m",
         f"/api/v1/topology/services/payment/apis/{quote('payment/charge', safe='')}/principals?window=5m",
@@ -206,7 +229,8 @@ def test_topology_api_surface_is_bounded_and_backward_compatible():
     assert all(response.status_code == 200 for response in responses), [response.text for response in responses]
     assert {"query", "items", "window"} <= responses[0].json().keys()
     assert {"nodes", "edges", "window"} <= responses[1].json().keys()
-    for response in responses[5:8]:
+    assert {"metrics", "series", "window", "backend"} <= responses[2].json().keys()
+    for response in responses[6:9]:
         assert {
             "request_bytes_per_second",
             "response_bytes_per_second",
