@@ -123,15 +123,18 @@ def test_worker_runs_elasticsearch_sync_when_configured():
     from backend.worker import run_jobs
 
     with patch("backend.elasticsearch.ElasticsearchReader.sync", return_value={"read": 5, "inserted": 5}) as mock_sync, \
+         patch("backend.worker.settings") as worker_settings, \
          patch("backend.worker.aggregate_traces", return_value={"1m_buckets": 1, "5m_buckets": 1, "service_edges": 0, "principal_edges": 0}), \
          patch("backend.worker._run_changed_baselines", return_value=0), \
          patch("backend.worker._run_revised_anomalies", return_value=[]), \
          patch("backend.worker.process_principal_intelligence", return_value={"processed": 0, "changes": 0}), \
          patch.dict("os.environ", {"OTEL_ES_URL": "http://127.0.0.1:32073"}):
 
+        worker_settings.clickhouse_only_agent_traces = False
+        worker_settings.analytics_stage_budget_seconds = 60
+
         result = run_jobs()
         assert "elasticsearch_read" in result
         assert result["elasticsearch_read"] == 5
         assert result["elasticsearch_inserted"] == 5
         mock_sync.assert_called_once()
-

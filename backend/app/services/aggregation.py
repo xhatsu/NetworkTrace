@@ -18,6 +18,7 @@ FIVE_MINUTES_MS = 300_000
 AGGREGATION_SLICE_MS = 6 * 60 * 60 * 1000
 CURSOR_BATCH_SIZE = 10_000
 ZERO_UUID = "00000000-0000-0000-0000-000000000000"
+METRIC_BUCKET_BYTES_SCHEMA_VERSION = 2
 log = logging.getLogger("tracescope-hub")
 
 _BUCKET_AGGREGATION_SQL = """
@@ -27,13 +28,17 @@ SELECT
   COALESCE(caller_service, '') AS caller_service,
   target_service,
   COALESCE(principal_name, 'unknown') AS principal_name,
-  operation,
+  COALESCE(nullIf(operation_key, ''), operation) AS operation_dimension,
   count() AS request_count,
   countIf(http_status >= 400 OR outcome = 'failure') AS error_count,
   sum(duration_ms) AS latency_sum,
   avg(duration_ms) AS latency_avg,
   min(duration_ms) AS latency_min,
   max(duration_ms) AS latency_max,
+  sum(toUInt64(ifNull(request_bytes, 0))) AS request_bytes_sum,
+  sum(toUInt64(ifNull(response_bytes, 0))) AS response_bytes_sum,
+  countIf(isNotNull(request_bytes)) AS request_bytes_samples,
+  countIf(isNotNull(response_bytes)) AS response_bytes_samples,
   -- ClickHouse quantilesExact selects floor(n*q) with zero-based indexing.
   -- The immediately preceding Float64 levels preserve the established Python
   -- nearest-rank ceil(n*q)-1 result when n*q is an exact integer.
@@ -45,7 +50,7 @@ SELECT
 FROM traces
 WHERE timestamp_ms >= {start_ms:Int64} AND timestamp_ms < {end_ms:Int64}
 GROUP BY
-  bucket_start, bucket_size, caller_service, target_service, principal_name, operation
+  bucket_start, bucket_size, caller_service, target_service, principal_name, operation_dimension
 """
 
 _SHADOW_AGGREGATION_SQL = """
@@ -166,7 +171,7 @@ def _metric_bucket(row: Dict[str, Any]) -> MetricBucket:
         caller_service=row["caller_service"],
         target_service=row["target_service"],
         principal_name=row["principal_name"],
-        operation=row["operation"],
+        operation=row["operation_dimension"],
         request_count=int(row["request_count"]),
         error_count=int(row["error_count"]),
         latency_sum=round(float(row["latency_sum"]), 2),
@@ -176,6 +181,10 @@ def _metric_bucket(row: Dict[str, Any]) -> MetricBucket:
         latency_p50=round(float(p50), 2),
         latency_p95=round(float(p95), 2),
         latency_p99=round(float(p99), 2),
+        request_bytes=int(row.get("request_bytes_sum") or 0),
+        response_bytes=int(row.get("response_bytes_sum") or 0),
+        request_bytes_samples=int(row.get("request_bytes_samples") or 0),
+        response_bytes_samples=int(row.get("response_bytes_samples") or 0),
     )
 
 
@@ -329,6 +338,7 @@ def _run_explicit_window(start_ms: int, end_ms: int, db_path: Optional[str]) -> 
 
 def _start_or_resume_bootstrap(db_path: Optional[str]) -> Optional[Dict[str, Any]]:
     start_time_ms = settings.worker_start_time_ms
+    reaggregate_metric_buckets = False
     with get_connection(db_path) as db:
         checkpoint_row = db.execute(
             "SELECT cursor_json FROM checkpoints FINAL WHERE source='aggregation_cursor'"
@@ -337,6 +347,15 @@ def _start_or_resume_bootstrap(db_path: Optional[str]) -> Optional[Dict[str, Any
             try:
                 checkpoint = json.loads(checkpoint_row[0])
             except (TypeError, ValueError, json.JSONDecodeError):
+                checkpoint = {}
+            # Existing buckets predate measured-byte columns and canonical API
+            # operation dimensions. Re-bootstrap retained source rows once so
+            # replacement buckets have both; preserve this version thereafter.
+            reaggregate_metric_buckets = (
+                checkpoint.get("metric_bucket_bytes_schema_version")
+                != METRIC_BUCKET_BYTES_SCHEMA_VERSION
+            )
+            if reaggregate_metric_buckets:
                 checkpoint = {}
             if checkpoint.get("mode") == "bootstrap":
                 if start_time_ms is not None and start_time_ms > int(checkpoint.get("next_slice_start_ms", 0)):
@@ -366,6 +385,16 @@ def _start_or_resume_bootstrap(db_path: Optional[str]) -> Optional[Dict[str, Any
 
         bounds = db.execute(f"SELECT count(), MIN(timestamp_ms), MAX(timestamp_ms) FROM traces {where_clause}", params).fetchone()
         row_count = int(bounds[0]) if bounds else 0
+        if row_count and reaggregate_metric_buckets:
+            # New bucket dimensions and byte totals replace the overlapping old
+            # rows. Keep older bucket history where the one-day trace TTL no
+            # longer leaves source rows available for a rebuild.
+            clear_start_ms, clear_end_ms = _aligned_window(int(bounds[1]), int(bounds[2]) + 1)
+            db.execute(
+                "DELETE FROM metric_buckets WHERE bucket_size IN (60, 300) "
+                "AND bucket_start >= ? AND bucket_start < ?",
+                (clear_start_ms // 1000, clear_end_ms // 1000),
+            )
         if not bounds or row_count == 0 or bounds[1] is None or int(bounds[1]) == 0:
             # If start_time_ms is configured but no traces exist at or after it yet,
             # checkpoint at the current latest trace so that all past data is skipped.
@@ -380,6 +409,7 @@ def _start_or_resume_bootstrap(db_path: Optional[str]) -> Optional[Dict[str, Any
                         "ingest_order": int(latest[0]),
                         "row_uid": str(latest[1]),
                         "last_ts": start_time_ms,
+                        "metric_bucket_bytes_schema_version": METRIC_BUCKET_BYTES_SCHEMA_VERSION,
                     }
                     _save_checkpoint(checkpoint, db_path)
                     return checkpoint
@@ -400,6 +430,7 @@ def _start_or_resume_bootstrap(db_path: Optional[str]) -> Optional[Dict[str, Any
         "bootstrap_end_ms": bootstrap_end,
         "high_water_ingest_order": int(high_water[0]),
         "high_water_row_uid": str(high_water[1]),
+        "metric_bucket_bytes_schema_version": METRIC_BUCKET_BYTES_SCHEMA_VERSION,
     }
     _save_checkpoint(checkpoint, db_path)
     return checkpoint
@@ -418,6 +449,7 @@ def _run_bootstrap(checkpoint: Dict[str, Any], db_path: Optional[str]) -> Dict[s
         "ingest_order": int(checkpoint["high_water_ingest_order"]),
         "row_uid": str(checkpoint["high_water_row_uid"]),
         "last_ts": bootstrap_end,
+        "metric_bucket_bytes_schema_version": METRIC_BUCKET_BYTES_SCHEMA_VERSION,
     }
     _save_checkpoint(incremental_checkpoint, db_path)
     checkpoint.clear()

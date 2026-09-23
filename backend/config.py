@@ -70,9 +70,8 @@ class Settings:
     )
     # Storage Backend: 'clickhouse' (default for local testbed) or 'elasticsearch' / 'elk'
     storage_backend: str = os.getenv("OTEL_STORAGE_BACKEND", "clickhouse").lower()
-    elasticsearch_url: str = os.getenv("OTEL_ES_URL", os.getenv("ELASTICSEARCH_URL", "")).rstrip("/")
+    elasticsearch_url: str = os.getenv("OTEL_ES_URL", os.getenv("ELASTICSEARCH_URL", "http://127.0.0.1:32073")).rstrip("/")
     elasticsearch_index: str = os.getenv("OTEL_ES_INDEX", "apm-*,traces-apm*")
-    elasticsearch_bandwidth_index: str = os.getenv("OTEL_ES_BANDWIDTH_INDEX", "tracescope-bandwidth-5m-v1")
     elasticsearch_api_key: str = os.getenv("OTEL_ES_API_KEY", "")
     elasticsearch_user: str = os.getenv("OTEL_ES_USER", "")
     elasticsearch_password: str = os.getenv("OTEL_ES_PASSWORD", "")

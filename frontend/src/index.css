@@ -15,6 +15,7 @@ html {
   font-synthesis: none;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+  --chart-line-width: 1.25px;
   --theme-canvas: #0b0c0e;
   --theme-sidebar: #111217;
   --theme-surface: #111217;
@@ -258,6 +259,13 @@ select {
 .recharts-cartesian-grid-line {
   stroke: var(--theme-grid);
 }
+/* Keep time-series peaks legible across Line, Area, and composed charts. */
+.recharts-line-curve,
+.recharts-area-curve,
+.time-series-curve {
+  stroke-width: var(--chart-line-width);
+}
+
 
 .recharts-tooltip-wrapper {
   outline: none;

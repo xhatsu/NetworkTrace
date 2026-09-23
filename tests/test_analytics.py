@@ -270,8 +270,8 @@ def test_five_minute_percentiles_use_raw_samples(tmp_path):
     assert tuple(row) == (1.0, 1.0, 1.0)
 
 
-def _trace_at(timestamp: str, suffix: str):
-    return normalize_otel_record({"_source": {
+def _trace_at(timestamp: str, suffix: str, request_bytes=None, response_bytes=None):
+    document = {
         "@timestamp": timestamp,
         "trace": {"id": f"trace-{suffix}"},
         "transaction": {
@@ -281,7 +281,43 @@ def _trace_at(timestamp: str, suffix: str):
         },
         "service": {"name": "incremental-service"},
         "span": {"kind": "server"},
-    }})
+    }
+    if request_bytes is not None:
+        document["request_bytes"] = request_bytes
+    if response_bytes is not None:
+        document["response_bytes"] = response_bytes
+    return normalize_otel_record({"_source": document})
+
+
+def test_aggregation_materializes_measured_bytes_in_both_bucket_sizes(tmp_path):
+    from backend.app.repositories.aggregate_repository import AggregateRepository
+
+    db_path = tmp_path / "metric-bucket-bytes.db"
+    StorageRepository(db_path).migrate()
+    TraceRepository(str(db_path)).insert_traces([
+        _trace_at("2026-01-01T00:01:00Z", "byte-first", request_bytes=0, response_bytes=120),
+        _trace_at("2026-01-01T00:01:30Z", "byte-second", response_bytes=60),
+    ])
+
+    result = aggregate_traces(db_path=str(db_path))
+    assert result["1m_buckets"] == 1
+    assert result["5m_buckets"] == 1
+    minute = AggregateRepository(str(db_path)).query_series(
+        1767225660, 1767225720, bucket_size=60, service="incremental-service",
+    )[0]
+    five_minutes = AggregateRepository(str(db_path)).query_series(
+        1767225600, 1767225900, bucket_size=300, service="incremental-service",
+    )[0]
+    api_series = AggregateRepository(str(db_path)).query_series(
+        1767225600, 1767225900, bucket_size=300, service="incremental-service",
+        operation="incremental-service/incremental",
+    )
+    assert len(api_series) == 1
+    for row in (minute, five_minutes):
+        assert row["request_bytes"] == 0
+        assert row["response_bytes"] == 180
+        assert row["request_bytes_samples"] == 1
+        assert row["response_bytes_samples"] == 2
 
 
 def test_aggregation_cursor_recomputes_late_arriving_complete_bucket(tmp_path):

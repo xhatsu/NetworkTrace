@@ -18,6 +18,9 @@ BANDWIDTH_FIELDS = (
     "response_bytes_per_second",
     "bandwidth_bytes_per_second",
     "bandwidth_bits_per_second",
+    "request_bytes_samples",
+    "response_bytes_samples",
+    "bandwidth_available",
 )
 
 

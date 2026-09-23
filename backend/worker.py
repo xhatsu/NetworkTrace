@@ -143,7 +143,6 @@ def _run_elasticsearch_sync(db_path=None) -> dict:
                    else {"status": "aggregate_only", "read": 0, "inserted": 0})
     metrics = (_run_elasticsearch_metrics(db_path) if settings.clickhouse_only_agent_traces
                else {"status": "clickhouse_trace_aggregation"})
-    bandwidth = _run_elasticsearch_bandwidth(db_path)
     retention = reader.prune_expired_documents()
     state = _checkpoint("worker_elasticsearch_sync", db_path)
     _save_stage_checkpoint("worker_elasticsearch_sync", {**state,
@@ -152,11 +151,12 @@ def _run_elasticsearch_sync(db_path=None) -> dict:
         "inserted": sync_result.get("inserted", 0),
         "retention": retention,
     }, db_path)
-    return {**sync_result, "metrics": metrics, "bandwidth": bandwidth, "retention": retention}
+    return {**sync_result, "metrics": metrics, "retention": retention}
 
 
 def _run_elasticsearch_metrics(db_path=None) -> dict:
     """Backfill and refresh transaction buckets without copying application traces."""
+    from .app.repositories.aggregate_repository import AggregateRepository
     from .app.repositories.elasticsearch_metric_repository import ElasticsearchMetricRepository
 
     source = "worker_elasticsearch_sync"
@@ -166,6 +166,19 @@ def _run_elasticsearch_metrics(db_path=None) -> dict:
     complete_end = (int(time.time() * 1000) // bucket_ms) * bucket_ms
     historical_start = max(complete_end - 7 * 86400 * 1000, int(settings.worker_start_time_ms or 0))
     repository = ElasticsearchMetricRepository(db_path)
+
+    # Byte fields and canonical API operation dimensions were added after earlier
+    # transaction buckets may already have been marked live. Revisit the retained
+    # window once so they are replaced without a separate bandwidth index/worker.
+    bytes_schema_version = 2
+    if state.get("bytes_schema_version") != bytes_schema_version:
+        AggregateRepository(db_path).delete_window(historical_start // 1000, complete_end // 1000)
+        state = {
+            "mode": "backfill",
+            "cursor_ms": complete_end,
+            "grain": 300,
+            "bytes_schema_version": bytes_schema_version,
+        }
 
     # Keep fresh minutes visible while the historical cursor moves backward.
     live_pending = state.get("live_pending") or {}
@@ -196,12 +209,18 @@ def _run_elasticsearch_metrics(db_path=None) -> dict:
     end_ms = min(int(state.get("cursor_ms") or complete_end), complete_end)
     start_ms = max(historical_start, end_ms - 6 * 3600 * 1000)
     if start_ms >= end_ms:
-        state = {"mode": "live", "last_run_ms": int(time.time() * 1000)}
+        state = {
+            "mode": "live", "last_run_ms": int(time.time() * 1000),
+            "bytes_schema_version": bytes_schema_version,
+        }
         _save_stage_checkpoint(source, {**stage_state, "metrics": state}, db_path)
         return {"status": "live", "complete": True}
     grain = int(state.get("grain") or 300)
     result = repository.materialize_window(start_ms, end_ms, grain, state.get("after_key"))
-    next_state = {"mode": "backfill", "cursor_ms": end_ms, "grain": grain}
+    next_state = {
+        "mode": "backfill", "cursor_ms": end_ms, "grain": grain,
+        "bytes_schema_version": bytes_schema_version,
+    }
     if result["complete"]:
         if grain == 300:
             next_state["grain"] = 60
@@ -209,84 +228,13 @@ def _run_elasticsearch_metrics(db_path=None) -> dict:
             next_state["grain"] = 300
             next_state["cursor_ms"] = start_ms
             if start_ms <= historical_start:
-                next_state = {"mode": "live"}
+                next_state = {"mode": "live", "bytes_schema_version": bytes_schema_version}
     else:
         next_state["after_key"] = result["after_key"]
     next_state["last_run_ms"] = int(time.time() * 1000)
     _save_stage_checkpoint(source, {**stage_state, "metrics": next_state}, db_path)
     return {**result, "status": "complete" if result["complete"] else "continuing",
             "grain": grain, "window_start_ms": start_ms, "window_end_ms": end_ms}
-
-
-def _run_elasticsearch_bandwidth(db_path=None) -> dict:
-    """Advance one bounded ELK bandwidth window, newest history first."""
-    from .app.repositories.elasticsearch_bandwidth_repository import (
-        BUCKET_MS, ElasticsearchBandwidthRepository,
-    )
-
-    source = "worker_elasticsearch_sync"
-    stage_state = _checkpoint(source, db_path)
-    state = stage_state.get("bandwidth") or {}
-    complete_end = (int(time.time() * 1000) // BUCKET_MS) * BUCKET_MS
-    historical_start = max(
-        complete_end - 30 * 86400 * 1000,
-        int(settings.worker_start_time_ms or 0),
-    )
-    pending = state.get("pending") or {}
-    mode = str(state.get("mode") or "backfill")
-    repository = ElasticsearchBandwidthRepository()
-    # Backfill can take many cycles; keep the most recent complete buckets
-    # fresh in the same stage while its historical cursor moves backward.
-    if mode == "backfill":
-        live_pending = state.get("live_pending") or {}
-        live_start = int(live_pending.get("start_ms") or max(historical_start, complete_end - 2 * BUCKET_MS))
-        live_end = int(live_pending.get("end_ms") or complete_end)
-        live_result = repository.materialize_window(live_start, live_end, live_pending.get("after_key"))
-        if not live_result["complete"]:
-            _save_stage_checkpoint(source, {**stage_state, "bandwidth": {**state,
-                "live_pending": {"start_ms": live_start, "end_ms": live_end,
-                                 "after_key": live_result["after_key"]}}}, db_path)
-            return {**live_result, "status": "continuing_recent_window",
-                    "window_start_ms": live_start, "window_end_ms": live_end}
-        state = {key: value for key, value in state.items() if key != "live_pending"}
-    if pending:
-        start_ms = int(pending["start_ms"])
-        end_ms = int(pending["end_ms"])
-        after_key = pending.get("after_key")
-    elif mode == "backfill":
-        end_ms = min(int(state.get("cursor_ms") or complete_end), complete_end)
-        start_ms = max(historical_start, end_ms - 6 * 3600 * 1000)
-        after_key = None
-    else:
-        cursor_ms = int(state.get("cursor_ms") or complete_end)
-        start_ms = max(historical_start, cursor_ms - 2 * BUCKET_MS)
-        end_ms = min(complete_end, start_ms + 6 * 3600 * 1000)
-        after_key = None
-
-    if start_ms >= end_ms:
-        if mode == "backfill":
-            _save_stage_checkpoint(source, {**stage_state,
-                "bandwidth": {"mode": "live", "cursor_ms": complete_end - 2 * BUCKET_MS}}, db_path)
-        return {"status": "up_to_date", "documents": 0, "pages": 0}
-
-    result = repository.materialize_window(start_ms, end_ms, after_key)
-    next_state: dict = {"mode": mode}
-    if result["complete"]:
-        if mode == "backfill":
-            next_state["cursor_ms"] = start_ms
-            if start_ms <= historical_start:
-                next_state = {"mode": "live", "cursor_ms": complete_end - 2 * BUCKET_MS}
-        else:
-            next_state["cursor_ms"] = end_ms
-    else:
-        next_state["cursor_ms"] = int(state.get("cursor_ms") or complete_end)
-        next_state["pending"] = {
-            "start_ms": start_ms, "end_ms": end_ms, "after_key": result["after_key"],
-        }
-    next_state["last_run_ms"] = int(time.time() * 1000)
-    _save_stage_checkpoint(source, {**stage_state, "bandwidth": next_state}, db_path)
-    return {**result, "status": "complete" if result["complete"] else "continuing",
-            "window_start_ms": start_ms, "window_end_ms": end_ms}
 
 
 def run_jobs(db_path=None) -> dict[str, Any]:
@@ -324,7 +272,6 @@ def run_jobs(db_path=None) -> dict[str, Any]:
             result["elasticsearch_read"] = es_sync.get("read", 0)
             result["elasticsearch_inserted"] = es_sync.get("inserted", 0)
             result["elasticsearch_metrics"] = es_sync.get("metrics", {"status": es_sync.get("status")})
-            result["elasticsearch_bandwidth"] = es_sync.get("bandwidth", {"status": es_sync.get("status")})
     except Exception as exc:
         with db_transaction(db_path) as db:
             db.execute(

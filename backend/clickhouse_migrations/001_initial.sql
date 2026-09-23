@@ -80,6 +80,10 @@ CREATE TABLE IF NOT EXISTS metric_buckets (
     latency_p50 Float64 DEFAULT 0.0,
     latency_p95 Float64 DEFAULT 0.0,
     latency_p99 Float64 DEFAULT 0.0,
+    request_bytes UInt64 DEFAULT 0,
+    response_bytes UInt64 DEFAULT 0,
+    request_bytes_samples UInt64 DEFAULT 0,
+    response_bytes_samples UInt64 DEFAULT 0,
     created_at UInt64
 ) ENGINE = ReplacingMergeTree(created_at)
 PARTITION BY toYYYYMM(toDateTime(bucket_start))

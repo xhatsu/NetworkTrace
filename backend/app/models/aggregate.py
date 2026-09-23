@@ -19,3 +19,7 @@ class MetricBucket(BaseModel):
     latency_p50: float = 0.0
     latency_p95: float = 0.0
     latency_p99: float = 0.0
+    request_bytes: int = 0
+    response_bytes: int = 0
+    request_bytes_samples: int = 0
+    response_bytes_samples: int = 0

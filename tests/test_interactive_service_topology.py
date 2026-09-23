@@ -177,27 +177,23 @@ def test_topology_api_rejects_invalid_window_without_store_access():
 
 def test_elasticsearch_topology_series_uses_worker_rollups_only(tmp_path, monkeypatch):
     from backend.app.repositories.aggregate_repository import AggregateRepository
-    from backend.app.repositories.elasticsearch_bandwidth_repository import ElasticsearchBandwidthRepository
 
     repo = InteractiveTopologyRepository(str(tmp_path / "unused.db"))
     captured = []
     timestamp_ms = 1_789_699_800_000
     def metric_query(_self, start, end, **filters):
         captured.append((start, end, filters))
-        return [{"bucket_start": timestamp_ms // 1000, "requests": 600, "errors": 6, "latency_p95": 42}]
-    def bandwidth_query(_self, start, end, filters):
-        captured.append((start, end, filters))
-        return {"series": [{"timestamp_ms": timestamp_ms, "request_bytes": 3000, "response_bytes": 6000}]}
+        return [{"bucket_start": timestamp_ms // 1000, "requests": 600, "errors": 6,
+                 "latency_p95": 42, "request_bytes": 3000, "response_bytes": 6000,
+                 "request_bytes_samples": 2, "response_bytes_samples": 2}]
     monkeypatch.setattr(AggregateRepository, "query_series", metric_query)
-    monkeypatch.setattr(ElasticsearchBandwidthRepository, "query", bandwidth_query)
     repo._es_request = lambda _body: (_ for _ in ()).throw(AssertionError("raw APM query"))
     series = repo._es_series({"start_ms": 1_789_000_000_000, "end_ms": 1_789_700_000_000, "duration_seconds": 700_000}, {"target_service": "payment"})
 
-    metric_call = next(call for call in captured if "bucket_size" in call[2])
-    bandwidth_call = next(call for call in captured if "bucket_size" not in call[2])
+    assert len(captured) == 1
+    metric_call = captured[0]
     assert metric_call[2]["bucket_size"] == 300
     assert metric_call[2]["service"] == "payment"
-    assert bandwidth_call[2]["service"] == "payment"
     assert series[0]["tps"] == 2.0
     assert series[0]["total_bytes"] == 9000
     assert series[0]["bandwidth_bytes_per_second"] == 30.0

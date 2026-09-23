@@ -16,7 +16,9 @@ class AggregateRepository:
             "bucket_start", "bucket_size", "caller_service", "target_service",
             "principal_name", "operation", "request_count", "error_count",
             "latency_sum", "latency_avg", "latency_min", "latency_max",
-            "latency_p50", "latency_p95", "latency_p99", "created_at"
+            "latency_p50", "latency_p95", "latency_p99",
+            "request_bytes", "response_bytes", "request_bytes_samples",
+            "response_bytes_samples", "created_at"
         ]
         sql = f"""
         INSERT INTO metric_buckets ({','.join(cols)})
@@ -28,8 +30,21 @@ class AggregateRepository:
                 b.bucket_start, b.bucket_size, b.caller_service, b.target_service,
                 b.principal_name, b.operation, b.request_count, b.error_count,
                 b.latency_sum, b.latency_avg, b.latency_min, b.latency_max,
-                b.latency_p50, b.latency_p95, b.latency_p99, now
+                b.latency_p50, b.latency_p95, b.latency_p99,
+                b.request_bytes, b.response_bytes, b.request_bytes_samples,
+                b.response_bytes_samples, now
             ] for b in buckets])
+
+    def delete_window(self, start_sec: int, end_sec: int) -> None:
+        """Remove both bucket grains in a bounded range before a full rematerialization."""
+        if end_sec <= start_sec:
+            return
+        with db_transaction(self.db_path) as db:
+            db.execute(
+                "DELETE FROM metric_buckets WHERE bucket_size IN (60, 300) "
+                "AND bucket_start >= ? AND bucket_start < ?",
+                (start_sec, end_sec),
+            )
 
     def query_series(
         self,
@@ -66,7 +81,11 @@ class AggregateRepository:
           ROUND(CASE WHEN SUM(request_count) > 0 THEN SUM(latency_sum) / SUM(request_count) ELSE 0 END, 2) as latency_avg,
           ROUND(MAX(latency_p50), 2) as latency_p50,
           ROUND(MAX(latency_p95), 2) as latency_p95,
-          ROUND(MAX(latency_p99), 2) as latency_p99
+          ROUND(MAX(latency_p99), 2) as latency_p99,
+          SUM(request_bytes) as request_bytes,
+          SUM(response_bytes) as response_bytes,
+          SUM(request_bytes_samples) as request_bytes_samples,
+          SUM(response_bytes_samples) as response_bytes_samples
         FROM metric_buckets FINAL
         WHERE {where}
         GROUP BY bucket_start
@@ -101,7 +120,11 @@ class AggregateRepository:
           COUNT(DISTINCT principal_name) as active_principals,
           ROUND(CASE WHEN SUM(request_count) > 0 THEN SUM(error_count) * 1.0 / SUM(request_count) ELSE 0 END, 4) as error_rate,
           ROUND(CASE WHEN SUM(request_count) > 0 THEN SUM(latency_sum) / SUM(request_count) ELSE 0 END, 2) as latency_avg,
-          ROUND(MAX(latency_p95), 2) as latency_p95
+          ROUND(MAX(latency_p95), 2) as latency_p95,
+          COALESCE(SUM(request_bytes), 0) as request_bytes,
+          COALESCE(SUM(response_bytes), 0) as response_bytes,
+          COALESCE(SUM(request_bytes_samples), 0) as request_bytes_samples,
+          COALESCE(SUM(response_bytes_samples), 0) as response_bytes_samples
         FROM metric_buckets FINAL
         WHERE {where}
         """

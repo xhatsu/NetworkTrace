@@ -62,15 +62,11 @@ type PerformancePoint = {
   latency_p99?: number;
   request_bytes?: number;
   response_bytes?: number;
+  request_bytes_samples?: number;
+  response_bytes_samples?: number;
   request_bytes_per_second?: number;
   response_bytes_per_second?: number;
   bandwidth_bytes_per_second?: number;
-};
-
-type BandwidthResponse = {
-  available?: boolean;
-  metrics?: { bandwidth_bytes_per_second?: number };
-  series?: Array<PerformancePoint & { request_count?: number; request_samples?: number; response_samples?: number }>;
 };
 
 type RelationshipItem = {
@@ -83,9 +79,6 @@ type RelationshipItem = {
   tps?: number;
   error_rate?: number;
   p95_latency_ms?: number;
-  request_bytes?: number;
-  response_bytes?: number;
-  bandwidth_bytes_per_second?: number;
   first_seen_ms?: number;
   last_seen_ms?: number;
   source_ip_role?: string;
@@ -106,9 +99,6 @@ type Aggregate = {
   tps: number;
   errorRate: number;
   p95: number;
-  requestBytes: number;
-  responseBytes: number;
-  bandwidth: number;
   firstSeen?: number;
   lastSeen?: number;
 };
@@ -150,9 +140,6 @@ function aggregate(items: RelationshipItem[]): Aggregate {
     tps: items.reduce((sum, item) => sum + finite(item.tps), 0),
     errorRate: requestCount ? errorCount / requestCount : 0,
     p95: Math.max(0, ...items.map((item) => finite(item.p95_latency_ms))),
-    requestBytes: items.reduce((sum, item) => sum + finite(item.request_bytes), 0),
-    responseBytes: items.reduce((sum, item) => sum + finite(item.response_bytes), 0),
-    bandwidth: items.reduce((sum, item) => sum + finite(item.bandwidth_bytes_per_second), 0),
     firstSeen: firstSeenValues.length ? Math.min(...firstSeenValues) : undefined,
     lastSeen: lastSeenValues.length ? Math.max(...lastSeenValues) : undefined,
   };
@@ -542,12 +529,6 @@ export function UserActivityWorkspace() {
     enabled: !!principal,
   });
 
-  const bandwidthQuery = useQuery({
-    queryKey: ["user-bandwidth-rollup", principal, filters],
-    queryFn: () => api<BandwidthResponse>(`/api/v1/topology/bandwidth?${queryString(filters, { account: principal, window: "30d" })}`),
-    enabled: !!principal,
-  });
-
   const relationshipQuery = useInfiniteQuery({
     queryKey: ["user-activity-relationships", principal, filters],
     initialPageParam: "",
@@ -563,7 +544,6 @@ export function UserActivityWorkspace() {
 
   const metricSeries = metricsQuery.data || [];
   const baselineSeries = baselineQuery.data?.items || [];
-  const bandwidthSeries = bandwidthQuery.data?.series || [];
   const mergedSeries = useMemo(() => {
     const parseFilterTime = (value: string) => Number.isFinite(Number(value)) ? timestamp(value) : Date.parse(value);
     const start = parseFilterTime(filters.start);
@@ -571,15 +551,32 @@ export function UserActivityWorkspace() {
     const bucketMs = Number.isFinite(start) && Number.isFinite(end) && end - start > 192 * 3_600_000
       ? 3_600_000 : 300_000;
     const bucketStart = (point: PerformancePoint) => Math.floor(timestamp(point.timestamp_ms ?? point.bucket_start) / bucketMs) * bucketMs;
-    const metricByBucket = new Map<number, { requests: number; errors: number; latency_p50: number; latency_p95: number; latency_p99: number }>();
+    const metricByBucket = new Map<number, {
+      requests: number;
+      errors: number;
+      latency_p50: number;
+      latency_p95: number;
+      latency_p99: number;
+      request_bytes: number;
+      response_bytes: number;
+      request_bytes_samples: number;
+      response_bytes_samples: number;
+    }>();
     metricSeries.forEach((point) => {
       const key = bucketStart(point);
-      const current = metricByBucket.get(key) || { requests: 0, errors: 0, latency_p50: 0, latency_p95: 0, latency_p99: 0 };
+      const current = metricByBucket.get(key) || {
+        requests: 0, errors: 0, latency_p50: 0, latency_p95: 0, latency_p99: 0,
+        request_bytes: 0, response_bytes: 0, request_bytes_samples: 0, response_bytes_samples: 0,
+      };
       current.requests += finite(point.requests);
       current.errors += finite(point.errors);
       current.latency_p50 = Math.max(current.latency_p50, finite(point.latency_p50));
       current.latency_p95 = Math.max(current.latency_p95, finite(point.latency_p95));
       current.latency_p99 = Math.max(current.latency_p99, finite(point.latency_p99));
+      current.request_bytes += finite(point.request_bytes);
+      current.response_bytes += finite(point.response_bytes);
+      current.request_bytes_samples += finite(point.request_bytes_samples);
+      current.response_bytes_samples += finite(point.response_bytes_samples);
       metricByBucket.set(key, current);
     });
     const baselineByBucket = new Map(baselineSeries.map((point) => [bucketStart(point), finite(point.baseline_rps)]));
@@ -591,22 +588,12 @@ export function UserActivityWorkspace() {
     const fallbackBaseline = median([...baselineByBucket.values()].filter((value) => value > 0)) || median(measuredRates);
     const fallbackErrorRate = median([...metricByBucket.values()].map((point) => point.requests ? point.errors / point.requests : 0));
     const fallbackP95 = median([...metricByBucket.values()].map((point) => point.latency_p95));
-    const grouped = new Map<number, { request_count: number; request_bytes: number; response_bytes: number; request_samples: number; response_samples: number }>();
-    bandwidthSeries.forEach((point) => {
-      const key = bucketStart(point);
-      const current = grouped.get(key) || { request_count: 0, request_bytes: 0, response_bytes: 0, request_samples: 0, response_samples: 0 };
-      current.request_count += finite(point.request_count);
-      current.request_bytes += finite(point.request_bytes);
-      current.response_bytes += finite(point.response_bytes);
-      current.request_samples += finite(point.request_samples);
-      current.response_samples += finite(point.response_samples);
-      grouped.set(key, current);
-    });
-    return [...new Set([...metricByBucket.keys(), ...grouped.keys()])].sort((left, right) => left - right).map((key) => {
+    return [...metricByBucket.keys()].sort((left, right) => left - right).map((key) => {
       const metric = metricByBucket.get(key);
-      const bytes = grouped.get(key);
       const seconds = bucketMs / 1000;
       const requests = metric?.requests || 0;
+      const requestBytes = metric?.request_bytes || 0;
+      const responseBytes = metric?.response_bytes || 0;
       return {
         bucket_start: key,
         timestamp_ms: key,
@@ -622,15 +609,16 @@ export function UserActivityWorkspace() {
           latency_p95: metric.latency_p95,
           latency_p99: metric.latency_p99,
         } : {}),
-        ...(bytes ? {
-          ...bytes,
-          request_bytes_per_second: bytes.request_bytes / seconds,
-          response_bytes_per_second: bytes.response_bytes / seconds,
-          bandwidth_bytes_per_second: (bytes.request_bytes + bytes.response_bytes) / seconds,
-        } : {}),
+        request_bytes: requestBytes,
+        response_bytes: responseBytes,
+        request_bytes_samples: metric?.request_bytes_samples || 0,
+        response_bytes_samples: metric?.response_bytes_samples || 0,
+        request_bytes_per_second: requestBytes / seconds,
+        response_bytes_per_second: responseBytes / seconds,
+        bandwidth_bytes_per_second: (requestBytes + responseBytes) / seconds,
       };
     });
-  }, [metricSeries, baselineSeries, bandwidthSeries, filters.start, filters.end]);
+  }, [metricSeries, baselineSeries, filters.start, filters.end]);
   const series = useMemo(() => mergedSeries.map((point) => {
     return {
       ...point,
@@ -737,15 +725,14 @@ export function UserActivityWorkspace() {
   const currentTps = finite(latestTelemetryPoint?.observed_tps);
   const currentErrorRate = finite(latestTelemetryPoint?.error_rate);
   const currentP95 = finite(latestTelemetryPoint?.latency_p95);
-  const hasBandwidth = Boolean(bandwidthQuery.data?.available) || series.some((point) => finite(point.request_bytes) > 0 || finite(point.response_bytes) > 0);
+  const hasBandwidth = series.some((point) => finite(point.request_bytes_samples) + finite(point.response_bytes_samples) > 0);
   const baselineTps = finite(latestTelemetryPoint?.baseline_rps);
   const baselineErrorRate = finite(latestTelemetryPoint?.baseline_error_rate);
   const baselineP95 = finite(latestTelemetryPoint?.baseline_p95);
-  const latestBandwidthPoint = [...bandwidthSeries].reverse().find((point) => finite(point.request_samples) + finite(point.response_samples) > 0);
-  const currentBandwidth = latestBandwidthPoint
-    ? finite(latestBandwidthPoint.bandwidth_bytes_per_second)
-    : finite(bandwidthQuery.data?.metrics?.bandwidth_bytes_per_second);
-  const bandwidthRates = bandwidthSeries.map((point) => finite(point.bandwidth_bytes_per_second)).sort((left, right) => left - right);
+  const bandwidthPoints = series.filter((point) => finite(point.request_bytes_samples) + finite(point.response_bytes_samples) > 0);
+  const latestBandwidthPoint = bandwidthPoints[bandwidthPoints.length - 1];
+  const currentBandwidth = finite(latestBandwidthPoint?.bandwidth_bytes_per_second);
+  const bandwidthRates = bandwidthPoints.map((point) => finite(point.bandwidth_bytes_per_second)).sort((left, right) => left - right);
   const baselineBandwidth = bandwidthRates.length ? bandwidthRates[Math.floor(bandwidthRates.length / 2)] : 0;
   const percentDelta = (currentValue: number, baselineValue: number) => baselineValue > 0 ? ((currentValue - baselineValue) / baselineValue) * 100 : null;
   const hourlyActivity = useMemo(() => {
@@ -908,11 +895,10 @@ export function UserActivityWorkspace() {
                     <p className="mt-2 text-[10px] text-[#7b7d80]">{t("This board scopes where the identity was observed. The table below shows the Caller Service recorded with each request; open a Trace to confirm the exact request chain and credential propagation.")}</p>
                   </div>
 
-                  <div className="grid grid-cols-2 gap-2 border-b border-[#2a2d30] p-2 lg:grid-cols-4">
+                  <div className="grid grid-cols-2 gap-2 border-b border-[#2a2d30] p-2 lg:grid-cols-3">
                     <MetricTile label="TPS" value={n(selectedAccessMetrics.tps, 2)} detail={`${n(selectedAccessMetrics.requestCount, 0)} ${t("requests")}`} valueClass="text-[#5794f2]" />
                     <MetricTile label={t("Error rate")} value={percent(selectedAccessMetrics.errorRate)} detail={`${n(selectedAccessMetrics.errorCount, 0)} ${t("failures")}`} valueClass={selectedAccessMetrics.errorRate >= 0.05 ? "text-[#f2495c]" : "text-[#73bf69]"} />
                     <MetricTile label="P95" value={`${n(selectedAccessMetrics.p95, 0)} ms`} detail={t("Maximum observed tail latency")} />
-                    <MetricTile label={t("Bandwidth")} value={selectedAccessMetrics.requestBytes + selectedAccessMetrics.responseBytes > 0 ? formatRate(selectedAccessMetrics.bandwidth) : t("Unavailable", "Không có dữ liệu")} detail={`${formatBytes(selectedAccessMetrics.requestBytes)} ↑ · ${formatBytes(selectedAccessMetrics.responseBytes)} ↓`} valueClass="text-[#5794f2]" />
                   </div>
 
                   <div className="overflow-x-auto">
