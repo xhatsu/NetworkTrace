@@ -6,11 +6,13 @@ raw events into rollups, baselines, and behavioral evidence on a predictable cad
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import logging
 import resource
 import time
 import traceback
+from typing import Any
 
 from .repository import StorageRepository
 from .config import settings
@@ -154,6 +156,74 @@ def _run_elasticsearch_sync(db_path=None) -> dict:
     return {**sync_result, "metrics": metrics, "retention": retention}
 
 
+def _mark_elasticsearch_metric_windows(db_path, historical_start: int, complete_end: int) -> int:
+    """Queue changed 5m ELK rollups for the existing anomaly detector.
+
+    The live ELK materializer revisits its two newest completed windows every
+    cycle. Compare their actual bucket contents so an unchanged refresh does not
+    increment an existing anomaly episode's occurrence count. Backfill the last
+    day in small, newest-first batches so detection stays within worker budget.
+    """
+    source = "worker_elasticsearch_anomaly_windows"
+    state = _checkpoint(source, db_path)
+    bucket_ms = 300_000
+    recent_start = max(historical_start, complete_end - 2 * bucket_ms)
+    columns = (
+        "bucket_start", "caller_service", "target_service", "principal_name",
+        "operation", "request_count", "error_count", "latency_sum",
+        "latency_p95", "request_bytes", "response_bytes",
+    )
+    with get_connection(db_path) as db:
+        rows = db.execute(
+            f"SELECT {','.join(columns)} FROM metric_buckets FINAL "
+            "WHERE bucket_size=300 AND bucket_start>=? AND bucket_start<? "
+            "ORDER BY bucket_start,caller_service,target_service,principal_name,operation",
+            (recent_start // 1000, complete_end // 1000),
+        ).fetchall()
+
+    digests: dict[int, Any] = {}
+    for row in rows:
+        bucket_ms_value = int(row["bucket_start"]) * 1000
+        digest = digests.setdefault(bucket_ms_value, hashlib.sha256())
+        digest.update(json.dumps(
+            [row[column] for column in columns],
+            separators=(",", ":"), default=str,
+        ).encode("utf-8"))
+    signatures = {str(bucket): digest.hexdigest() for bucket, digest in digests.items()}
+    previous = state.get("recent_signatures") or {}
+    changed = [bucket for bucket in sorted(digests)
+               if previous.get(str(bucket)) != signatures[str(bucket)]]
+
+    bootstrap_floor_ms = int(state.get("bootstrap_floor_ms") or max(
+        historical_start, complete_end - 24 * 3600 * 1000,
+    ))
+    bootstrap_cursor_ms = int(state.get("bootstrap_cursor_ms") or recent_start)
+    bootstrap_rows = []
+    if not state.get("bootstrap_complete") and bootstrap_cursor_ms > bootstrap_floor_ms:
+        with get_connection(db_path) as db:
+            bootstrap_rows = db.execute(
+                "SELECT DISTINCT bucket_start FROM metric_buckets FINAL "
+                "WHERE bucket_size=300 AND bucket_start>=? AND bucket_start<? "
+                "ORDER BY bucket_start DESC LIMIT 20",
+                (bootstrap_floor_ms // 1000, bootstrap_cursor_ms // 1000),
+            ).fetchall()
+        changed.extend(int(row[0]) * 1000 for row in bootstrap_rows)
+    if changed:
+        now_ms = int(time.time() * 1000)
+        with db_transaction(db_path) as db:
+            db.executemany(
+                "INSERT INTO dirty_buckets(bucket_ms,reason,created_at_ms) VALUES (?,?,?)",
+                [(bucket, "aggregation-revised", now_ms) for bucket in sorted(set(changed))],
+            )
+    _save_stage_checkpoint(source, {
+        "bootstrap_floor_ms": bootstrap_floor_ms,
+        "bootstrap_cursor_ms": min(int(row[0]) * 1000 for row in bootstrap_rows) if bootstrap_rows else bootstrap_cursor_ms,
+        "bootstrap_complete": state.get("bootstrap_complete") or not bootstrap_rows,
+        "recent_signatures": signatures,
+    }, db_path)
+    return len(set(changed))
+
+
 def _run_elasticsearch_metrics(db_path=None) -> dict:
     """Backfill and refresh transaction buckets without copying application traces."""
     from .app.repositories.aggregate_repository import AggregateRepository
@@ -201,10 +271,14 @@ def _run_elasticsearch_metrics(db_path=None) -> dict:
         live_pending = {}
         state.pop("live_pending", None)
 
+    anomaly_windows_marked = _mark_elasticsearch_metric_windows(
+        db_path, historical_start, complete_end,
+    )
     if state.get("mode") == "live":
         state["last_run_ms"] = int(time.time() * 1000)
         _save_stage_checkpoint(source, {**stage_state, "metrics": state}, db_path)
-        return {"status": "live", "complete": True}
+        return {"status": "live", "complete": True,
+                "anomaly_windows_marked": anomaly_windows_marked}
 
     end_ms = min(int(state.get("cursor_ms") or complete_end), complete_end)
     start_ms = max(historical_start, end_ms - 6 * 3600 * 1000)
@@ -234,6 +308,7 @@ def _run_elasticsearch_metrics(db_path=None) -> dict:
     next_state["last_run_ms"] = int(time.time() * 1000)
     _save_stage_checkpoint(source, {**stage_state, "metrics": next_state}, db_path)
     return {**result, "status": "complete" if result["complete"] else "continuing",
+            "anomaly_windows_marked": anomaly_windows_marked,
             "grain": grain, "window_start_ms": start_ms, "window_end_ms": end_ms}
 
 

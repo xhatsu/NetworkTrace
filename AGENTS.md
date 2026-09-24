@@ -866,7 +866,7 @@
 
 ### Worker metric-bucket bandwidth (2026-09-23)
 
-- The Elasticsearch metrics stage uses its `worker_elasticsearch_sync` checkpoint to paginate bounded six-hour windows across the retained seven-day source range. It writes both 60-second and 300-second buckets and refreshes the latest ten minutes during backfill.
+- The Elasticsearch metrics stage uses its `worker_elasticsearch_sync` checkpoint to paginate bounded six-hour windows across the retained seven-day source range. It writes both 60-second and 300-second buckets and refreshes the latest ten minutes during backfill. The worker fingerprints the two most recent completed 300-second windows and marks changed ELK metric windows for anomaly detection; it also evaluates the prior day in bounded batches after first deployment.
 - The Elasticsearch metrics stage writes grouped transaction counts, latency summaries, byte totals, and byte sample counts into worker-owned `metric_buckets` at both 60-second and 300-second grain. A byte-schema checkpoint version triggers one retained-window rebackfill after upgrading older buckets. With `OTEL_CLICKHOUSE_ONLY_AGENT_TRACES=true`, the stage skips raw Elasticsearch-to-ClickHouse sync entirely.
 - `/api/v1/topology/bandwidth`, Overview, Services, API detail, and User Activity read byte totals from `metric_buckets`. Bandwidth is unavailable only when those buckets contain no measured byte samples.
 
