@@ -15,9 +15,9 @@ export type LayoutEdge = {
   };
 };
 
-const LAYER_GAP = 260;
-const NODE_GAP = 90;
-const COMPONENT_GAP = 220;
+const LAYER_GAP = 210;
+const NODE_GAP = 24;
+const COMPONENT_GAP = 100;
 const MAX_NODES_PER_COLUMN = 14;
 const CROSSING_SWEEPS = 8;
 
@@ -26,9 +26,9 @@ export const SERVICE_NODE_HEIGHT = 66;
 
 const SERVICE_CARD_HALF_WIDTH = SERVICE_NODE_WIDTH / 2;
 const SERVICE_CARD_HALF_HEIGHT = SERVICE_NODE_HEIGHT / 2;
-const SCC_RADIUS = 122;
-const SCC_GRID_X_GAP = SERVICE_NODE_WIDTH + 24;
-const SCC_GRID_Y_GAP = SERVICE_NODE_HEIGHT + 24;
+const SCC_RADIUS = 105;
+const SCC_GRID_X_GAP = SERVICE_NODE_WIDTH + 16;
+const SCC_GRID_Y_GAP = SERVICE_NODE_HEIGHT + 16;
 
 type SccGroup = {
   id: string;
@@ -187,7 +187,7 @@ function buildVisualColumns(groups: SccGroup[]): VisualColumn[] {
     if (!previous || !current) continue;
     const previousHalfWidth = Math.max(...previous.groups.map((group) => group.halfWidth));
     const currentHalfWidth = Math.max(...current.groups.map((group) => group.halfWidth));
-    current.offsetX = previous.offsetX + previousHalfWidth + currentHalfWidth + 24;
+    current.offsetX = previous.offsetX + previousHalfWidth + currentHalfWidth + 16;
   }
   return columns;
 }

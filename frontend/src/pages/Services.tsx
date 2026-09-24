@@ -20,6 +20,8 @@ import {
   Search,
 } from "lucide-react";
 import { EpisodeStatusBadge, episodeStatusClass, episodeStatusLabel, type EpisodeResponse } from "../components/EpisodePrimitives";
+import { EntityLink } from "../components/EntityLink";
+import { entityPath } from "../entityRoutes";
 import { api, queryString } from "../api";
 import {
   ErrorState,
@@ -132,14 +134,14 @@ export function ServicesPage() {
                   return (
                     <tr
                       key={s.name}
-                      onClick={() => nav(`/services/${encodeURIComponent(s.name)}?${queryString(filters)}`)}
+                          onClick={() => nav(entityPath({ kind: "service", name: s.name }) + `?${queryString(filters)}`)}
                       className="cursor-pointer border-t border-[rgba(255,255,255,0.08)] transition hover:bg-white/[0.04]"
                     >
                       <td className="px-4 py-3">
-                        <span className="inline-flex items-center gap-2 font-semibold text-[#f5f3fa] hover:text-cyan-300">
+                        <EntityLink entity={{ kind: "service", name: s.name }} search={`?${queryString(filters)}`} className="inline-flex items-center gap-2 font-semibold text-[#f5f3fa] hover:text-cyan-300">
                           <Box size={14} className="text-violet-300" />
                           {s.name}
-                        </span>
+                        </EntityLink>
                       </td>
                       <td className="px-4 text-[#c4bdd9]">{t(s.environment, s.environment)}</td>
                       <td className="px-4 text-[#c4bdd9]">{s.service_group} · {s.service_module}</td>
@@ -602,10 +604,10 @@ export function ServiceDetailPage() {
         {attentionOperations.length ? (
           <div className="divide-y divide-[#2a2d30]">
             {attentionOperations.map((operation) => (
-              <button
-                type="button"
+              <EntityLink
+                entity={{ kind: "api", service: name, operation: operation.name }}
+                search={`?${qs}`}
                 key={`attention-${operation.name}`}
-                onClick={() => nav(`/services/${encodeURIComponent(name)}/apis/${encodeURIComponent(operation.name)}?${qs}`)}
                 className="flex w-full items-center justify-between gap-4 px-4 py-3 text-left transition hover:bg-[#181b1f]"
               >
                 <span className="min-w-0 truncate font-semibold text-[#d8d9da] hover:text-[#5794f2]">{operation.name}</span>
@@ -614,7 +616,7 @@ export function ServiceDetailPage() {
                   <span className={operation.p95_ms > 500 ? "text-[#ff9830]" : "text-[#b877d9]"}>{n(operation.p95_ms || 0, 1)} ms p95</span>
                   <span className="text-[#a7a9ab]">{n(operation.requests || 0, 0)} {t("requests")}</span>
                 </span>
-              </button>
+              </EntityLink>
             ))}
           </div>
         ) : (
@@ -650,10 +652,10 @@ export function ServiceDetailPage() {
               {operations.map((o) => (
                 <tr
                   key={o.name}
-                  onClick={() => nav(`/services/${encodeURIComponent(name)}/apis/${encodeURIComponent(o.name)}?${qs}`)}
+                  onClick={() => nav(entityPath({ kind: "api", service: name, operation: o.name }) + `?${qs}`)}
                   className="cursor-pointer hover:bg-[#181b1f] transition"
                 >
-                  <td className="px-4 py-2.5 font-medium text-[#5794f2]">{o.name}</td>
+                  <td className="px-4 py-2.5 font-medium text-[#5794f2]"><EntityLink entity={{ kind: "api", service: name, operation: o.name }} search={`?${qs}`} className="hover:underline">{o.name}</EntityLink></td>
                   <td className="px-4 font-mono tabular-nums text-[#d8d9da]">{n(o.requests)}</td>
                   <td className="px-4 font-mono tabular-nums text-[#7b7d80]">{n(o.p50_ms || 0)} ms</td>
                   <td className="px-4 font-mono tabular-nums text-[#b877d9]">{n(o.p95_ms || 0)} ms</td>
@@ -686,8 +688,8 @@ export function ServiceDetailPage() {
             </thead>
             <tbody className="divide-y divide-[#2a2d30]">
               {(serviceUsers.data?.items || []).map((u: any) => (
-                <tr key={u.principal_name} onClick={() => nav(`/users/${encodeURIComponent(u.principal_name)}/activity?${qs}`)} className="cursor-pointer hover:bg-[#181b1f] transition">
-                  <td className="px-3 py-2 font-mono text-[#5794f2]">{u.principal_name}</td>
+                <tr key={u.principal_name} onClick={() => nav(entityPath({ kind: "user", principal: u.principal_name }) + `?${qs}`)} className="cursor-pointer hover:bg-[#181b1f] transition">
+                  <td className="px-3 py-2 font-mono text-[#5794f2]"><EntityLink entity={{ kind: "user", principal: u.principal_name }} search={`?${qs}`} className="hover:underline">{u.principal_name}</EntityLink></td>
                   <td className="px-3 font-mono tabular-nums text-[#d8d9da]">{n(u.total_requests || u.requests || 0, 0)}</td>
                   <td className="px-3 font-mono tabular-nums text-[#a7a9ab]">{u.unique_callers ?? u.callers ?? "—"}</td>
                   <td className="px-3 font-mono tabular-nums text-[#a7a9ab]">{u.unique_operations ?? u.operations ?? "—"}</td>
@@ -764,18 +766,22 @@ export function ServiceDetailPage() {
         ) : changes.length ? (
           <div className="divide-y divide-[#2a2d30]">
             {changes.slice(0, 5).map((change) => (
-              <button
-                key={change.id}
-                onClick={() => nav(`/changes/${encodeURIComponent(change.id)}?${qs}`)}
-                className="flex w-full items-start gap-2.5 px-3 py-2.5 text-left transition hover:bg-[#181b1f]"
-              >
+              <div key={change.id} className="flex items-start gap-2.5 px-3 py-2.5 transition hover:bg-[#181b1f]">
                 <EpisodeStatusBadge episode={change} />
                 <span className="min-w-0 flex-1">
-                  <span className="block truncate text-xs font-semibold text-[#d8d9da]">{change.summary}</span>
-                  <span className="mt-0.5 block truncate text-[10px] text-[#7b7d80]">{change.context.operation || change.context.target || change.subject.name}</span>
+                  <EntityLink entity={{ kind: "change", id: change.id }} search={`?${qs}`} className="block truncate text-xs font-semibold text-[#d8d9da] hover:text-[#5794f2]">{change.summary}</EntityLink>
+                  <div className="mt-0.5 truncate text-[10px] text-[#7b7d80]">
+                    {change.context.operation && change.context.target
+                      ? <EntityLink entity={{ kind: "api", service: change.context.target, operation: change.context.operation }}>{change.context.operation}</EntityLink>
+                      : change.context.target
+                        ? <EntityLink entity={{ kind: "service", name: change.context.target }}>{change.context.target}</EntityLink>
+                        : change.subject.type === "user"
+                          ? <EntityLink entity={{ kind: "user", principal: change.subject.name }}>{change.subject.name}</EntityLink>
+                          : <EntityLink entity={{ kind: "service", name: change.subject.name }}>{change.subject.name}</EntityLink>}
+                  </div>
                 </span>
                 <span className="shrink-0 font-mono text-[10px] text-[#7b7d80]">{change.last_seen_at ? new Date(change.last_seen_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : "—"}</span>
-              </button>
+              </div>
             ))}
           </div>
         ) : (
@@ -919,7 +925,7 @@ function Relation({
               className="flex items-center justify-between py-2 text-xs"
               key={i.name}
             >
-              <span className="font-medium text-[#f0f3f6] truncate max-w-[180px]">{i.name}</span>
+              <EntityLink entity={{ kind: "service", name: i.name }} className="max-w-[180px] truncate font-medium text-[#f0f3f6] hover:text-[#5794f2]">{i.name}</EntityLink>
               <div className="flex items-center gap-2">
                 <span
                   className={`rounded px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wider ${

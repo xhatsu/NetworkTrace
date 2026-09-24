@@ -130,6 +130,7 @@
   - `Infrastructure`: `Agent Fleet` (`/agent-stats`) and `Agent Drilldown` (`/agent-stats/:node`) with interactive time-series dashboards.
   - **TPS chart invariant**: `/services`, `/services/:name`, API detail routes, and every `/users/:principal/*` workspace route render scoped TPS first. Activity satisfies this through its default Behavior segment; Access is the only separate internal view on the same route. Activity's worker metric buckets expose non-error and failed request counts for its percentage view.
   - Global Search in header: Search services, principals, or jump directly to trace waterfall by ID.
+  - Entity navigation uses `frontend/src/entityRoutes.ts` and `EntityLink.tsx` for canonical Service, API, User, and Change routes across active pages. Investigation results show a concise explanation, evidence, and next steps; source-derived entity links are created by the backend, while run state, evidence IDs, model details, alternatives, and history stay in collapsed Technical details.
   - **Localization (i18n)**: Canonical Vietnamese UI copy across active pages, charts, tables, cards, and modals with persistent language switcher (`🇻🇳 VI` / `🇬🇧 EN`) defaulting to Vietnamese. DevOps/product vocabulary remains English where it improves operator recognition (`Service`, `API`, `User`, `TPS`, `Latency`, `Trace`, `IP`, `Baseline`, `Agent`, and protocol/database names); surrounding explanatory copy is translated.
 
 ---

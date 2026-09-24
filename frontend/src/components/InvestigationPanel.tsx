@@ -1,41 +1,24 @@
-import React, { useState, useEffect } from "react";
-import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import {
-  Sparkles,
-  AlertTriangle,
-  CheckCircle2,
-  XCircle,
-  Clock,
-  Ban,
-  RefreshCw,
-  HelpCircle,
-  FileSearch,
-  ArrowRight,
-  ShieldAlert,
-  ListFilter,
-  Check,
-  ExternalLink,
-} from "lucide-react";
-import {
-  type FindingRef,
-  type FindingKind,
-  type InvestigationState,
-  type AssessmentConfidence,
-  getFindingId,
-  isInvestigationTerminal,
-  fetchInvestigationSource,
-  createInvestigation,
-  getInvestigation,
-  cancelInvestigation,
-  fetchInvestigationHistory,
-} from "../investigations";
+import { useEffect, useState } from "react";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { Link } from "react-router-dom";
+import { AlertTriangle, ExternalLink, RefreshCw, Sparkles, XCircle } from "lucide-react";
 import { useI18n } from "../i18n";
+import {
+  cancelInvestigation,
+  createInvestigation,
+  fetchInvestigationHistory,
+  fetchInvestigationSource,
+  getFindingId,
+  getInvestigation,
+  isInvestigationTerminal,
+  type FindingRef,
+  type InvestigationRecord,
+  type InvestigationState,
+} from "../investigations";
+import { toInvestigationView } from "../investigationView";
+import { EntityLink } from "./EntityLink";
+import type { EntityRef } from "../entityRoutes";
 
-/**
- * Props for InvestigationPanel.
- * Supports any finding reference (`anomaly_event`, `principal_change_event`, or `incident`).
- * Other finding types are supported as future call sites.
- */
 export interface InvestigationPanelProps {
   findingRef: FindingRef;
   initialScore?: number | null;
@@ -56,31 +39,24 @@ export function InvestigationPanel({
   const { t } = useI18n();
   const queryClient = useQueryClient();
   const findingId = getFindingId(findingRef);
-
   const [activeInvestigationId, setActiveInvestigationId] = useState<string | null>(null);
 
-  // 1. Fetch Source Snapshot & Eligibility
   const sourceQuery = useQuery({
     queryKey: ["investigation-source", findingRef.kind, findingId],
     queryFn: () => fetchInvestigationSource(findingRef.kind, findingId),
     staleTime: 10_000,
   });
-
-  // Auto-select latest investigation ID if known and none currently active
   useEffect(() => {
     if (!activeInvestigationId && sourceQuery.data?.latest_investigation_id) {
       setActiveInvestigationId(sourceQuery.data.latest_investigation_id);
     }
   }, [activeInvestigationId, sourceQuery.data?.latest_investigation_id]);
 
-  // 2. Fetch Investigation History
   const historyQuery = useQuery({
     queryKey: ["investigation-history", findingRef.kind, findingId],
     queryFn: () => fetchInvestigationHistory(findingRef.kind, findingId, 5),
     staleTime: 5_000,
   });
-
-  // 3. Poll Active Investigation (bounded to 1.5s while non-terminal)
   const investigationQuery = useQuery({
     queryKey: ["investigation", activeInvestigationId],
     queryFn: () => getInvestigation(activeInvestigationId!),
@@ -91,20 +67,14 @@ export function InvestigationPanel({
     },
   });
 
-  // 4. Start Investigation Mutation
   const startMutation = useMutation({
     mutationFn: async () => {
       const source = sourceQuery.data;
-      if (!source?.snapshot?.source_version) {
-        throw new Error("Source version is missing. Cannot start investigation.");
-      }
+      if (!source?.snapshot?.source_version) throw new Error("Source version is missing.");
       if (source.eligibility?.status !== "eligible") {
         throw new Error(source.eligibility?.reason || "Finding is not eligible for investigation.");
       }
-      return createInvestigation({
-        finding: findingRef,
-        source_version: source.snapshot.source_version,
-      });
+      return createInvestigation({ finding: findingRef, source_version: source.snapshot.source_version });
     },
     onSuccess: (data) => {
       setActiveInvestigationId(data.id);
@@ -113,636 +83,303 @@ export function InvestigationPanel({
       queryClient.invalidateQueries({ queryKey: ["investigation-source", findingRef.kind, findingId] });
     },
   });
-
-  // 5. Cancel Investigation Mutation
   const cancelMutation = useMutation({
-    mutationFn: async () => {
-      if (!activeInvestigationId) return;
-      return cancelInvestigation(activeInvestigationId);
-    },
+    mutationFn: () => activeInvestigationId ? cancelInvestigation(activeInvestigationId) : Promise.resolve(undefined),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["investigation", activeInvestigationId] });
       queryClient.invalidateQueries({ queryKey: ["investigation-history", findingRef.kind, findingId] });
     },
   });
 
-  const sourceData = sourceQuery.data;
-  const eligibility = sourceData?.eligibility;
-  const sourceSnapshot = sourceData?.snapshot;
-  const sourceVersion = sourceSnapshot?.source_version || "";
-
-  const inv = investigationQuery.data;
-  const currentState: InvestigationState | undefined = inv?.state;
-  const isTerminal = isInvestigationTerminal(currentState);
-  const isActive = Boolean(currentState && !isTerminal);
-
-  // Deterministic values: prioritize source_facts / initial props
-  const scoreVal = initialScore ?? sourceSnapshot?.source_facts?.score ?? sourceSnapshot?.source_facts?.current_value ?? null;
-  const severityVal = (initialSeverity || sourceSnapshot?.source_facts?.severity || "info").toLowerCase();
-  const entityVal = initialEntityId || sourceSnapshot?.dimensions?.target_service || sourceSnapshot?.dimensions?.principal_name || findingId;
-  const explanationVal = initialExplanation || sourceSnapshot?.source_facts?.explanation || "Deterministic detection trigger on service estate.";
-
-  const isEligible = eligibility?.status === "eligible" && Boolean(sourceVersion);
+  const source = sourceQuery.data;
+  const snapshot = source?.snapshot;
+  const eligibility = source?.eligibility;
+  const sourceVersion = snapshot?.source_version || "";
+  const investigation = investigationQuery.data;
+  const currentState: InvestigationState | undefined = investigation?.state;
+  const isActive = Boolean(currentState && !isInvestigationTerminal(currentState));
+  const eligible = eligibility?.status === "eligible" && Boolean(sourceVersion);
+  const view = investigation?.operator_view || (investigation ? toInvestigationView(investigation, initialExplanation) : undefined);
+  const score = initialScore ?? snapshot?.source_facts?.score ?? snapshot?.source_facts?.current_value;
+  const severity = (initialSeverity || snapshot?.source_facts?.severity || "info").toLowerCase();
+  const target = initialEntityId || snapshot?.dimensions?.target_service || snapshot?.dimensions?.principal_name || findingId;
 
   return (
-    <div
-      className={`rounded-xl border border-violet-500/30 bg-[#141624] p-5 shadow-sm ${className}`}
-      data-testid="investigation-panel"
-    >
-      {/* HEADER */}
-      <div className="flex flex-wrap items-start justify-between gap-3 border-b border-white/[0.08] pb-4">
-        <div className="space-y-1">
-          <div className="flex items-center gap-2">
-            <div className="flex h-7 w-7 items-center justify-center rounded-md border border-violet-500/40 bg-violet-500/20 text-violet-300">
-              <Sparkles size={16} />
-            </div>
-            <h3 className="text-sm font-semibold tracking-wide text-white">
-              {t("AI Diagnostic Investigation")}
-            </h3>
-            <span className="rounded border border-violet-500/30 bg-violet-500/10 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider text-violet-300">
-              {t("Existing Finding Only")}
-            </span>
-          </div>
-          <p className="text-xs text-[#c4bdd9] max-w-3xl">
-            {t(
-              "Investigates an already-detected abnormal finding using attached telemetry evidence. Original finding scores and severity are deterministic and immutable.",
-              "Investigates an already-detected abnormal finding using attached telemetry evidence. Original finding scores and severity are deterministic and immutable.",
-            )}
-          </p>
-        </div>
-
-        {/* TOP STATUS & SOURCE VERSION */}
-        <div className="flex flex-wrap items-center gap-2">
-          {sourceQuery.isLoading ? (
-            <span className="inline-flex items-center gap-1.5 rounded border border-white/10 bg-white/[0.03] px-2.5 py-1 text-[11px] text-[#9e96b8]">
-              <RefreshCw size={12} className="animate-spin text-violet-400" />
-              <span>{t("Checking finding eligibility...")}</span>
-            </span>
-          ) : sourceQuery.isError ? (
-            <span className="inline-flex items-center gap-1 rounded border border-rose-500/30 bg-rose-500/10 px-2 py-0.5 text-[11px] font-medium text-rose-300">
-              <XCircle size={12} />
-              <span>{sourceQuery.error instanceof Error ? sourceQuery.error.message : t("Error loading finding source")}</span>
-            </span>
-          ) : eligibility ? (
-            <div className="flex items-center gap-2">
-              <EligibilityBadge status={eligibility.status} label={t(getEligibilityLabel(eligibility.status))} />
-              {sourceVersion && (
-                <span
-                  className="rounded border border-white/[0.08] bg-white/[0.03] px-2 py-0.5 font-mono text-[10px] text-[#9e96b8]"
-                  title={`Source SHA256: ${sourceVersion}`}
-                >
-                  {t("Source Version")}: {sourceVersion.slice(0, 10)}…
-                </span>
-              )}
-            </div>
-          ) : null}
-        </div>
-      </div>
-
-      {/* DETERMINISTIC FINDING BASELINE (IMMUTABLE) */}
-      <div className="mt-4 rounded-lg border border-[rgba(255,255,255,0.08)] bg-black/20 p-4">
-        <div className="flex flex-wrap items-center justify-between gap-2 mb-2">
-          <div className="flex items-center gap-1.5">
-            <ShieldAlert size={14} className="text-amber-400" />
-            <span className="text-[11px] font-semibold uppercase tracking-wider text-[#c4bdd9]">
-              {t("Deterministic Finding Baseline (Immutable)")}
-            </span>
-          </div>
-          <div className="flex items-center gap-2">
-            {scoreVal !== null && (
-              <span className="font-mono text-xs font-bold text-white">
-                Score: <span className="text-amber-300">{scoreVal}</span>
-              </span>
-            )}
-            <SeverityPill severity={severityVal} />
-          </div>
-        </div>
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-3 text-xs pt-2 border-t border-white/[0.05]">
-          <div>
-            <span className="text-[10px] uppercase tracking-wider text-[#8b949e]">{t("Target Entity")}:</span>
-            <div className="font-mono text-white truncate mt-0.5">{entityVal}</div>
-          </div>
-          <div className="md:col-span-2">
-            <span className="text-[10px] uppercase tracking-wider text-[#8b949e]">{t("Detection Reason")}:</span>
-            <div className="text-[#f5f3fa] mt-0.5 line-clamp-2">{explanationVal}</div>
-          </div>
-        </div>
-        <p className="mt-2.5 text-[10px] text-[#8b949e] italic">
-          {t(
-            "Notice: Scores and rules are computed deterministically. The AI investigator does not recalculate scores or discover new anomalies.",
-            "Notice: Scores and rules are computed deterministically. The AI investigator does not recalculate scores or discover new anomalies.",
-          )}
-        </p>
-      </div>
-
-      {/* CONTROLS BAR */}
-      <div className="mt-4 flex flex-wrap items-center justify-between gap-3 pt-3 border-t border-white/[0.06]">
-        <div className="flex flex-wrap items-center gap-2">
-          {/* Main Investigate Action */}
-          <button
-            type="button"
-            aria-label={t("Start AI Investigation")}
-            disabled={!isEligible || startMutation.isPending || isActive}
-            onClick={() => startMutation.mutate()}
-            className={`inline-flex items-center gap-2 rounded-lg px-3.5 py-1.5 text-xs font-semibold transition focus:outline-none focus:ring-2 focus:ring-violet-400 ${
-              isEligible && !isActive && !startMutation.isPending
-                ? "border border-violet-500/60 bg-violet-600/30 text-violet-200 hover:bg-violet-600/50 hover:text-white"
-                : "cursor-not-allowed border border-white/10 bg-white/[0.02] text-[#6b6585]"
-            }`}
-          >
-            {startMutation.isPending ? (
-              <RefreshCw size={13} className="animate-spin text-violet-300" />
-            ) : (
-              <Sparkles size={13} className="text-violet-300" />
-            )}
-            <span>
-              {startMutation.isPending
-                ? t("Submitting...")
-                : inv
-                  ? t("Rerun Investigation")
-                  : t("Start AI Investigation")}
-            </span>
-          </button>
-
-          {/* Cancel button while active */}
-          {isActive && (
-            <button
-              type="button"
-              aria-label={t("Cancel Investigation")}
-              disabled={cancelMutation.isPending || Boolean(inv?.cancel_requested)}
-              onClick={() => cancelMutation.mutate()}
-              className="inline-flex items-center gap-1.5 rounded-lg border border-rose-500/40 bg-rose-500/15 px-3 py-1.5 text-xs font-semibold text-rose-300 hover:bg-rose-500/25 focus:outline-none focus:ring-2 focus:ring-rose-400 transition"
-            >
-              <Ban size={13} />
-              <span>
-                {cancelMutation.isPending || inv?.cancel_requested
-                  ? t("Canceling...")
-                  : t("Cancel Investigation")}
-              </span>
-            </button>
-          )}
-
-          {/* Ineligible Explanation */}
-          {!isEligible && eligibility && (
-            <span className="text-[11px] text-amber-300/90 flex items-center gap-1">
-              <AlertTriangle size={12} />
-              <span>{eligibility.reason}</span>
-            </span>
-          )}
-        </div>
-
-        {/* History Run Selector */}
-        {historyQuery.data?.items && historyQuery.data.items.length > 1 && (
-          <div className="flex items-center gap-1.5 text-xs">
-            <span className="text-[10px] uppercase tracking-wider text-[#8b949e]">
-              {t("Past Runs")}:
-            </span>
-            <select
-              aria-label={t("Select past investigation run")}
-              value={activeInvestigationId || ""}
-              onChange={(e) => setActiveInvestigationId(e.target.value)}
-              className="rounded border border-white/10 bg-[#0c0d14] px-2 py-1 font-mono text-[11px] text-[#c4bdd9] focus:outline-none focus:border-violet-400"
-            >
-              {historyQuery.data.items.map((item, idx) => (
-                <option key={item.id} value={item.id}>
-                  #{historyQuery.data!.items.length - idx} · {item.state} (
-                  {new Date(item.created_at_ms || Date.now()).toLocaleTimeString()})
-                </option>
-              ))}
-            </select>
-          </div>
-        )}
-      </div>
-
-      {/* START MUTATION ERROR NOTIFICATION */}
-      {startMutation.isError && (
-        <div className="mt-3 rounded-lg border border-rose-500/40 bg-rose-500/10 p-3 text-xs text-rose-200">
-          <div className="flex items-center gap-2 font-semibold">
-            <XCircle size={14} className="text-rose-400" />
-            <span>{t("Failed to start investigation")}</span>
-          </div>
-          <p className="mt-1 font-mono text-[11px]">
-            {startMutation.error instanceof Error
-              ? startMutation.error.message
-              : String(startMutation.error)}
-          </p>
-        </div>
-      )}
-
-      {/* LIVE PROGRESS & STATE (aria-live) */}
-      <div aria-live="polite" className="mt-4">
-        {isActive && (
-          <div className="rounded-lg border border-violet-500/30 bg-violet-950/20 p-4">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-2.5">
-                <RefreshCw size={15} className="animate-spin text-violet-400" />
-                <span className="text-xs font-semibold text-violet-200">
-                  {t("Investigation In Progress")}:{" "}
-                  <span className="font-mono text-violet-300">{currentState}</span>
-                </span>
-              </div>
-              <span className="text-[11px] font-mono text-violet-400/80">
-                {t("Polling 1.5s")}
-              </span>
-            </div>
-            <div className="mt-3 grid grid-cols-4 gap-2 text-[10px] font-medium text-[#c4bdd9]">
-              <ProgressStep
-                step={1}
-                label="Queued"
-                active={currentState === "queued"}
-                done={["assembling", "generating", "validating", "succeeded"].includes(currentState || "")}
-              />
-              <ProgressStep
-                step={2}
-                label="Assembling"
-                active={currentState === "assembling"}
-                done={["generating", "validating", "succeeded"].includes(currentState || "")}
-              />
-              <ProgressStep
-                step={3}
-                label="Generating"
-                active={currentState === "generating"}
-                done={["validating", "succeeded"].includes(currentState || "")}
-              />
-              <ProgressStep
-                step={4}
-                label="Validating"
-                active={currentState === "validating"}
-                done={currentState === "succeeded"}
-              />
-            </div>
-          </div>
-        )}
-
-        {/* TERMINAL STATE BANNER (Non-success or Warnings) */}
-        {currentState && currentState !== "succeeded" && isTerminal && (
-          <div
-            className={`rounded-lg border p-4 text-xs ${
-              currentState === "canceled"
-                ? "border-slate-500/40 bg-slate-800/20 text-slate-300"
-                : currentState === "timed_out"
-                  ? "border-amber-500/40 bg-amber-500/10 text-amber-200"
-                  : currentState.startsWith("source_")
-                    ? "border-amber-500/40 bg-amber-500/10 text-amber-200"
-                    : "border-rose-500/40 bg-rose-500/10 text-rose-200"
-            }`}
-          >
-            <div className="flex items-center gap-2 font-bold">
-              {currentState === "canceled" ? (
-                <Ban size={15} />
-              ) : currentState === "timed_out" ? (
-                <Clock size={15} />
-              ) : (
-                <AlertTriangle size={15} />
-              )}
-              <span className="uppercase tracking-wider">
-                {currentState === "canceled"
-                  ? t("Investigation Canceled")
-                  : currentState === "timed_out"
-                    ? t("Investigation Timed Out")
-                    : currentState.startsWith("source_")
-                      ? t("Finding Outdated / Changed")
-                      : t("Investigation Failed")}
-              </span>
-            </div>
-            <p className="mt-1.5 text-[11px] text-[#c4bdd9]">
-              {inv?.failure_code ? (
-                <span>
-                  Reason: <code className="font-mono text-rose-300">{inv.failure_code}</code>
-                </span>
-              ) : currentState === "canceled" ? (
-                t("Investigation was canceled by operator request.")
-              ) : currentState.startsWith("source_") ? (
-                t("The source finding has changed or closed since the investigation was requested.")
-              ) : (
-                t("Investigation failed during execution. Check provider configuration or try again.")
-              )}
+    <section className={`border border-[#2a2d30] bg-[#111217] p-4 ${className}`} data-testid="investigation-panel">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <h3 className="flex items-center gap-2 text-sm font-semibold text-[#d8d9da]">
+            <Sparkles size={15} className="text-[#b877d9]" />
+            {t("Investigation", "Điều tra")}
+          </h3>
+          {isActive ? (
+            <p aria-live="polite" className="mt-1 inline-flex items-center gap-1.5 text-xs text-[#b877d9]">
+              <RefreshCw size={12} className="animate-spin" />{t("Analyzing…", "Đang phân tích…")}
             </p>
-          </div>
-        )}
-
-        {/* SOURCE CHECK STALE BANNER */}
-        {inv?.source_check && inv.source_check.status !== "current" && (
-          <div className="mt-3 flex items-center gap-2 rounded-md border border-amber-500/30 bg-amber-500/10 p-2.5 text-xs text-amber-200">
-            <AlertTriangle size={14} className="text-amber-400 shrink-0" />
-            <span>
-              {t("Notice: Finding was")} <strong>{inv.source_check.status}</strong>{" "}
-              {t("after this investigation run. Version:")}{" "}
-              <code className="font-mono text-[10px]">
-                {inv.source_check.current_version?.slice(0, 12)}…
-              </code>
-            </span>
-          </div>
-        )}
-      </div>
-
-      {/* STRUCTURED INVESTIGATION RESULTS */}
-      {inv?.result && (
-        <div className="mt-5 space-y-4 border-t border-white/[0.08] pt-4">
-          {/* Assessment Banner */}
-          <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-white/[0.08] bg-black/30 p-3.5">
-            <div>
-              <div className="text-[10px] font-bold uppercase tracking-wider text-[#8b949e]">
-                {t("Investigation Assessment")}
-              </div>
-              <div className="mt-1 flex items-center gap-2">
-                <AssessmentPill assessment={inv.result.assessment} />
-                <span className="text-xs text-[#c4bdd9]">
-                  {inv.result.assessment === "explained"
-                    ? t("Root cause is sufficiently explained by attached evidence.")
-                    : inv.result.assessment === "partially_explained"
-                      ? t("Evidence partially supports the hypothesis, but gaps remain.")
-                      : t("Insufficient evidence to reliably explain this baseline shift.")}
-                </span>
-              </div>
-            </div>
-            {inv.configured_model && (
-              <div className="text-right text-[10px] font-mono text-[#8b949e]">
-                Model: <span className="text-violet-300">{inv.configured_model}</span>
-              </div>
-            )}
-          </div>
-
-          {/* Hypotheses List */}
-          {inv.result.hypotheses && inv.result.hypotheses.length > 0 && (
-            <div className="space-y-2.5">
-              <div className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-violet-300">
-                <FileSearch size={14} />
-                <span>{t("Hypotheses")}</span>
-              </div>
-              <div className="space-y-2">
-                {inv.result.hypotheses.map((hyp) => (
-                  <div
-                    key={hyp.id}
-                    className="rounded-lg border border-violet-500/20 bg-white/[0.02] p-3 text-xs"
-                  >
-                    <div className="flex items-start justify-between gap-2">
-                      <p className="font-medium text-[#f5f3fa] leading-relaxed">
-                        {hyp.statement}
-                      </p>
-                      <ConfidenceBadge confidence={hyp.confidence} />
-                    </div>
-
-                    {/* Citations & Evidence */}
-                    <div className="mt-2.5 flex flex-wrap items-center gap-2 pt-2 border-t border-white/[0.04] text-[11px]">
-                      {hyp.supporting_evidence_ids?.length > 0 && (
-                        <div className="flex items-center gap-1 flex-wrap">
-                          <span className="text-[10px] uppercase font-semibold text-[#8b949e]">
-                            {t("Supporting Evidence")}:
-                          </span>
-                          {hyp.supporting_evidence_ids.map((id) => (
-                            <span
-                              key={id}
-                              className="rounded border border-emerald-500/30 bg-emerald-500/10 px-1.5 py-0.2 font-mono text-[10px] text-emerald-300"
-                            >
-                              {id}
-                            </span>
-                          ))}
-                        </div>
-                      )}
-
-                      {hyp.counter_evidence_ids?.length > 0 && (
-                        <div className="flex items-center gap-1 flex-wrap">
-                          <span className="text-[10px] uppercase font-semibold text-[#8b949e]">
-                            {t("Counter Evidence")}:
-                          </span>
-                          {hyp.counter_evidence_ids.map((id) => (
-                            <span
-                              key={id}
-                              className="rounded border border-rose-500/30 bg-rose-500/10 px-1.5 py-0.2 font-mono text-[10px] text-rose-300"
-                            >
-                              {id}
-                            </span>
-                          ))}
-                        </div>
-                      )}
-                    </div>
-
-                    {/* Alternative explanations */}
-                    {hyp.alternatives?.length > 0 && (
-                      <div className="mt-2 text-[11px] text-[#9e96b8]">
-                        <span className="font-medium text-[#c4bdd9]">{t("Alternatives")}: </span>
-                        {hyp.alternatives.join("; ")}
-                      </div>
-                    )}
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
-
-          {/* Observed Facts & Correlations Citations */}
-          {((inv.result.observed_fact_ids && inv.result.observed_fact_ids.length > 0) ||
-            (inv.result.correlation_ids && inv.result.correlation_ids.length > 0)) && (
-            <div className="rounded-lg border border-white/[0.06] bg-black/20 p-3 text-xs">
-              <div className="text-[10px] font-semibold uppercase tracking-wider text-[#8b949e] mb-1.5">
-                {t("Observed Facts & Correlations")}
-              </div>
-              <div className="flex flex-wrap items-center gap-2">
-                {(inv.result.observed_fact_ids || []).map((id) => (
-                  <span
-                    key={id}
-                    className="rounded border border-cyan-500/30 bg-cyan-500/10 px-2 py-0.5 font-mono text-[10px] text-cyan-300"
-                  >
-                    Fact: {id}
-                  </span>
-                ))}
-                {(inv.result.correlation_ids || []).map((id) => (
-                  <span
-                    key={id}
-                    className="rounded border border-indigo-500/30 bg-indigo-500/10 px-2 py-0.5 font-mono text-[10px] text-indigo-300"
-                  >
-                    Corr: {id}
-                  </span>
-                ))}
-              </div>
-            </div>
-          )}
-
-          {/* Missing Evidence & Limitations */}
-          {inv.result.missing_evidence && inv.result.missing_evidence.length > 0 && (
-            <div className="space-y-1.5">
-              <div className="text-[10px] font-semibold uppercase tracking-wider text-[#8b949e]">
-                {t("Missing Evidence & Limitations")}
-              </div>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
-                {inv.result.missing_evidence.map((me, idx) => (
-                  <div
-                    key={idx}
-                    className="rounded border border-amber-500/20 bg-amber-500/5 p-2.5 text-xs text-amber-200/90"
-                  >
-                    <div className="font-mono text-[10px] uppercase font-bold text-amber-400">
-                      [{me.code}]
-                    </div>
-                    <p className="mt-0.5">{me.explanation}</p>
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
-
-          {/* Actionable Recommendations */}
-          {inv.result.recommendations && inv.result.recommendations.length > 0 && (
-            <div className="space-y-2">
-              <div className="text-[10px] font-semibold uppercase tracking-wider text-[#8b949e]">
-                {t("Actionable Recommendations")}
-              </div>
-              <div className="space-y-1.5">
-                {inv.result.recommendations.map((rec, idx) => (
-                  <div
-                    key={idx}
-                    className="flex items-start gap-2.5 rounded-lg border border-emerald-500/20 bg-emerald-500/5 p-3 text-xs"
-                  >
-                    <span className="mt-0.5 rounded border border-emerald-500/40 bg-emerald-500/20 px-2 py-0.5 font-mono text-[10px] font-bold uppercase text-emerald-300">
-                      {rec.action.replaceAll("_", " ")}
-                    </span>
-                    <div className="space-y-1 flex-1">
-                      <p className="text-[#f5f3fa]">{rec.rationale}</p>
-                      {rec.evidence_ids?.length > 0 && (
-                        <div className="flex items-center gap-1 font-mono text-[10px] text-emerald-400/80">
-                          <span>{t("Evidence")}</span>
-                          {rec.evidence_ids.join(", ")}
-                        </div>
-                      )}
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </div>
+          ) : currentState === "succeeded" ? (
+            <p className="mt-1 text-xs text-[#73bf69]">{t("Analysis complete", "Đã phân tích xong")}</p>
+          ) : currentState && isInvestigationTerminal(currentState) ? (
+            <p className="mt-1 inline-flex items-center gap-1.5 text-xs text-[#ff9830]">
+              <AlertTriangle size={12} />{t("Investigation failed", "Điều tra thất bại")}
+            </p>
+          ) : sourceQuery.isLoading ? (
+            <p className="mt-1 text-xs text-[#7b7d80]">{t("Checking investigation availability…", "Đang kiểm tra khả năng điều tra…")}</p>
+          ) : (
+            <p className="mt-1 text-xs text-[#7b7d80]">{t("Use the attached telemetry evidence to explain this finding.", "Dùng telemetry đã đính kèm để giải thích finding này.")}</p>
           )}
         </div>
+        <button
+          type="button"
+          disabled={!eligible || startMutation.isPending || isActive || sourceQuery.isLoading}
+          onClick={() => startMutation.mutate()}
+          className="btn h-8 px-3 text-xs disabled:cursor-not-allowed disabled:opacity-50"
+        >
+          {startMutation.isPending ? <RefreshCw size={12} className="animate-spin" /> : <Sparkles size={12} />}
+          {investigation ? t("Run again", "Chạy lại") : t("Investigate", "Điều tra")}
+        </button>
+      </div>
+
+      {sourceQuery.isError && (
+        <p role="alert" className="mt-3 text-xs text-[#f2495c]">
+          {sourceQuery.error instanceof Error ? sourceQuery.error.message : t("Could not load investigation source", "Không thể tải nguồn điều tra")}
+        </p>
       )}
-    </div>
+      {startMutation.isError && (
+        <p role="alert" className="mt-3 flex items-start gap-1.5 text-xs text-[#f2495c]">
+          <XCircle size={13} className="mt-0.5 shrink-0" />
+          {startMutation.error instanceof Error ? startMutation.error.message : t("Failed to start investigation", "Không thể bắt đầu điều tra")}
+        </p>
+      )}
+      {investigationQuery.isError && (
+        <p role="alert" className="mt-3 text-xs text-[#f2495c]">{t("Could not load this investigation run.", "Không thể tải lần điều tra này.")}</p>
+      )}
+      {eligibility && !eligible && (
+        <p className="mt-2 text-[11px] text-[#ff9830]">{t("Investigation unavailable", "Không thể điều tra")}: {eligibility.reason}</p>
+      )}
+
+      {view?.status === "done" && investigation?.result && (
+        <div className="mt-4 grid gap-3">
+          <section className="border-l-2 border-[#b877d9] bg-[#181b1f] px-3 py-2.5">
+            <h4 className="text-[10px] font-semibold uppercase tracking-wide text-[#a7a9ab]">{t("Likely explanation", "Giải thích có khả năng nhất")}</h4>
+            <p className="mt-1 text-sm leading-5 text-[#d8d9da]">{view.summary}</p>
+            {view.confidence && <p className="mt-1.5 text-[11px] text-[#7b7d80]">{t("Confidence", "Độ tin cậy")}: <span className="font-semibold capitalize text-[#ff9830]">{t(view.confidence, view.confidence)}</span></p>}
+          </section>
+
+          <section>
+            <h4 className="text-[10px] font-semibold uppercase tracking-wide text-[#a7a9ab]">{t("Evidence", "Bằng chứng")}</h4>
+            {view.evidence.length ? (
+              <div className="mt-1 divide-y divide-[#2a2d30] border-y border-[#2a2d30]">
+                {view.evidence.map((item, index) => (
+                  <div key={`${item.label}-${index}`} className="flex flex-wrap items-center gap-x-2 gap-y-1 py-2 text-xs">
+                    <span className="text-[#7b7d80]">{t(item.label, item.label)}:</span>
+                    {item.relationship?.map((part, partIndex) => (
+                      <span key={`${part.text}-${partIndex}`} className="inline-flex items-center gap-2">
+                        {partIndex > 0 && <span aria-hidden="true" className="text-[#7b7d80]">→</span>}
+                        {part.entity
+                          ? <InvestigationEntity entity={part.entity}>{part.text}</InvestigationEntity>
+                          : <span className="font-mono text-[#d8d9da]">{part.text}</span>}
+                      </span>
+                    ))}
+                    {item.value && <span className="font-mono text-[#d8d9da]">{item.value}</span>}
+                    {item.timestamp_ms && <span className="font-mono text-[#d8d9da]">{new Date(item.timestamp_ms).toLocaleString()}</span>}
+                    {item.entities?.filter((entity) => entity.kind === "user").map((entity) => (
+                      <span key={`user-${entity.kind === "user" ? entity.principal : ""}`} className="inline-flex items-center gap-1">
+                        <span className="text-[#7b7d80]">{t("User", "User")}:</span>
+                        <InvestigationEntity entity={entity}>{entity.kind === "user" ? entity.principal : ""}</InvestigationEntity>
+                      </span>
+                    ))}
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <p className="mt-1 text-xs text-[#7b7d80]">{t("No structured evidence is available for this run.", "Lần chạy này không có bằng chứng có cấu trúc.")}</p>
+            )}
+            {view.limitations.length > 0 && (
+              <p className="mt-2 text-[11px] text-[#a7a9ab]">{t("Limitations", "Giới hạn")}: {view.limitations.join(" · ")}</p>
+            )}
+          </section>
+
+          <section>
+            <h4 className="text-[10px] font-semibold uppercase tracking-wide text-[#a7a9ab]">{t("Next steps", "Bước tiếp theo")}</h4>
+            {view.next_actions.length ? (
+              <div className="mt-1 flex flex-wrap gap-2">
+                {view.next_actions.map((action, index) => action.entity ? (
+                  <EntityLink key={`${action.label}-${index}`} entity={action.entity} className="btn h-7 px-2.5 text-[11px]">
+                    {t(action.label, action.label)} <ExternalLink size={11} />
+                  </EntityLink>
+                ) : action.href ? (
+                  <Link key={`${action.label}-${index}`} to={action.href} className="btn h-7 px-2.5 text-[11px]">
+                    {t(action.label, action.label)} <ExternalLink size={11} />
+                  </Link>
+                ) : null)}
+              </div>
+            ) : (
+              <p className="mt-1 text-xs text-[#7b7d80]">{t("No entity destinations are available from this finding.", "Không có entity đích từ finding này.")}</p>
+            )}
+          </section>
+        </div>
+      )}
+
+      <details className="mt-4 border-t border-[#2a2d30] pt-3 text-xs">
+        <summary className="cursor-pointer select-none text-[#7b7d80] hover:text-[#d8d9da]">{t("Technical details", "Chi tiết kỹ thuật")}</summary>
+        <div className="mt-3 space-y-4">
+          <TechnicalSource
+            findingRef={findingRef}
+            findingId={findingId}
+            target={target}
+            score={score}
+            severity={severity}
+            initialExplanation={initialExplanation}
+            sourceVersion={sourceVersion}
+            eligibility={eligibility}
+            investigation={investigation}
+            currentState={currentState}
+            history={historyQuery.data?.items || []}
+            activeInvestigationId={activeInvestigationId}
+            onSelectRun={setActiveInvestigationId}
+            onCancel={() => cancelMutation.mutate()}
+            canCancel={isActive}
+            cancelPending={cancelMutation.isPending || Boolean(investigation?.cancel_requested)}
+            t={t}
+          />
+        </div>
+      </details>
+    </section>
   );
 }
 
-function EligibilityBadge({ status, label }: { status: string; label: string }) {
-  const isEligible = status === "eligible";
-  return (
-    <span
-      className={`inline-flex items-center gap-1.5 rounded-md border px-2.5 py-1 text-[11px] font-semibold tracking-wide ${
-        isEligible
-          ? "border-emerald-500/40 bg-emerald-500/15 text-emerald-300"
-          : status === "closed"
-            ? "border-slate-500/40 bg-slate-800/30 text-slate-300"
-            : status === "stale"
-              ? "border-amber-500/40 bg-amber-500/15 text-amber-300"
-              : status === "superseded"
-                ? "border-purple-500/40 bg-purple-500/15 text-purple-300"
-                : "border-rose-500/40 bg-rose-500/15 text-rose-300"
-      }`}
-    >
-      {isEligible ? <CheckCircle2 size={12} /> : <AlertTriangle size={12} />}
-      <span>{label}</span>
-    </span>
-  );
-}
-
-function getEligibilityLabel(status: string): string {
-  switch (status) {
-    case "eligible":
-      return "Eligible for Analysis";
-    case "closed":
-      return "Finding Closed";
-    case "stale":
-      return "Finding Stale";
-    case "superseded":
-      return "Finding Superseded";
-    case "insufficient_scope":
-      return "Insufficient Telemetry Scope";
-    case "invalid_source":
-      return "Invalid Source";
-    default:
-      return status;
-  }
-}
-
-function SeverityPill({ severity }: { severity: string }) {
-  const s = severity.toLowerCase();
-  const color =
-    s === "critical"
-      ? "border-rose-500/50 bg-rose-500/20 text-rose-300"
-      : s === "high"
-        ? "border-amber-500/50 bg-amber-500/20 text-amber-300"
-        : s === "medium"
-          ? "border-yellow-500/50 bg-yellow-500/20 text-yellow-300"
-          : "border-slate-500/50 bg-slate-500/20 text-slate-300";
-
-  return (
-    <span className={`rounded border px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider ${color}`}>
-      {severity}
-    </span>
-  );
-}
-
-function ProgressStep({
-  step,
-  label,
-  active,
-  done,
+function TechnicalSource({
+  findingRef,
+  findingId,
+  target,
+  score,
+  severity,
+  initialExplanation,
+  sourceVersion,
+  eligibility,
+  investigation,
+  currentState,
+  history,
+  activeInvestigationId,
+  onSelectRun,
+  onCancel,
+  canCancel,
+  cancelPending,
+  t,
 }: {
-  step: number;
-  label: string;
-  active: boolean;
-  done: boolean;
+  findingRef: FindingRef;
+  findingId: string;
+  target: string;
+  score: unknown;
+  severity: string;
+  initialExplanation?: string | null;
+  sourceVersion: string;
+  eligibility?: { status: string; reason: string };
+  investigation?: InvestigationRecord;
+  currentState?: InvestigationState;
+  history: InvestigationRecord[];
+  activeInvestigationId: string | null;
+  onSelectRun: (id: string) => void;
+  onCancel: () => void;
+  canCancel: boolean;
+  cancelPending: boolean;
+  t: (key: string, fallback?: string) => string;
 }) {
+  const result = investigation?.result;
   return (
-    <div
-      className={`flex items-center gap-1 rounded border px-2 py-1 transition ${
-        active
-          ? "border-violet-500 bg-violet-500/20 text-white font-bold"
-          : done
-            ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-300"
-            : "border-white/5 bg-white/[0.02] text-[#6b6585]"
-      }`}
-    >
-      <span>{step}.</span>
-      <span>{label}</span>
-      {done && <Check size={10} className="text-emerald-400 ml-auto" />}
-      {active && <RefreshCw size={10} className="animate-spin text-violet-400 ml-auto" />}
-    </div>
+    <>
+      <div className="grid gap-2 sm:grid-cols-2">
+        <TechnicalValue label={t("Finding", "Finding")} value={`${findingRef.kind} · ${findingId}`} />
+        <TechnicalValue label={t("Investigation ID", "ID điều tra")} value={investigation?.id || "—"} />
+        <TechnicalValue label={t("Internal state", "Trạng thái nội bộ")} value={currentState || "—"} />
+        <TechnicalValue label={t("Source version", "Phiên bản nguồn")} value={investigation?.source_version || sourceVersion || "—"} />
+        <TechnicalValue label={t("Model", "Model")} value={investigation?.reported_model || investigation?.configured_model || "—"} />
+        <TechnicalValue label={t("Provider", "Provider")} value={investigation?.provider || "—"} />
+        <TechnicalValue label={t("Target entity", "Entity đích")} value={target} />
+        <TechnicalValue label={t("Original score / severity", "Điểm / mức độ gốc")} value={`${score ?? "—"} / ${severity}`} />
+        <TechnicalValue label={t("Eligibility", "Điều kiện")} value={`${eligibility?.status || "checking"}${eligibility?.reason ? ` · ${eligibility.reason}` : ""}`} />
+        {investigation?.failure_code && <TechnicalValue label={t("Failure code", "Mã lỗi")} value={investigation.failure_code} />}
+        {investigation?.source_check && <TechnicalValue label={t("Source check", "Kiểm tra nguồn")} value={`${investigation.source_check.status}${investigation.source_check.current_version ? ` · ${investigation.source_check.current_version}` : ""}`} />}
+        {initialExplanation && <TechnicalValue label={t("Deterministic detection reason", "Lý do phát hiện xác định")} value={initialExplanation} />}
+      </div>
+
+      {history.length > 1 && (
+        <label className="flex flex-wrap items-center gap-2 text-[11px] text-[#a7a9ab]">
+          <span>{t("Investigation history", "Lịch sử điều tra")}</span>
+          <select
+            aria-label={t("Select past investigation run", "Chọn lần điều tra trước")}
+            value={activeInvestigationId || ""}
+            onChange={(event) => onSelectRun(event.target.value)}
+            className="border border-[#34373b] bg-[#0b0c0e] px-2 py-1 font-mono text-[10px] text-[#d8d9da]"
+          >
+            {history.map((item, index) => (
+              <option key={item.id} value={item.id}>{`#${history.length - index} · ${item.state} · ${item.id}`}</option>
+            ))}
+          </select>
+        </label>
+      )}
+      {canCancel && <button type="button" disabled={cancelPending} onClick={onCancel} className="btn h-7 px-2 text-[10px] disabled:opacity-50">{cancelPending ? t("Cancel requested", "Đã yêu cầu hủy") : t("Cancel investigation", "Hủy điều tra")}</button>}
+
+      {result && (
+        <div className="space-y-3 border-t border-[#2a2d30] pt-3">
+          <TechnicalValue label={t("Assessment", "Đánh giá")} value={result.assessment} />
+          {investigation?.evidence_manifest?.digest && <TechnicalValue label={t("Evidence digest", "Digest bằng chứng")} value={investigation.evidence_manifest.digest} />}
+          {result.hypotheses.map((hypothesis) => (
+            <div key={hypothesis.id} className="border border-[#2a2d30] p-2.5">
+              <div className="font-semibold text-[#d8d9da]">{hypothesis.id} · {hypothesis.confidence}</div>
+              <p className="mt-1 text-[#a7a9ab]">{hypothesis.statement}</p>
+              <TechnicalList label={t("Supporting evidence IDs", "ID bằng chứng hỗ trợ")} values={hypothesis.supporting_evidence_ids} />
+              <TechnicalList label={t("Counter-evidence IDs", "ID bằng chứng đối chiếu")} values={hypothesis.counter_evidence_ids} />
+              <TechnicalList label={t("Alternatives", "Giải thích thay thế")} values={hypothesis.alternatives} />
+            </div>
+          ))}
+          <TechnicalList label={t("Observed fact IDs", "ID dữ kiện quan sát")} values={result.observed_fact_ids} />
+          <TechnicalList label={t("Correlation IDs", "ID tương quan")} values={result.correlation_ids} />
+          {result.missing_evidence.map((item, index) => (
+            <div key={`${item.code}-${index}`} className="border border-[#ff9830]/25 bg-[#ff9830]/5 p-2.5 text-[#d8d9da]">
+              <span className="font-mono text-[#ff9830]">{item.code}</span> · {item.explanation}
+              <TechnicalList label={t("Related evidence IDs", "ID bằng chứng liên quan")} values={item.related_evidence_ids} />
+            </div>
+          ))}
+          {result.recommendations.map((item, index) => (
+            <div key={`${item.action}-${index}`} className="border border-[#2a2d30] p-2.5">
+              <div className="font-semibold text-[#d8d9da]">{item.action}</div>
+              <p className="mt-1 text-[#a7a9ab]">{item.rationale}</p>
+              <TechnicalList label={t("Evidence IDs", "ID bằng chứng")} values={item.evidence_ids} />
+            </div>
+          ))}
+        </div>
+      )}
+
+      {investigation && (
+        <details className="border-t border-[#2a2d30] pt-2">
+          <summary className="cursor-pointer text-[10px] text-[#7b7d80]">{t("Snapshot and audit payload", "Snapshot và dữ liệu kiểm toán")}</summary>
+          <pre className="mt-2 max-h-96 overflow-auto whitespace-pre-wrap break-all bg-[#0b0c0e] p-2 font-mono text-[9px] leading-4 text-[#a7a9ab]">{JSON.stringify({
+            snapshot: investigation.snapshot,
+            source_check: investigation.source_check,
+            deterministic_summary: investigation.deterministic_summary,
+            evidence_manifest: investigation.evidence_manifest,
+            metadata: investigation.metadata,
+          }, null, 2)}</pre>
+        </details>
+      )}
+    </>
   );
 }
 
-function AssessmentPill({ assessment }: { assessment: string }) {
-  const { t } = useI18n();
-  if (assessment === "explained") {
-    return (
-      <span className="inline-flex items-center gap-1 rounded border border-emerald-500/50 bg-emerald-500/20 px-2.5 py-0.5 text-xs font-bold uppercase text-emerald-300">
-        <CheckCircle2 size={12} />
-        <span>{t("Explained")}</span>
-      </span>
-    );
-  }
-  if (assessment === "partially_explained") {
-    return (
-      <span className="inline-flex items-center gap-1 rounded border border-amber-500/50 bg-amber-500/20 px-2.5 py-0.5 text-xs font-bold uppercase text-amber-300">
-        <AlertTriangle size={12} />
-        <span>{t("Partially Explained")}</span>
-      </span>
-    );
-  }
-  return (
-    <span className="inline-flex items-center gap-1 rounded border border-slate-500/50 bg-slate-500/20 px-2.5 py-0.5 text-xs font-bold uppercase text-slate-300">
-      <HelpCircle size={12} />
-      <span>{t("Insufficient Evidence")}</span>
-    </span>
-  );
+function TechnicalValue({ label, value }: { label: string; value: string }) {
+  return <div className="min-w-0 border border-[#2a2d30] bg-[#0b0c0e] px-2.5 py-2"><div className="text-[9px] uppercase tracking-wide text-[#7b7d80]">{label}</div><div className="mt-1 break-all font-mono text-[10px] text-[#a7a9ab]">{value}</div></div>;
 }
 
-function ConfidenceBadge({ confidence }: { confidence: AssessmentConfidence }) {
-  const color =
-    confidence === "high"
-      ? "border-emerald-500/40 bg-emerald-500/15 text-emerald-300"
-      : confidence === "medium"
-        ? "border-amber-500/40 bg-amber-500/15 text-amber-300"
-        : "border-slate-500/40 bg-slate-500/15 text-slate-300";
+function TechnicalList({ label, values }: { label: string; values?: string[] }) {
+  if (!values?.length) return null;
+  return <div className="mt-2 text-[10px] text-[#7b7d80]"><span className="font-semibold">{label}: </span><span className="break-all font-mono">{values.join(", ")}</span></div>;
+}
 
-  return (
-    <span
-      className={`rounded border px-1.5 py-0.5 font-mono text-[10px] font-bold uppercase tracking-wider ${color}`}
-    >
-      {confidence} conf
-    </span>
-  );
+function InvestigationEntity({ entity, children }: { entity: EntityRef; children: string }) {
+  const color = entity.kind === "service" ? "text-[#8db7fa]"
+    : entity.kind === "api" ? "text-[#82d5c4]"
+      : entity.kind === "user" ? "text-[#d9b4ea]"
+        : "text-[#ff9830]";
+  return <EntityLink entity={entity} className={`font-mono underline decoration-transparent underline-offset-2 hover:decoration-current ${color}`}>{children}</EntityLink>;
 }

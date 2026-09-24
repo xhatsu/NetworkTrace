@@ -24,6 +24,8 @@ import {
 } from "../components/EpisodePrimitives";
 import { InvestigationPanel } from "../components/InvestigationPanel";
 import { useI18n } from "../i18n";
+import { EntityLink } from "../components/EntityLink";
+import { entityPath } from "../entityRoutes";
 
 export function ChangesPage() {
   const { filters } = useFilters();
@@ -67,8 +69,9 @@ export function ChangesPage() {
         </div>
         {query.isLoading ? <Loading /> : query.error ? <ErrorState message={query.error.message} /> : episodes.length ? (
           <div>{episodes.map((episode) => {
-            const detailUrl = `/changes/${encodeURIComponent(episode.id)}?${queryString(filters, { view })}`;
-            return <EpisodeCard key={episode.id} episode={episode} timezone={filters.timezone} onOpen={() => nav(detailUrl)} onInvestigate={() => nav(`${detailUrl}#ai-investigation`)} />;
+            const detailSearch = `?${queryString(filters, { view })}`;
+            const detailUrl = `${entityPath({ kind: "change", id: episode.id })}${detailSearch}`;
+            return <EpisodeCard key={episode.id} episode={episode} timezone={filters.timezone} detailSearch={detailSearch} onInvestigate={() => nav(`${detailUrl}#ai-investigation`)} />;
           })}</div>
         ) : <div className="p-12 text-center text-xs text-[#7b7d80]">{t("No changes match the selected view.", "Không có thay đổi phù hợp với bộ lọc.")}</div>}
       </Panel>
@@ -133,7 +136,7 @@ export function ChangeDetailPage() {
           </Panel>
           <Panel title={t("Evidence", "Bằng chứng")} subtitle={t("Detector facts supporting this episode", "Dữ kiện detector hỗ trợ episode")}><EpisodeEvidence episode={episode} /></Panel>
           <EpisodeBaselineNote episode={episode} />
-          <Panel title={t("Actions", "Thao tác")} subtitle={t("Review actions apply to this episode's source finding.", "Thao tác review áp dụng cho finding nguồn của episode này.")}><div className="flex flex-wrap gap-2 p-3"><button type="button" onClick={() => nav(`/traces?${queryString(filters, { principal: episode.subject.type === "user" ? episode.subject.name : undefined, service: episode.context.target || undefined })}`)} className="btn"><Activity size={13} />{t("View related traces", "Xem Trace liên quan")}</button><button type="button" onClick={() => nav(`${episode.subject.type === "user" ? `/users/${encodeURIComponent(episode.subject.name)}/activity` : `/services/${encodeURIComponent(episode.subject.name)}`}?${queryString(filters)}`)} className="btn"><ArrowRight size={13} />{t(`Open ${episode.subject.type}`, `Mở ${episode.subject.type}`)}</button><button type="button" disabled={decision.isPending} onClick={() => decision.mutate("expected")} className="btn text-[#73bf69]">{canMarkEpisodeExpected(episode) ? t("Expected behavior", "Hành vi dự kiến") : t("Suppress finding", "Ẩn finding")}</button><button type="button" disabled={decision.isPending} onClick={() => decision.mutate("investigate")} className="btn text-[#ff9830]">{t("Keep monitoring", "Tiếp tục theo dõi")}</button><button type="button" disabled={decision.isPending} onClick={() => decision.mutate("resolve")} className="btn">{t("Resolve", "Đã xử lý")}</button></div>{decision.isError && <div className="border-t border-[#2a2d30] p-3 text-xs text-[#f2495c]">{decision.error instanceof Error ? decision.error.message : t("Decision could not be saved", "Không thể lưu quyết định")}</div>}{decision.isSuccess && <div className="border-t border-[#2a2d30] p-3 text-xs text-[#73bf69]">{t("Decision saved", "Đã lưu quyết định")}</div>}</Panel>
+          <Panel title={t("Actions", "Thao tác")} subtitle={t("Review actions apply to this episode's source finding.", "Thao tác review áp dụng cho finding nguồn của episode này.")}><div className="flex flex-wrap gap-2 p-3"><button type="button" onClick={() => nav(`/traces?${queryString(filters, { principal: episode.subject.type === "user" ? episode.subject.name : undefined, service: episode.context.target || undefined })}`)} className="btn"><Activity size={13} />{t("View related traces", "Xem Trace liên quan")}</button><EntityLink entity={episode.subject.type === "user" ? { kind: "user", principal: episode.subject.name } : { kind: "service", name: episode.subject.name }} className="btn"><ArrowRight size={13} />{t(`Open ${episode.subject.type}`, `Mở ${episode.subject.type}`)}</EntityLink><button type="button" disabled={decision.isPending} onClick={() => decision.mutate("expected")} className="btn text-[#73bf69]">{canMarkEpisodeExpected(episode) ? t("Expected behavior", "Hành vi dự kiến") : t("Suppress finding", "Ẩn finding")}</button><button type="button" disabled={decision.isPending} onClick={() => decision.mutate("investigate")} className="btn text-[#ff9830]">{t("Keep monitoring", "Tiếp tục theo dõi")}</button><button type="button" disabled={decision.isPending} onClick={() => decision.mutate("resolve")} className="btn">{t("Resolve", "Đã xử lý")}</button></div>{decision.isError && <div className="border-t border-[#2a2d30] p-3 text-xs text-[#f2495c]">{decision.error instanceof Error ? decision.error.message : t("Decision could not be saved", "Không thể lưu quyết định")}</div>}{decision.isSuccess && <div className="border-t border-[#2a2d30] p-3 text-xs text-[#73bf69]">{t("Decision saved", "Đã lưu quyết định")}</div>}</Panel>
         </div>
       </div>
 

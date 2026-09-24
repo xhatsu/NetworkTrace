@@ -21,6 +21,8 @@ import {
 import { api, queryString } from "../../api";
 import { useFilters } from "../../App";
 import { useI18n } from "../../i18n";
+import { EntityLink } from "../../components/EntityLink";
+import { entityPath } from "../../entityRoutes";
 
 export function UserDirectory() {
   const { filters } = useFilters();
@@ -218,16 +220,16 @@ export function UserDirectory() {
                   return (
                     <tr
                       key={u.principal_name}
-                      onClick={() => nav(`/users/${encodeURIComponent(u.principal_name)}/activity`)}
+                      onClick={() => nav(entityPath({ kind: "user", principal: u.principal_name }))}
                       className="cursor-pointer hover:bg-white/[0.06] transition"
                     >
                       <td className="px-5 py-3 font-bold text-white flex items-center gap-2.5">
                         <div className="grid h-7 w-7 place-items-center rounded-lg bg-white/10 text-cyan-300 font-sans text-xs">
                           <User size={14} />
                         </div>
-                        <span className="truncate max-w-[220px]" title={u.principal_name}>
+                        <EntityLink entity={{ kind: "user", principal: u.principal_name }} className="truncate max-w-[220px] hover:underline" title={u.principal_name}>
                           {u.principal_name}
-                        </span>
+                        </EntityLink>
                       </td>
 
                       <td className="px-4 py-3 font-sans text-xs text-[#cbd5e1]">
@@ -291,16 +293,10 @@ export function UserDirectory() {
                       </td>
 
                       <td className="px-5 py-3 text-right">
-                        <button
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            nav(`/users/${encodeURIComponent(u.principal_name)}/activity`);
-                          }}
-                          className="inline-flex items-center gap-1 rounded-lg border border-cyan-400/50 bg-cyan-500/15 px-2.5 py-1 text-xs font-bold text-cyan-200 hover:bg-cyan-500/30 transition"
-                        >
+                        <EntityLink entity={{ kind: "user", principal: u.principal_name }} className="inline-flex items-center gap-1 rounded-lg border border-cyan-400/50 bg-cyan-500/15 px-2.5 py-1 text-xs font-bold text-cyan-200 hover:bg-cyan-500/30 transition">
                           <span>{t("Inspect Workspace")}</span>
                           <ArrowRight size={12} />
-                        </button>
+                        </EntityLink>
                       </td>
                     </tr>
                   );

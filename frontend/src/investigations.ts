@@ -1,4 +1,5 @@
 import { api } from "./api";
+import type { EntityRef } from "./entityRoutes";
 
 export type FindingKind = "anomaly_event" | "principal_change_event" | "incident";
 
@@ -170,6 +171,22 @@ export type InvestigationRecord = {
   metadata?: Record<string, any>;
   source_check?: SourceCheck | null;
   effective_status?: string;
+  operator_view?: OperatorInvestigationView;
+};
+
+export type OperatorInvestigationView = {
+  status: "running" | "done" | "failed";
+  summary?: string;
+  confidence?: AssessmentConfidence;
+  evidence: Array<{
+    label: string;
+    value?: string;
+    timestamp_ms?: number;
+    entities?: EntityRef[];
+    relationship?: Array<{ text: string; entity?: EntityRef }>;
+  }>;
+  next_actions: Array<{ label: string; entity?: EntityRef; href?: string }>;
+  limitations: string[];
 };
 
 export type CreateInvestigationPayload = {

@@ -29,6 +29,7 @@ import { api, queryString } from "../../api";
 import { useFilters } from "../../App";
 import { ErrorState, InteractiveMetricCard, Loading, Panel, chartTooltip, minMaxDownsample, n } from "../../components";
 import { useI18n } from "../../i18n";
+import { EntityLink } from "../../components/EntityLink";
 
 type ActivityView = "behavior" | "access";
 type ChartMetric = "tps" | "error" | "latency" | "bandwidth";
@@ -887,10 +888,10 @@ export function UserActivityWorkspace() {
                     <div className="flex flex-wrap items-center gap-2 text-[10px]">
                       <span className="inline-flex items-center gap-1 border border-[#a7a9ab]/40 bg-[#a7a9ab]/10 px-2 py-1 font-mono text-[#d8d9da]"><Globe2 size={11} />{selectedIp}</span>
                       <ArrowRight size={12} className="text-[#7b7d80]" />
-                      <span className="inline-flex items-center gap-1 border border-[#b877d9]/40 bg-[#b877d9]/10 px-2 py-1 font-mono text-[#d9b4ea]">{isHuman ? <UserRound size={11} /> : <KeyRound size={11} />}{principal}</span>
+                      <EntityLink entity={{ kind: "user", principal }} className="inline-flex items-center gap-1 border border-[#b877d9]/40 bg-[#b877d9]/10 px-2 py-1 font-mono text-[#d9b4ea]">{isHuman ? <UserRound size={11} /> : <KeyRound size={11} />}{principal}</EntityLink>
                       <ArrowRight size={12} className="text-[#7b7d80]" />
-                      <span className="inline-flex items-center gap-1 border border-[#5794f2]/40 bg-[#5794f2]/10 px-2 py-1 font-mono text-[#8db7fa]"><Server size={11} />{selectedService}</span>
-                      {selectedApi && <><ArrowRight size={12} className="text-[#7b7d80]" /><span className="inline-flex items-center gap-1 border border-[#56b9a8]/40 bg-[#56b9a8]/10 px-2 py-1 font-mono text-[#82d5c4]"><Fingerprint size={11} />{selectedApi}</span></>}
+                      <EntityLink entity={{ kind: "service", name: selectedService }} className="inline-flex items-center gap-1 border border-[#5794f2]/40 bg-[#5794f2]/10 px-2 py-1 font-mono text-[#8db7fa]"><Server size={11} />{selectedService}</EntityLink>
+                      {selectedApi && <><ArrowRight size={12} className="text-[#7b7d80]" /><EntityLink entity={{ kind: "api", service: selectedService, operation: selectedApi }} className="inline-flex items-center gap-1 border border-[#56b9a8]/40 bg-[#56b9a8]/10 px-2 py-1 font-mono text-[#82d5c4]"><Fingerprint size={11} />{selectedApi}</EntityLink></>}
                     </div>
                     <p className="mt-2 text-[10px] text-[#7b7d80]">{t("This board scopes where the identity was observed. The table below shows the Caller Service recorded with each request; open a Trace to confirm the exact request chain and credential propagation.")}</p>
                   </div>
@@ -906,7 +907,7 @@ export function UserActivityWorkspace() {
                       <thead><tr><th className="text-left">{t("Caller Service")}</th><th className="text-right">TPS</th><th className="text-right">{t("Requests")}</th><th className="text-right">{t("Error")}</th><th className="text-right">P95</th><th className="text-right">{t("First seen")}</th><th className="text-right">{t("Last seen")}</th></tr></thead>
                       <tbody>{callerRows.map((caller) => (
                         <tr key={caller.name}>
-                          <td className="font-mono text-[11px] text-[#8db7fa]">{caller.name}</td>
+                          <td className="font-mono text-[11px] text-[#8db7fa]"><EntityLink entity={{ kind: "service", name: caller.name }} className="hover:underline">{caller.name}</EntityLink></td>
                           <td className="text-right font-mono">{n(caller.tps, 2)}</td>
                           <td className="text-right font-mono">{n(caller.requestCount, 0)}</td>
                           <td className={`text-right font-mono ${caller.errorRate >= 0.05 ? "text-[#f2495c]" : "text-[#73bf69]"}`}>{percent(caller.errorRate)}</td>
@@ -921,7 +922,7 @@ export function UserActivityWorkspace() {
                     <span className="inline-flex items-center gap-1.5 text-[10px] text-[#7b7d80]"><Clock3 size={11} />{formatTime(selectedAccessMetrics.firstSeen)} → {formatTime(selectedAccessMetrics.lastSeen)}</span>
                     <div className="flex gap-2">
                       <Link to={`/traces?principal=${encodeURIComponent(principal)}&service=${encodeURIComponent(selectedService)}`} className="toolbar-control inline-flex items-center gap-1.5 px-2 py-1 text-[10px] text-[#5794f2] hover:text-white">{t("View related Traces")}<ExternalLink size={11} /></Link>
-                      {selectedApi && <Link to={`/services/${encodeURIComponent(selectedService)}/apis/${encodeURIComponent(selectedApi)}`} className="toolbar-control inline-flex items-center gap-1.5 px-2 py-1 text-[10px] text-[#56b9a8] hover:text-white">{t("Open API")}<ExternalLink size={11} /></Link>}
+                      {selectedApi && <EntityLink entity={{ kind: "api", service: selectedService, operation: selectedApi }} className="toolbar-control inline-flex items-center gap-1.5 px-2 py-1 text-[10px] text-[#56b9a8] hover:text-white">{t("Open API")}<ExternalLink size={11} /></EntityLink>}
                     </div>
                   </div>
                 </Panel>

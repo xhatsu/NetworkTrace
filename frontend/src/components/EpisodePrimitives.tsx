@@ -3,6 +3,8 @@ import type { ReactNode } from "react";
 import { useI18n } from "../i18n";
 import type { FindingRef } from "../investigations";
 import { n } from "../components";
+import { EntityLink } from "./EntityLink";
+import type { EntityRef } from "../entityRoutes";
 
 export type EpisodeHighlight = {
   label: string;
@@ -186,8 +188,10 @@ export function entityTokenClass(kind: EntityKind) {
   return "border-[#34373b] bg-[#181b1f] text-[#a7a9ab]";
 }
 
-export function EntityToken({ kind, children }: { kind: EntityKind; children: ReactNode }) {
-  return <span className={`inline-flex max-w-full items-center border px-2 py-1 font-mono text-[11px] ${entityTokenClass(kind)}`}>{children}</span>;
+export function EntityToken({ kind, entity, children }: { kind: EntityKind; entity?: EntityRef; children: ReactNode }) {
+  const className = `inline-flex max-w-full items-center border px-2 py-1 font-mono text-[11px] ${entityTokenClass(kind)}`;
+  if (!entity) return <span className={className}>{children}</span>;
+  return <EntityLink entity={entity} className={className}>{children}</EntityLink>;
 }
 
 export function EpisodePath({ episode, compact = false }: { episode: Episode; compact?: boolean }) {
@@ -217,12 +221,15 @@ export function EpisodePath({ episode, compact = false }: { episode: Episode; co
       label: t("API / Operation", "API / Operation"),
     },
   ].filter(Boolean) as Array<{ value: string; kind: EntityKind; label: string }>;
+  const apiService = episode.context.target
+    || (episode.subject.type === "service" ? episode.subject.name : undefined)
+    || episode.context.caller;
   return (
     <div className={compact ? "" : "py-1"}>
       {isPrincipalEpisode && (
         <div className="mb-2 flex min-w-0 flex-wrap items-center gap-2 text-[10px] text-[#a7a9ab]">
           <span className="inline-flex items-center gap-1 font-semibold uppercase tracking-[.1em] text-[#7b7d80]"><KeyRound size={11} className="text-[#d9b4ea]" />{t("Credential observed on this call", "Credential quan sát trên call này")}</span>
-          <EntityToken kind="user">{episode.subject.name}</EntityToken>
+          <EntityToken kind="user" entity={{ kind: "user", principal: episode.subject.name }}>{episode.subject.name}</EntityToken>
         </div>
       )}
       <div className="flex flex-wrap items-end gap-1.5 text-[11px]">
@@ -231,7 +238,16 @@ export function EpisodePath({ episode, compact = false }: { episode: Episode; co
             {index > 0 && <ArrowRight size={12} className="mb-1.5 shrink-0 text-[#7b7d80]" aria-hidden="true" />}
             <span className="min-w-0">
               <span className="mb-1 block text-[9px] font-semibold uppercase tracking-[.12em] text-[#7b7d80]">{node.label}</span>
-              <EntityToken kind={node.kind}>{node.value}</EntityToken>
+              <EntityToken
+                kind={node.kind}
+                entity={node.kind === "user"
+                  ? { kind: "user", principal: node.value }
+                  : node.kind === "service"
+                    ? { kind: "service", name: node.value }
+                    : node.kind === "api" && apiService
+                      ? { kind: "api", service: apiService, operation: node.value }
+                      : undefined}
+              >{node.value}</EntityToken>
             </span>
           </span>
         )) : <span className="text-[#7b7d80]">{t("Relationship context unavailable", "Chưa có ngữ cảnh quan hệ")}</span>}
@@ -253,7 +269,7 @@ export function EpisodePath({ episode, compact = false }: { episode: Episode; co
   );
 }
 
-export function EpisodeCard({ episode, onOpen, onInvestigate, timezone = "local" }: { episode: Episode; onOpen: () => void; onInvestigate?: () => void; timezone?: string }) {
+export function EpisodeCard({ episode, onInvestigate, detailSearch = "", timezone = "local" }: { episode: Episode; onInvestigate?: () => void; detailSearch?: string; timezone?: string }) {
   const { t } = useI18n();
   const Icon = episode.subject.type === "user" ? UserRound : Boxes;
   return (
@@ -270,7 +286,9 @@ export function EpisodeCard({ episode, onOpen, onInvestigate, timezone = "local"
           {episode.abnormality?.reasons?.[0] && <p className="mt-2 text-[11px] text-[#a7a9ab]">{episode.abnormality.reasons[0]}</p>}
         </div>
         <div className="flex shrink-0 gap-2">
-          <button type="button" onClick={onOpen} className="btn h-7 px-2.5 text-[11px]">{t("View details", "Xem chi tiết")} <ArrowRight size={12} /></button>
+          <EntityLink entity={{ kind: "change", id: episode.id }} search={detailSearch} className="btn h-7 px-2.5 text-[11px]">
+            {t("View details", "Xem chi tiết")} <ArrowRight size={12} />
+          </EntityLink>
           {onInvestigate && <button type="button" onClick={onInvestigate} className="btn h-7 border-[#b877d9]/50 px-2.5 text-[11px] text-[#b877d9]">{t("Investigate", "Điều tra")}</button>}
         </div>
       </div>

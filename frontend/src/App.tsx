@@ -39,6 +39,7 @@ import { TracesPage, TraceDetailPage } from "./pages/Traces";
 import { AgentStatsPage, AgentNodeDetailPage } from "./pages/AgentStats";
 import { UnknownUsersPage } from "./pages/UnknownUsers";
 import { InteractiveTopologyPage } from "./pages/InteractiveTopology";
+import { entityPath } from "./entityRoutes";
 
 // 6 User-Centric Pages & Components
 import { UserDirectory } from "./pages/user/UserDirectory";
@@ -53,7 +54,7 @@ const defaultStart = new Date(now.getTime() - 7 * 86400_000).toISOString();
 function LegacyAnomalyRedirect() {
   const location = useLocation();
   const legacyId = location.pathname.split("/").filter(Boolean).pop() || "";
-  return <Navigate to={`/changes/${encodeURIComponent(legacyId)}${location.search}`} replace />;
+  return <Navigate to={`${entityPath({ kind: "change", id: legacyId })}${location.search}`} replace />;
 }
 
 const FilterContext = createContext<{
@@ -318,17 +319,21 @@ function FilterBar() {
     if (q.includes("/")) {
       const [svc, ...opParts] = q.split("/").map((p) => p.trim());
       if (svc && opParts.length > 0) {
-        nav(`/services/${encodeURIComponent(svc)}/apis/${encodeURIComponent(opParts.join("/"))}`);
+        nav(entityPath({ kind: "api", service: svc, operation: opParts.join("/") }));
         return;
       }
     }
 
     if (/^service:/i.test(q)) {
-      nav(`/services/${encodeURIComponent(q.replace(/^service:/i, "").trim())}`);
+      nav(entityPath({ kind: "service", name: q.replace(/^service:/i, "").trim() }));
       return;
     }
     if (/^user:/i.test(q)) {
-      nav(`/users/${encodeURIComponent(q.replace(/^user:/i, "").trim())}/activity`);
+      nav(entityPath({ kind: "user", principal: q.replace(/^user:/i, "").trim() }));
+      return;
+    }
+    if (/^change:/i.test(q)) {
+      nav(entityPath({ kind: "change", id: q.replace(/^change:/i, "").trim() }));
       return;
     }
     if (/^trace:/i.test(q)) {
@@ -341,7 +346,7 @@ function FilterBar() {
       return;
     }
 
-    nav(`/users/${encodeURIComponent(q)}/activity`);
+    nav(entityPath({ kind: "user", principal: q }));
   };
 
   const handleRefresh = () => {

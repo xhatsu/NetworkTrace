@@ -26,6 +26,7 @@ import {
 } from "../components";
 import { useFilters } from "../App";
 import { useI18n } from "../i18n";
+import { EntityLink } from "../components/EntityLink";
 
 export type TraceSummaryItem = {
   id: number;
@@ -156,14 +157,14 @@ export function TracesPage() {
                       </td>
                       <td className="px-4 py-3">
                         <div className="flex items-center gap-1.5">
-                          <span className="font-mono text-emerald-400 font-medium">{item.service_name || item.target_service}</span>
+                          <EntityLink entity={{ kind: "service", name: item.target_service || item.service_name }} className="font-mono font-medium text-emerald-400 hover:underline">{item.service_name || item.target_service}</EntityLink>
                           <span className="text-[#8b949e]">/</span>
-                          <span className="font-mono text-[#f0f3f6]">{item.operation}</span>
+                          <EntityLink entity={{ kind: "api", service: item.target_service || item.service_name, operation: item.operation }} className="font-mono text-[#f0f3f6] hover:underline">{item.operation}</EntityLink>
                         </div>
                       </td>
                       <td className="px-4 py-3 font-mono text-[#8b949e]">
                         {item.principal_name && item.principal_name !== "unknown" ? (
-                          <span className="text-indigo-300 font-medium">{item.principal_name}</span>
+                          <EntityLink entity={{ kind: "user", principal: item.principal_name }} className="font-medium text-indigo-300 hover:underline">{item.principal_name}</EntityLink>
                         ) : (
                           <span className="text-[#6e7681]">unknown</span>
                         )}
@@ -325,12 +326,14 @@ export function TraceDetailPage() {
                     <div className="w-56 shrink-0 truncate">
                       <div className="flex items-center gap-1.5 truncate">
                         <span className={`h-2 w-2 rounded-full ${isErr ? "bg-rose-400" : "bg-emerald-400"}`} />
-                        <span className="font-mono text-xs font-semibold text-[#f0f3f6] truncate">
+                        <EntityLink entity={{ kind: "service", name: span.target_service || span.service_name }} className="truncate font-mono text-xs font-semibold text-[#f0f3f6] hover:underline">
                           {span.service_name || span.target_service}
-                        </span>
+                        </EntityLink>
                       </div>
                       <div className="pl-3.5 truncate font-mono text-[10px] text-[#8b949e]">
-                        {span.operation}
+                        {span.target_service || span.service_name
+                          ? <EntityLink entity={{ kind: "api", service: span.target_service || span.service_name, operation: span.operation }} className="hover:underline">{span.operation}</EntityLink>
+                          : span.operation}
                       </div>
                     </div>
 
@@ -388,12 +391,14 @@ export function TraceDetailPage() {
               <div className="space-y-3 text-xs">
                 <div>
                   <span className="text-[10px] font-semibold uppercase text-[#8b949e]">{t("Service")}</span>
-                  <div className="font-mono text-[#f0f3f6] font-medium">{selectedSpan.service_name || selectedSpan.target_service}</div>
+                  <EntityLink entity={{ kind: "service", name: selectedSpan.target_service || selectedSpan.service_name }} className="font-mono font-medium text-[#f0f3f6] hover:underline">{selectedSpan.service_name || selectedSpan.target_service}</EntityLink>
                 </div>
 
                 <div>
                   <span className="text-[10px] font-semibold uppercase text-[#8b949e]">{t("Operation")}</span>
-                  <div className="font-mono text-[#f0f3f6] break-all">{selectedSpan.operation}</div>
+                  {(selectedSpan.target_service || selectedSpan.service_name)
+                    ? <EntityLink entity={{ kind: "api", service: selectedSpan.target_service || selectedSpan.service_name, operation: selectedSpan.operation }} className="break-all font-mono text-[#f0f3f6] hover:underline">{selectedSpan.operation}</EntityLink>
+                    : <div className="break-all font-mono text-[#f0f3f6]">{selectedSpan.operation}</div>}
                 </div>
 
                 <div className="grid grid-cols-2 gap-2">
@@ -409,13 +414,13 @@ export function TraceDetailPage() {
 
                 <div>
                   <span className="text-[10px] font-semibold uppercase text-[#8b949e]">{t("Principal Actor")}</span>
-                  <div className="font-mono text-indigo-300">{selectedSpan.principal_name || "unknown"}</div>
+                  {selectedSpan.principal_name ? <EntityLink entity={{ kind: "user", principal: selectedSpan.principal_name }} className="font-mono text-indigo-300 hover:underline">{selectedSpan.principal_name}</EntityLink> : <div className="font-mono text-indigo-300">unknown</div>}
                 </div>
 
                 {selectedSpan.caller_service && (
                   <div>
                     <span className="text-[10px] font-semibold uppercase text-[#8b949e]">{t("Caller Service")}</span>
-                    <div className="font-mono text-[#8b949e]">{selectedSpan.caller_service}</div>
+                    <EntityLink entity={{ kind: "service", name: selectedSpan.caller_service }} className="font-mono text-[#8b949e] hover:underline">{selectedSpan.caller_service}</EntityLink>
                   </div>
                 )}
 

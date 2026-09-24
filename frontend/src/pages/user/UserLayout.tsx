@@ -24,6 +24,7 @@ import { api, queryString } from "../../api";
 import { useFilters } from "../../App";
 import { Panel, TpsLineChart, n } from "../../components";
 import { useI18n } from "../../i18n";
+import { entityPath } from "../../entityRoutes";
 import { episodeStatusClass, episodeStatusLabel, type Episode, type EpisodeResponse } from "../../components/EpisodePrimitives";
 
 export function UserLayout() {
@@ -115,14 +116,14 @@ export function UserLayout() {
       id: "activity",
       label: t("Activity"),
       question: t("How has traffic & performance changed?"),
-      path: `/users/${encodeURIComponent(principal)}/activity`,
+      path: entityPath({ kind: "user", principal, tab: "activity" }),
       icon: Activity,
     },
     {
       id: "changes",
       label: t("Changes"),
       question: t("What is different from normal behavior?"),
-      path: `/users/${encodeURIComponent(principal)}/changes`,
+      path: entityPath({ kind: "user", principal, tab: "changes" }),
       icon: GitCompareArrows,
       badge: episodeData?.total || profile?.changes?.length || profile?.recent_changes || 0,
     },
@@ -240,7 +241,7 @@ export function UserLayout() {
                       onClick={() => {
                         setSwitcherOpen(false);
                         setSearchQuery("");
-                        nav(`/users/${encodeURIComponent(u.principal_name)}/${currentTab}`);
+                        nav(entityPath({ kind: "user", principal: u.principal_name, tab: currentTab === "changes" ? "changes" : "activity" }));
                       }}
                       className={`flex w-full items-center justify-between px-2 py-1 text-xs transition ${
                         u.principal_name === principal

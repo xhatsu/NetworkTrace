@@ -35,6 +35,8 @@ import {
   pct,
 } from "../components";
 import { useFilters } from "../App";
+import { EntityLink } from "../components/EntityLink";
+import { entityPath } from "../entityRoutes";
 
 export type PrincipalItem = {
   principal_name: string;
@@ -288,10 +290,10 @@ export function PrincipalDetailPage() {
                 {targets.map((t) => (
                   <tr
                     key={t.target_service}
-                    onClick={() => nav(`/services/${encodeURIComponent(t.target_service)}?${queryString(filters)}`)}
+                    onClick={() => nav(entityPath({ kind: "service", name: t.target_service }) + `?${queryString(filters)}`)}
                     className="cursor-pointer hover:bg-white/[0.03]"
                   >
-                    <td className="py-2.5 font-mono text-indigo-300 hover:underline">{t.target_service}</td>
+                    <td className="py-2.5 font-mono text-indigo-300"><EntityLink entity={{ kind: "service", name: t.target_service }} search={`?${queryString(filters)}`} className="hover:underline">{t.target_service}</EntityLink></td>
                     <td className="py-2.5 text-right font-mono text-[#c9d1d9]">{n(t.requests)}</td>
                     <td className="py-2.5 text-right font-mono">
                       <span className={t.error_rate > 0.05 ? "text-rose-400" : "text-emerald-400"}>

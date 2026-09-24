@@ -146,8 +146,21 @@ class InteractiveTopologyRepository:
             return "elasticsearch"
         return "clickhouse"
 
+    @property
+    def uses_worker_metric_buckets(self) -> bool:
+        """Whether topology reads should use worker rollups instead of edge tables.
+
+        Application traces can live in Elasticsearch while ClickHouse remains the
+        analytics store. In that split configuration the worker materializes
+        ``metric_buckets`` but does not create the ClickHouse trace edge tables.
+        """
+        return (
+            self.backend == "elasticsearch"
+            or settings.trace_storage_backend in ("elasticsearch", "elk")
+        )
+
     def data_bounds_ms(self) -> Tuple[Optional[int], Optional[int]]:
-        if self.backend == "elasticsearch":
+        if self.uses_worker_metric_buckets:
             with get_connection(self.db_path) as db:
                 row = db.execute(
                     "SELECT min(bucket_start), max(bucket_start) FROM metric_buckets FINAL WHERE bucket_size = 300"
@@ -577,7 +590,7 @@ class InteractiveTopologyRepository:
         filters: Optional[Dict[str, Any]], sort_dimension: str, page_size: int,
         search: Optional[str] = None, cursor: Optional[str] = None,
     ) -> Tuple[List[Dict[str, Any]], Optional[str]]:
-        if self.backend == "elasticsearch":
+        if self.uses_worker_metric_buckets:
             return self._metric_records_page(
                 dimensions, window["start_ms"], window["end_ms"], filters,
                 sort_dimension, page_size, search, cursor,
@@ -661,7 +674,7 @@ class InteractiveTopologyRepository:
 
     def _records_with_changes(self, table: str, dimensions: Sequence[str], filters: Optional[Dict[str, Any]], window: Dict[str, Any]) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]], bool]:
         duration = window["end_ms"] - window["start_ms"]
-        if self.backend == "elasticsearch":
+        if self.uses_worker_metric_buckets:
             current_rows = self._es_rows(dimensions, window, filters)
             previous_rows = self._es_rows(dimensions, {**window, "start_ms": window["start_ms"] - duration, "end_ms": window["start_ms"]}, filters)
             previous_available = bool(previous_rows)
@@ -686,8 +699,13 @@ class InteractiveTopologyRepository:
         return result, disappeared, previous_available
 
     def _has_history_before(self, table: str, before_ms: int) -> bool:
-        if self.backend == "elasticsearch":
-            return False
+        if self.uses_worker_metric_buckets:
+            with get_connection(self.db_path) as db:
+                row = db.execute(
+                    "SELECT 1 FROM metric_buckets FINAL WHERE bucket_size = 300 AND bucket_start < ? LIMIT 1",
+                    (before_ms // 1000,),
+                ).fetchone()
+            return bool(row)
         with get_connection(self.db_path) as db:
             row = db.execute(f"SELECT 1 FROM {table} WHERE bucket_start < ? LIMIT 1", (before_ms // 1000,)).fetchone()
         return bool(row)
@@ -727,6 +745,31 @@ class InteractiveTopologyRepository:
         }
 
     def _anonymous_summary(self, window: Dict[str, Any]) -> Dict[str, Any]:
+        if self.uses_worker_metric_buckets:
+            total_rows = self._es_rows([], window)
+            anon_rows = self._es_rows(
+                ["target_service", "target_api"], window,
+                {"principal": "-anonymous-"},
+            )
+            total = _safe_int(total_rows[0].get("request_count")) if total_rows else 0
+            anonymous = sum(_safe_int(row.get("request_count")) for row in anon_rows)
+            by_service: Dict[str, int] = {}
+            by_api: Dict[str, int] = {}
+            for row in anon_rows:
+                service = canonical_service(row.get("target_service"))
+                api = canonical_api(row.get("target_api"), service)
+                by_service[service] = by_service.get(service, 0) + _safe_int(row.get("request_count"))
+                by_api[api] = by_api.get(api, 0) + _safe_int(row.get("request_count"))
+            return {
+                "total_requests": total,
+                "identified_requests": max(0, total - anonymous),
+                "anonymous_requests": anonymous,
+                "identified_request_percentage": round(max(0, total - anonymous) / max(1, total) * 100, 2),
+                "anonymous_request_percentage": round(anonymous / max(1, total) * 100, 2),
+                "anonymous_tps": round(anonymous / max(1, window["duration_seconds"]), 3),
+                "top_services": [{"name": k, "requests": v} for k, v in sorted(by_service.items(), key=lambda x: (-x[1], x[0]))[:10]],
+                "top_apis": [{"name": k, "requests": v} for k, v in sorted(by_api.items(), key=lambda x: (-x[1], x[0]))[:10]],
+            }
         total_rows = self._query_records("topology_api_edges_5m", [], window["start_ms"], window["end_ms"])
         anon_rows = self._query_records("topology_principal_edges_5m", ["target_service", "target_api"], window["start_ms"], window["end_ms"], {"principal": "-anonymous-"})
         total = _safe_int(total_rows[0].get("request_count")) if total_rows else 0
@@ -750,7 +793,7 @@ class InteractiveTopologyRepository:
         }
 
     def service_graph(self, window: Dict[str, Any]) -> Dict[str, Any]:
-        if self.backend == "elasticsearch":
+        if self.uses_worker_metric_buckets:
             return self._es_graph(window)
         records, disappeared, history = self._records_with_changes("topology_service_edges_5m", ["caller_service", "target_service"], None, window)
         node_rows = self._query_records("topology_api_edges_5m", ["target_service"], window["start_ms"], window["end_ms"])
@@ -872,7 +915,10 @@ class InteractiveTopologyRepository:
         nodes_by_name: Dict[str, Dict[str, Any]] = {}
         edges = []
         for record in records:
-            caller = canonical_service(record["dimensions"].get("caller_service"))
+            caller_value = str(record["dimensions"].get("caller_service") or "").strip()
+            if not caller_value:
+                continue
+            caller = canonical_service(caller_value)
             service = canonical_service(record["dimensions"].get("target_service"))
             metrics = record["metrics"]
             nodes_by_name.setdefault(caller, {
@@ -902,7 +948,7 @@ class InteractiveTopologyRepository:
                 "disappeared_edges": disappeared,
                 "baseline": "previous_window" if history else "insufficient_history",
             },
-            "anonymous": self._anonymous_summary(window) if self.backend != "elasticsearch" else {},
+            "anonymous": self._anonymous_summary(window),
             "backend": self.backend,
         }
 
@@ -991,7 +1037,7 @@ class InteractiveTopologyRepository:
                 "new_nodes": [], "disappeared_nodes": [],
                 "baseline": "precomputed_rollup",
             },
-            "anonymous": self._anonymous_summary(window) if self.backend != "elasticsearch" else {},
+            "anonymous": self._anonymous_summary(window),
             "backend": self.backend,
         }
 
@@ -1031,21 +1077,31 @@ class InteractiveTopologyRepository:
                 "new_nodes": [], "disappeared_nodes": [],
                 "baseline": "precomputed_rollup",
             },
-            "anonymous": self._anonymous_summary(window) if self.backend != "elasticsearch" else {},
+            "anonymous": self._anonymous_summary(window),
             "backend": self.backend,
         }
 
     def service_metrics(self, service: str, window: Dict[str, Any]) -> Dict[str, Any]:
         service = canonical_service(service)
-        rows = self._query_records("topology_api_edges_5m", ["target_service"], window["start_ms"], window["end_ms"], {"target_service": service})
-        previous = self._query_records("topology_api_edges_5m", ["target_service"], window["start_ms"] - (window["end_ms"] - window["start_ms"]), window["start_ms"], {"target_service": service})
+        if self.uses_worker_metric_buckets:
+            rows = self._es_rows(["target_service"], window, {"target_service": service})
+            duration = window["end_ms"] - window["start_ms"]
+            previous_window = {**window, "start_ms": window["start_ms"] - duration, "end_ms": window["start_ms"]}
+            previous = self._es_rows(["target_service"], previous_window, {"target_service": service})
+            callers = self._es_rows(["caller_service"], window, {"target_service": service})
+            targets = self._es_rows(["target_service"], window, {"caller_service": service})
+            apis = self._es_rows(["target_api"], window, {"target_service": service})
+            callers = [row for row in callers if str(row.get("caller_service") or "").strip()]
+        else:
+            rows = self._query_records("topology_api_edges_5m", ["target_service"], window["start_ms"], window["end_ms"], {"target_service": service})
+            previous = self._query_records("topology_api_edges_5m", ["target_service"], window["start_ms"] - (window["end_ms"] - window["start_ms"]), window["start_ms"], {"target_service": service})
+            callers = self._query_records("topology_service_edges_5m", ["caller_service"], window["start_ms"], window["end_ms"], {"target_service": service})
+            targets = self._query_records("topology_service_edges_5m", ["target_service"], window["start_ms"], window["end_ms"], {"caller_service": service})
+            apis = self._query_records("topology_api_edges_5m", ["target_api"], window["start_ms"], window["end_ms"], {"target_service": service})
         metrics = self._metrics(rows[0] if rows else None, window["duration_seconds"])
         metrics["change"] = self._delta(metrics, self._metrics(previous[0], window["duration_seconds"]) if previous else None, bool(previous) or self._has_history_before("topology_api_edges_5m", window["start_ms"]))
         series = self._series("topology_api_edges_5m", {"target_service": service}, window)
         metrics.update(self._series_bandwidth_summary(series, window["duration_seconds"]))
-        callers = self._query_records("topology_service_edges_5m", ["caller_service"], window["start_ms"], window["end_ms"], {"target_service": service})
-        targets = self._query_records("topology_service_edges_5m", ["target_service"], window["start_ms"], window["end_ms"], {"caller_service": service})
-        apis = self._query_records("topology_api_edges_5m", ["target_api"], window["start_ms"], window["end_ms"], {"target_service": service})
         entity = {"id": f"service:{service}", "name": service, "type": "service", "service": service, "groups": {"traffic": {k: metrics[k] for k in ("tps", "request_count", "request_bytes", "response_bytes", "total_bytes", "average_request_bytes", "average_response_bytes", "request_bytes_per_second", "response_bytes_per_second", "bandwidth_bytes_per_second", "bandwidth_bits_per_second")}, "performance": {k: metrics[k] for k in ("p50_latency_ms", "p95_latency_ms", "p99_latency_ms")}, "reliability": {k: metrics[k] for k in ("error_rate", "http_4xx_rate", "http_5xx_rate", "timeout_count", "tcp_reset_count", "incomplete_count")}, "dependencies": {"caller_service_count": len(callers), "target_service_count": len(targets), "api_count": len(apis), "active_principal_count": metrics["unique_principals"]}, "change": metrics["change"]}}
         return {"entity": entity, "metrics": metrics, "series": series, "changes": {"baseline": metrics["change"].get("baseline")}, "anonymous": self._anonymous_summary(window), "backend": self.backend}
 
@@ -1071,7 +1127,10 @@ class InteractiveTopologyRepository:
         filters = {"target_api": api}
         if service:
             filters["target_service"] = canonical_service(service)
-        rows = self._query_records("topology_principal_edges_5m", ["target_service", "target_api"], window["start_ms"], window["end_ms"], filters)
+        if self.uses_worker_metric_buckets:
+            rows = self._es_rows(["target_service", "target_api"], window, filters)
+        else:
+            rows = self._query_records("topology_principal_edges_5m", ["target_service", "target_api"], window["start_ms"], window["end_ms"], filters)
         metrics = self._metrics(rows[0] if rows else None, window["duration_seconds"])
         series = self._series("topology_principal_edges_5m", filters, window)
         metrics.update(self._series_bandwidth_summary(series, window["duration_seconds"]))
@@ -1080,12 +1139,17 @@ class InteractiveTopologyRepository:
 
     def principal_metrics(self, principal: str, window: Dict[str, Any]) -> Dict[str, Any]:
         principal = canonical_principal(principal)
-        rows = self._query_records("topology_principal_edges_5m", ["principal"], window["start_ms"], window["end_ms"], {"principal": principal})
+        if self.uses_worker_metric_buckets:
+            rows = self._es_rows(["principal"], window, {"principal": principal})
+            services = self._es_rows(["target_service"], window, {"principal": principal})
+            apis = self._es_rows(["target_api"], window, {"principal": principal})
+        else:
+            rows = self._query_records("topology_principal_edges_5m", ["principal"], window["start_ms"], window["end_ms"], {"principal": principal})
+            services = self._query_records("topology_principal_edges_5m", ["target_service"], window["start_ms"], window["end_ms"], {"principal": principal})
+            apis = self._query_records("topology_principal_edges_5m", ["target_api"], window["start_ms"], window["end_ms"], {"principal": principal})
         metrics = self._metrics(rows[0] if rows else None, window["duration_seconds"])
         series = self._series("topology_principal_edges_5m", {"principal": principal}, window)
         metrics.update(self._series_bandwidth_summary(series, window["duration_seconds"]))
-        services = self._query_records("topology_principal_edges_5m", ["target_service"], window["start_ms"], window["end_ms"], {"principal": principal})
-        apis = self._query_records("topology_principal_edges_5m", ["target_api"], window["start_ms"], window["end_ms"], {"principal": principal})
         entity = {"id": f"principal:{principal}", "name": principal, "type": "principal", "principal": principal, "groups": {"overview": {k: metrics[k] for k in ("tps", "request_count", "p95_latency_ms", "p99_latency_ms", "error_rate", "request_bytes", "response_bytes", "total_bytes", "request_bytes_per_second", "response_bytes_per_second", "bandwidth_bytes_per_second", "bandwidth_bits_per_second", "unique_source_ips", "first_seen_ms", "last_seen_ms")}, "paths": {"services_used": len(services), "apis_used": len(apis)}}}
         return {"entity": entity, "metrics": metrics, "series": series, "changes": {"baseline": "previous_window"}, "anonymous": self._anonymous_summary(window), "backend": self.backend}
 
@@ -1259,15 +1323,25 @@ class InteractiveTopologyRepository:
 
     def _es_graph(self, window: Dict[str, Any]) -> Dict[str, Any]:
         rows = self._es_rows(["caller_service", "target_service"], window)
+        target_rows = self._es_rows(["target_service"], window)
         nodes: Dict[str, Any] = {}
         edges = []
+        for row in target_rows:
+            target = canonical_service(row.get("target_service"))
+            nodes[target] = {
+                "id": f"service:{target}", "name": target, "type": "service",
+                "service": target, "metrics": self._metrics(row, window["duration_seconds"]),
+            }
         for row in rows:
-            c, t = canonical_service(row.get("caller_service")), canonical_service(row.get("target_service"))
+            caller_value = str(row.get("caller_service") or "").strip()
+            if not caller_value:
+                continue
+            c, t = canonical_service(caller_value), canonical_service(row.get("target_service"))
             metrics = self._metrics(row, window["duration_seconds"])
-            for name in (c, t):
-                nodes.setdefault(name, {"id": f"service:{name}", "name": name, "type": "service", "service": name, "metrics": metrics})
+            nodes.setdefault(c, {"id": f"service:{c}", "name": c, "type": "service", "service": c, "metrics": metrics})
+            nodes.setdefault(t, {"id": f"service:{t}", "name": t, "type": "service", "service": t, "metrics": metrics})
             edges.append({"id": service_edge_id(c, t), "source": f"service:{c}", "target": f"service:{t}", "source_name": c, "target_name": t, "metrics": metrics, "evidence_type": "direct", "direct": True, "inferred": False})
-        return {"window": window, "nodes": list(nodes.values()), "edges": edges, "changes": {"baseline": "insufficient_history", "new_edges": [], "disappeared_edges": []}, "anonymous": {"total_requests": sum(_safe_int(r.get("request_count")) for r in rows), "identified_requests": 0, "anonymous_requests": 0, "identified_request_percentage": 0.0, "anonymous_request_percentage": 0.0, "anonymous_tps": 0.0, "top_services": [], "top_apis": []}, "backend": self.backend}
+        return {"window": window, "nodes": list(nodes.values()), "edges": edges, "changes": {"baseline": "insufficient_history", "new_edges": [], "disappeared_edges": []}, "anonymous": self._anonymous_summary(window), "backend": self.backend}
 
     def _es_expansion(self, kind: str, service: str, api: str, window: Dict[str, Any]) -> Dict[str, Any]:
         filters = {"target_service": service}

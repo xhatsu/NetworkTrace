@@ -8,6 +8,8 @@ import { useFilters } from "../../App";
 import { ErrorState, Loading, MetricCard, Panel } from "../../components";
 import { InvestigationPanel } from "../../components/InvestigationPanel";
 import { useI18n } from "../../i18n";
+import { entityPath } from "../../entityRoutes";
+import { EntityLink } from "../../components/EntityLink";
 import {
   EpisodeBaselineNote,
   EpisodeCard,
@@ -97,8 +99,9 @@ export function UserChangesTab() {
           <label className="relative ml-auto"><Search size={13} className="absolute left-2 top-1.5 text-[#7b7d80]" /><input value={search} onChange={(event) => setSearch(event.target.value)} placeholder={t("Search changes...", "Tìm thay đổi...")} className="toolbar-control h-7 w-52 pl-7 pr-2 text-[11px] placeholder:text-[#7b7d80]" /></label>
         </div>
         {query.isLoading ? <Loading /> : query.error ? <ErrorState message={query.error.message} /> : visible.length ? <div>{visible.map((episode) => {
-          const detailUrl = `/users/${encodeURIComponent(principal)}/changes/${encodeURIComponent(episode.id)}?${queryString(filters)}`;
-          return <EpisodeCard key={episode.id} episode={episode} timezone={filters.timezone} onOpen={() => nav(detailUrl)} onInvestigate={() => nav(`${detailUrl}#ai-investigation`)} />;
+          const detailSearch = `?${queryString(filters, { principal })}`;
+          const detailUrl = `${entityPath({ kind: "change", id: episode.id })}${detailSearch}`;
+          return <EpisodeCard key={episode.id} episode={episode} timezone={filters.timezone} detailSearch={detailSearch} onInvestigate={() => nav(`${detailUrl}#ai-investigation`)} />;
         })}</div> : <div className="p-10 text-center text-xs text-[#7b7d80]">{t("No changes match these filters.", "Không có thay đổi phù hợp với bộ lọc.")}</div>}
       </Panel>
     </div>
@@ -138,7 +141,7 @@ export function UserChangeDetailPage() {
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap items-start justify-between gap-3 border-b border-[#2a2d30] pb-3">
-        <div><button type="button" onClick={() => nav(`/users/${encodeURIComponent(principal)}/changes?${queryString(filters)}`)} className="mb-2 inline-flex items-center gap-1 text-[11px] text-[#5794f2] hover:text-[#d8d9da]"><ArrowLeft size={12} />{t("Back to Changes", "Quay lại Changes")}</button><div className="flex flex-wrap items-center gap-2"><EpisodeStatusBadge episode={episode} /><EpisodeWorkflowBadge episode={episode} /><span className="font-mono text-[11px] text-[#7b7d80]">{principal}</span></div><h2 className="mt-2 text-lg font-semibold text-[#d8d9da]">{episodeTitle(episode, t)}</h2><p className="mt-1 text-xs text-[#a7a9ab]">{t("Started", "Bắt đầu")} {formatEpisodeTime(episode.started_at, true, filters.timezone)} · {t("Last observed", "Quan sát gần nhất")} {formatEpisodeTime(episode.last_seen_at, true, filters.timezone)}</p><div className="mt-2"><EpisodePath episode={episode} /></div></div>
+        <div><button type="button" onClick={() => nav(`/users/${encodeURIComponent(principal)}/changes?${queryString(filters)}`)} className="mb-2 inline-flex items-center gap-1 text-[11px] text-[#5794f2] hover:text-[#d8d9da]"><ArrowLeft size={12} />{t("Back to Changes", "Quay lại Changes")}</button><div className="flex flex-wrap items-center gap-2"><EpisodeStatusBadge episode={episode} /><EpisodeWorkflowBadge episode={episode} /><EntityLink entity={{ kind: "user", principal }} className="font-mono text-[11px] text-[#d9b4ea] hover:underline">{principal}</EntityLink></div><h2 className="mt-2 text-lg font-semibold text-[#d8d9da]">{episodeTitle(episode, t)}</h2><p className="mt-1 text-xs text-[#a7a9ab]">{t("Started", "Bắt đầu")} {formatEpisodeTime(episode.started_at, true, filters.timezone)} · {t("Last observed", "Quan sát gần nhất")} {formatEpisodeTime(episode.last_seen_at, true, filters.timezone)}</p><div className="mt-2"><EpisodePath episode={episode} /></div></div>
         <div className="flex flex-wrap gap-2"><button type="button" onClick={() => aiSectionRef.current?.scrollIntoView({ behavior: "smooth", block: "start" })} className="btn border-[#b877d9]/50 text-[#b877d9]"><BrainCircuit size={13} />{t("Investigate with AI", "Điều tra bằng AI")}</button><button type="button" disabled={decision.isPending} onClick={() => decision.mutate("expected")} className="btn text-[#73bf69]">{canMarkEpisodeExpected(episode) ? t("Expected behavior", "Hành vi dự kiến") : t("Suppress finding", "Ẩn finding")}</button></div>
       </div>
       <Panel title={t("What changed", "Điều gì đã thay đổi")} subtitle={t("A deterministic summary before any AI interpretation.", "Tóm tắt xác định trước mọi diễn giải của AI.")}><div className="space-y-3 p-4"><p className="max-w-4xl text-sm leading-6 text-[#d8d9da]">{episode.summary}</p><p className="max-w-4xl text-xs leading-5 text-[#a7a9ab]">{episode.explanation}</p><EpisodeBaselineNote episode={episode} /></div></Panel>

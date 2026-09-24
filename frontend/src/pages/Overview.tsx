@@ -16,6 +16,7 @@ import { useFilters } from "../App";
 import { useI18n } from "../i18n";
 import type { SeriesPoint, Summary } from "../types";
 import { episodeStatusClass, episodeStatusLabel, type Episode, type EpisodeResponse } from "../components/EpisodePrimitives";
+import { EntityLink } from "../components/EntityLink";
 
 type UserSummary = {
   observed_principals: number;
@@ -68,11 +69,6 @@ function formatTooltipTime(value: unknown, timezone: string) {
   } catch {
     return new Date(Number(value)).toLocaleString();
   }
-}
-
-function changeHref(change: Episode, filters: ReturnType<typeof useFilters>["filters"]) {
-  const qs = queryString(filters);
-  return `/changes/${encodeURIComponent(change.id)}${qs ? `?${qs}` : ""}`;
 }
 
 export function OverviewPage() {
@@ -283,14 +279,20 @@ export function OverviewPage() {
           {importantChanges.length ? (
             <div role="region" aria-label={t("Important changes list")} tabIndex={0} className="max-h-[284px] overflow-y-auto overscroll-contain scrollbar divide-y divide-[#2a2d30] xl:max-h-[196px]">
               {importantChanges.map((change) => (
-                <button key={change.id} onClick={() => nav(changeHref(change, filters))} className="flex w-full items-start gap-2.5 px-3 py-2 text-left transition hover:bg-[#181b1f]">
+                <div key={change.id} className="flex items-start gap-2.5 px-3 py-2 transition hover:bg-[#181b1f]">
                   <span className={`mt-0.5 border px-1.5 py-0.5 text-[9px] font-bold uppercase ${episodeStatusClass(change.state)}`}>{episodeStatusLabel(change.state, t)}</span>
                   <span className="min-w-0 flex-1">
-                    <span className="block truncate text-xs font-semibold text-[#d8d9da]">{change.summary}</span>
-                    <span className="mt-0.5 block truncate text-[10px] text-[#a7a9ab]">{change.context.target || change.context.caller || t("Estate")}{` · ${change.subject.name}`}</span>
+                    <EntityLink entity={{ kind: "change", id: change.id }} search={`?${queryString(filters)}`} className="block truncate text-xs font-semibold text-[#d8d9da] hover:text-[#5794f2]">{change.summary}</EntityLink>
+                    <span className="mt-0.5 flex flex-wrap gap-x-1 text-[10px] text-[#a7a9ab]">
+                      {change.context.target && <EntityLink entity={{ kind: "service", name: change.context.target }}>{change.context.target}</EntityLink>}
+                      {change.context.caller && <EntityLink entity={{ kind: "service", name: change.context.caller }}>{change.context.caller}</EntityLink>}
+                      {change.subject.type === "user"
+                        ? <EntityLink entity={{ kind: "user", principal: change.subject.name }}>{change.subject.name}</EntityLink>
+                        : <EntityLink entity={{ kind: "service", name: change.subject.name }}>{change.subject.name}</EntityLink>}
+                    </span>
                   </span>
                   <span className="shrink-0 font-mono text-[10px] text-[#7b7d80]">{change.last_seen_at ? formatTime(change.last_seen_at, filters.timezone) : "—"}</span>
-                </button>
+                </div>
               ))}
             </div>
           ) : (
@@ -318,7 +320,7 @@ export function OverviewPage() {
                 {serviceHotspots.map((service) => (
                   <tr key={service.name} className="hover:bg-[#181b1f]">
                     <td className="px-3 py-2">
-                      <button onClick={() => nav(`/services/${encodeURIComponent(service.name)}`)} className="text-left font-semibold text-[#d8d9da] hover:text-[#5794f2]">{service.name}</button>
+                      <EntityLink entity={{ kind: "service", name: service.name }} className="text-left font-semibold text-[#d8d9da] hover:text-[#5794f2]">{service.name}</EntityLink>
                       <span className="block text-[10px] text-[#7b7d80]">{service.environment || "—"}</span>
                     </td>
                     <td className="px-3 py-2 text-right font-mono text-[#5794f2] tabular-nums">{n(service.rps, 2)}</td>
@@ -350,9 +352,9 @@ export function OverviewPage() {
                 {userHotspots.length ? userHotspots.map((user) => (
                   <tr key={user.principal_name} className="hover:bg-[#181b1f]">
                     <td className="px-3 py-2">
-                      <button onClick={() => nav(`/users/${encodeURIComponent(user.principal_name)}/activity`)} className="flex items-center gap-1.5 text-left font-semibold text-[#d8d9da] hover:text-[#5794f2]">
+                      <EntityLink entity={{ kind: "user", principal: user.principal_name }} className="flex items-center gap-1.5 text-left font-semibold text-[#d8d9da] hover:text-[#5794f2]">
                         <UserRound size={13} className="text-[#5794f2]" />{user.principal_name}
-                      </button>
+                      </EntityLink>
                     </td>
                     <td className="px-3 py-2 text-right font-mono text-[#5794f2] tabular-nums">{n(Number(user.total_requests || 0) / windowSeconds, 2)}</td>
                     <td className="px-3 py-2 text-right font-mono text-[#a7a9ab] tabular-nums">{n(user.unique_targets, 0)}</td>
@@ -362,9 +364,9 @@ export function OverviewPage() {
                 )) : changedUsers.map(([principal, count]) => (
                   <tr key={principal} className="hover:bg-[#181b1f]">
                     <td className="px-3 py-2">
-                      <button onClick={() => nav(`/users/${encodeURIComponent(principal)}/activity`)} className="flex items-center gap-1.5 text-left font-semibold text-[#d8d9da] hover:text-[#5794f2]">
+                      <EntityLink entity={{ kind: "user", principal }} className="flex items-center gap-1.5 text-left font-semibold text-[#d8d9da] hover:text-[#5794f2]">
                         <UserRound size={13} className="text-[#5794f2]" />{principal}
-                      </button>
+                      </EntityLink>
                     </td>
                     <td className="px-3 py-2 text-right font-mono text-[#7b7d80]">—</td>
                     <td className="px-3 py-2 text-right font-mono text-[#7b7d80]">—</td>

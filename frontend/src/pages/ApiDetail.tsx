@@ -1,6 +1,6 @@
 import { useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { useNavigate, useParams } from "react-router-dom";
+import { Link, useNavigate, useParams } from "react-router-dom";
 import {
   CartesianGrid,
   Line,
@@ -12,6 +12,8 @@ import {
 } from "recharts";
 import { Activity, ArrowLeft, ArrowRight, Network, Users } from "lucide-react";
 import { EpisodeStatusBadge, type EpisodeResponse } from "../components/EpisodePrimitives";
+import { EntityLink } from "../components/EntityLink";
+import { entityPath } from "../entityRoutes";
 import { api, queryString } from "../api";
 import { ErrorState, Loading, MetricCard, Page, Panel, TpsLineChart, chartTooltip, n, pct } from "../components";
 import { useFilters } from "../App";
@@ -153,18 +155,16 @@ export function ApiDetailPage() {
       title={displayName}
       description={`${t("Service")}: ${service} · ${t("Observed API performance and identity context")}`}
       actions={(
-        <button type="button" className="btn" onClick={() => nav(`/services/${encodeURIComponent(service)}?${qs}`)}>
-          <ArrowLeft size={13} /> {t("Back to service")}
-        </button>
+        <EntityLink entity={{ kind: "service", name: service }} search={`?${qs}`} className="btn"><ArrowLeft size={13} /> {t("Back to service")}</EntityLink>
       )}
     >
       {/* 1. Header context */}
       <div className="flex flex-wrap items-center gap-2 text-xs text-[#a7a9ab]">
-        <button type="button" onClick={() => nav(`/services/${encodeURIComponent(service)}?${qs}`)} className="inline-flex items-center gap-1.5 rounded-[2px] border border-[#5794f2]/40 bg-[#5794f2]/10 px-2 py-1 font-mono text-[#5794f2] hover:underline">
+        <EntityLink entity={{ kind: "service", name: service }} search={`?${qs}`} className="inline-flex items-center gap-1.5 rounded-[2px] border border-[#5794f2]/40 bg-[#5794f2]/10 px-2 py-1 font-mono text-[#5794f2] hover:underline">
           <Activity size={12} /> {service}
-        </button>
+        </EntityLink>
         <span className="text-[#7b7d80]">/</span>
-        <span className="font-mono text-[#d8d9da]">{displayName}</span>
+        <EntityLink entity={{ kind: "api", service, operation: apiName }} className="font-mono text-[#d8d9da] hover:text-[#56b9a8]">{displayName}</EntityLink>
         <span className={`rounded-[2px] border px-2 py-0.5 text-[10px] font-semibold uppercase ${changeStatus === "changed" || changeStatus === "new" ? "border-[#ff9830]/40 bg-[#ff9830]/10 text-[#ff9830]" : "border-[#73bf69]/40 bg-[#73bf69]/10 text-[#73bf69]"}`}>
           {changeStatus}
         </span>
@@ -217,8 +217,8 @@ export function ApiDetailPage() {
                 {users.map((user) => {
                   const userMetrics = user.metrics || {};
                   return (
-                    <tr key={user.id || user.name} onClick={() => nav(`/users/${encodeURIComponent(user.name)}/activity?${qs}`)} className="cursor-pointer hover:bg-[#181b1f] transition">
-                      <td className="px-3 py-2 font-mono text-[#5794f2]"><Users size={12} className="mr-1 inline" />{user.name}</td>
+                    <tr key={user.id || user.name} onClick={() => nav(entityPath({ kind: "user", principal: user.name }) + `?${qs}`)} className="cursor-pointer hover:bg-[#181b1f] transition">
+                      <td className="px-3 py-2 font-mono text-[#5794f2]"><Users size={12} className="mr-1 inline" /><EntityLink entity={{ kind: "user", principal: user.name }} search={`?${qs}`} className="hover:underline">{user.name}</EntityLink></td>
                       <td className="px-3 font-mono tabular-nums text-[#d8d9da]">{n(userMetrics.request_count || 0, 0)}</td>
                       <td className="px-3 font-mono tabular-nums text-[#5794f2]">{n(userMetrics.tps || 0, 2)}</td>
                       <td className="px-3 font-mono tabular-nums text-[#f2495c]">{pct(userMetrics.error_rate || 0)}</td>
@@ -238,7 +238,7 @@ export function ApiDetailPage() {
           <div className="divide-y divide-[#2a2d30]">
             {callers.map((caller) => (
               <div key={caller.id || caller.name} className="flex items-center justify-between px-3 py-2.5 text-xs hover:bg-[#181b1f]">
-                <button type="button" onClick={() => nav(`/services/${encodeURIComponent(caller.name)}?${qs}`)} className="font-semibold text-[#d8d9da] hover:text-[#5794f2]">{caller.name}</button>
+                <EntityLink entity={{ kind: "service", name: caller.name }} search={`?${qs}`} className="font-semibold text-[#d8d9da] hover:text-[#5794f2]">{caller.name}</EntityLink>
                 <span className="font-mono text-[#5794f2] tabular-nums">{n(caller.metrics?.tps || 0, 2)} TPS <span className="text-[#7b7d80]">· {pct(caller.metrics?.error_rate || 0)}</span></span>
               </div>
             ))}
@@ -259,18 +259,22 @@ export function ApiDetailPage() {
         ) : changes.length ? (
           <div className="divide-y divide-[#2a2d30]">
             {changes.slice(0, 5).map((change) => (
-              <button
-                key={change.id}
-                onClick={() => nav(`/changes/${encodeURIComponent(change.id)}?${qs}`)}
-                className="flex w-full items-start gap-2.5 px-3 py-2.5 text-left transition hover:bg-[#181b1f]"
-              >
+              <div key={change.id} className="flex items-start gap-2.5 px-3 py-2.5 transition hover:bg-[#181b1f]">
                 <EpisodeStatusBadge episode={change} />
                 <span className="min-w-0 flex-1">
-                  <span className="block truncate text-xs font-semibold text-[#d8d9da]">{change.summary}</span>
-                  <span className="mt-0.5 block truncate text-[10px] text-[#7b7d80]">{change.context.operation || change.context.target || change.subject.name}</span>
+                  <EntityLink entity={{ kind: "change", id: change.id }} search={`?${qs}`} className="block truncate text-xs font-semibold text-[#d8d9da] hover:text-[#5794f2]">{change.summary}</EntityLink>
+                  <div className="mt-0.5 truncate text-[10px] text-[#7b7d80]">
+                    {change.context.operation && change.context.target
+                      ? <EntityLink entity={{ kind: "api", service: change.context.target, operation: change.context.operation }}>{change.context.operation}</EntityLink>
+                      : change.context.target
+                        ? <EntityLink entity={{ kind: "service", name: change.context.target }}>{change.context.target}</EntityLink>
+                        : change.subject.type === "user"
+                          ? <EntityLink entity={{ kind: "user", principal: change.subject.name }}>{change.subject.name}</EntityLink>
+                          : <EntityLink entity={{ kind: "service", name: change.subject.name }}>{change.subject.name}</EntityLink>}
+                  </div>
                 </span>
                 <span className="shrink-0 font-mono text-[10px] text-[#7b7d80]">{change.last_seen_at ? new Date(change.last_seen_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : "—"}</span>
-              </button>
+              </div>
             ))}
           </div>
         ) : (
@@ -305,8 +309,8 @@ export function ApiDetailPage() {
                     onClick={() => nav(`/traces/${encodeURIComponent(tr.trace_id || tr.id)}`)}
                     className="cursor-pointer hover:bg-[#181b1f] transition"
                   >
-                    <td className="px-3 py-2 font-mono text-[#5794f2]">{(tr.trace_id || tr.id || "").slice(0, 16)}…</td>
-                    <td className="px-3 font-mono text-[#a7a9ab]">{tr.principal_name || tr.user || "—"}</td>
+                      <td className="px-3 py-2 font-mono text-[#5794f2]"><Link to={`/traces/${encodeURIComponent(tr.trace_id || tr.id)}`} className="hover:underline">{(tr.trace_id || tr.id || "").slice(0, 16)}…</Link></td>
+                    <td className="px-3 font-mono text-[#a7a9ab]">{(tr.principal_name || tr.user) ? <EntityLink entity={{ kind: "user", principal: tr.principal_name || tr.user }}>{tr.principal_name || tr.user}</EntityLink> : "—"}</td>
                     <td className="px-3 text-right font-mono tabular-nums text-[#d8d9da]">{tr.duration_ms != null ? `${Number(tr.duration_ms).toFixed(1)} ms` : "—"}</td>
                     <td className="px-3 text-right font-mono">
                       <span className={`rounded-[2px] px-1.5 py-0.5 text-[10px] uppercase font-semibold ${String(tr.status_code || tr.http_status || tr.status).startsWith("5") ? "text-[#f2495c] bg-[#f2495c]/10" : "text-[#73bf69] bg-[#73bf69]/10"}`}>

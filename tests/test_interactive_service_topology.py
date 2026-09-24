@@ -179,6 +179,81 @@ def test_materialized_topology_has_metrics_evidence_anonymous_and_ip_status(tmp_
     assert performance["kpis"]["current_5m"]["bandwidth_bits_per_second"] == 48.0
 
 
+def test_split_trace_storage_topology_reads_worker_metric_buckets(tmp_path, monkeypatch):
+    from backend.app.models.aggregate import MetricBucket
+    from backend.app.repositories.aggregate_repository import AggregateRepository
+    from backend.config import settings
+
+    db_path = tmp_path / "split-trace-topology.db"
+    StorageRepository(db_path).migrate()
+    bucket_start = int(time.time() // 300) * 300
+    AggregateRepository(str(db_path)).save_buckets([MetricBucket(
+        bucket_start=bucket_start,
+        bucket_size=300,
+        caller_service="",
+        target_service="navidrome",
+        principal_name="-anonymous-",
+        operation="navidrome/SELECT artwork_queue",
+        request_count=15,
+        error_count=2,
+        latency_sum=630,
+        latency_avg=42,
+        latency_min=10,
+        latency_max=90,
+        latency_p50=35,
+        latency_p95=84,
+        latency_p99=90,
+        request_bytes=300,
+        response_bytes=900,
+        request_bytes_samples=15,
+        response_bytes_samples=15,
+    )])
+    monkeypatch.setattr(settings, "storage_backend", "clickhouse")
+    monkeypatch.setattr(settings, "trace_storage_backend", "elasticsearch")
+
+    repo = InteractiveTopologyRepository(str(db_path))
+    window = {
+        "start_ms": bucket_start * 1000,
+        "end_ms": (bucket_start + 300) * 1000,
+        "duration_seconds": 300,
+        "label": "5m",
+        "baseline": "previous_window",
+    }
+
+    graph = repo.service_graph(window)
+    assert [node["name"] for node in graph["nodes"]] == ["navidrome"]
+    assert graph["edges"] == []
+    assert graph["nodes"][0]["metrics"]["request_count"] == 15
+
+    apis = repo.service_apis("navidrome", window)
+    assert [node["name"] for node in apis["nodes"]] == ["navidrome/SELECT artwork_queue"]
+    assert apis["nodes"][0]["metrics"]["request_count"] == 15
+
+    search = repo.search_entities("artwork_queue", window)
+    assert any(item["type"] == "api" and "artwork_queue" in item["name"] for item in search["items"])
+
+    service_metrics = repo.service_metrics("navidrome", window)
+    assert service_metrics["metrics"]["request_count"] == 15
+    assert service_metrics["entity"]["groups"]["dependencies"]["api_count"] == 1
+
+    async def request_topology_api():
+        import backend.app.api.topology as topology_api
+
+        monkeypatch.setattr(topology_api, "InteractiveTopologyRepository", lambda: repo)
+        transport = httpx.ASGITransport(app=app)
+        async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+            query = f"window=5m&from={window['start_ms']}&to={window['end_ms']}"
+            service_response = await client.get("/api/v1/topology/services?" + query)
+            api_response = await client.get("/api/v1/topology/services/navidrome/apis?" + query)
+        return service_response, api_response
+
+    service_response, api_response = asyncio.run(request_topology_api())
+    assert service_response.status_code == 200
+    assert "navidrome" in {node["name"] for node in service_response.json()["nodes"]}
+    assert api_response.status_code == 200
+    assert api_response.json()["nodes"][0]["name"] == "navidrome/SELECT artwork_queue"
+
+
 def test_topology_api_rejects_invalid_window_without_store_access():
     async def request():
         transport = httpx.ASGITransport(app=app)

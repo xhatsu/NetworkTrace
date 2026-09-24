@@ -13,6 +13,7 @@ import { api, queryString } from "../api";
 import { ErrorState, Loading, Page, Panel, n, pct } from "../components";
 import { useFilters } from "../App";
 import type { Edge, NodeItem } from "../types";
+import { EntityLink } from "../components/EntityLink";
 type Graph = {
   nodes: NodeItem[];
   edges: Edge[];
@@ -381,10 +382,10 @@ function Selection({
           </div>
           <div className="space-y-1">
             {item.top_principals.map((p) => (
-              <button onClick={()=>nav(`/users/${encodeURIComponent(p.principal_name)}`)} key={p.principal_name} className="flex w-full items-center justify-between text-xs bg-white/[0.02] p-2 rounded border border-[rgba(255,255,255,0.06)] hover:border-indigo-500/40">
-                <span className="font-mono text-indigo-300 truncate max-w-[170px]">{p.principal_name}</span>
+              <div key={p.principal_name} className="flex w-full items-center justify-between text-xs bg-white/[0.02] p-2 rounded border border-[rgba(255,255,255,0.06)] hover:border-indigo-500/40">
+                <EntityLink entity={{ kind: "user", principal: p.principal_name }} className="max-w-[170px] truncate font-mono text-indigo-300 hover:underline">{p.principal_name}</EntityLink>
                 <span className="font-mono text-[#8b949e] text-[10px]">{n(p.requests)} reqs</span>
-              </button>
+              </div>
             ))}
           </div>
         </div>

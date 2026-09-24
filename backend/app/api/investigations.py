@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import hmac
 from typing import Any
+from urllib.parse import urlencode
 from uuid import UUID
 
 from fastapi import APIRouter, Body, Depends, Header, HTTPException, Query, Request
@@ -69,12 +70,102 @@ def _ref(kind: str, identifier: str) -> FindingRef:
     raise ValueError("unsupported finding kind")
 
 
+def _operator_view(row: dict[str, Any]) -> dict[str, Any]:
+    """Build trusted operator navigation from the immutable server snapshot."""
+    snapshot = row.get("snapshot") if isinstance(row.get("snapshot"), dict) else {}
+    dimensions = snapshot.get("dimensions") if isinstance(snapshot.get("dimensions"), dict) else {}
+    facts = snapshot.get("source_facts") if isinstance(snapshot.get("source_facts"), dict) else {}
+    result = row.get("result") if isinstance(row.get("result"), dict) else {}
+    hypotheses = result.get("hypotheses") if isinstance(result.get("hypotheses"), list) else []
+    hypothesis = hypotheses[0] if hypotheses and isinstance(hypotheses[0], dict) else {}
+
+    def service_ref(name: Any) -> dict[str, str] | None:
+        return {"kind": "service", "name": name} if isinstance(name, str) and name.strip() else None
+
+    caller = service_ref(dimensions.get("caller_service"))
+    target = service_ref(dimensions.get("target_service"))
+    principal = dimensions.get("principal_name")
+    user = ({"kind": "user", "principal": principal}
+            if isinstance(principal, str) and principal.strip() and principal not in {"unknown", "-anonymous-"} else None)
+    operation = dimensions.get("operation")
+    api = ({"kind": "api", "service": target["name"], "operation": operation}
+           if target and isinstance(operation, str) and operation.strip() else None)
+
+    relationship = []
+    for value, entity in ((dimensions.get("caller_service"), caller), (dimensions.get("target_service"), target), (operation, api)):
+        if entity and isinstance(value, str) and value.strip():
+            relationship.append({"text": value, "entity": entity})
+    evidence = []
+    entities = [entity for entity in (caller, target, api, user) if entity]
+    if relationship or user:
+        evidence.append({
+            "label": "Observed relationship and identity" if user else "Observed relationship",
+            "relationship": relationship,
+            "entities": entities,
+        })
+
+    baseline, current = facts.get("baseline"), facts.get("current")
+    if isinstance(baseline, (int, float)) and not isinstance(baseline, bool) and isinstance(current, (int, float)) and not isinstance(current, bool):
+        source_type = str(facts.get("type") or "").lower()
+        if "latency" in source_type:
+            label, unit = "P95 latency", " ms"
+        elif "error" in source_type:
+            label, unit = "Error rate", "%"
+        elif any(token in source_type for token in ("traffic", "spike", "drop")):
+            label, unit = "TPS", ""
+        else:
+            label, unit = "Observed metric", ""
+        if unit == "%":
+            value = f"{float(baseline) * 100:.1f}% → {float(current) * 100:.1f}%"
+        else:
+            value = f"{float(baseline):,.2f}{unit} → {float(current):,.2f}{unit}"
+        evidence.append({"label": label, "value": value})
+
+    observed_at = next((facts.get(key) for key in ("detected_at", "first_seen", "first_observed", "started_at")
+                        if isinstance(facts.get(key), int) and facts.get(key) > 0), None)
+    if observed_at is not None:
+        evidence.append({"label": "First observed", "timestamp_ms": observed_at})
+
+    next_actions = []
+    if api:
+        next_actions.append({"label": "View API", "entity": api})
+    if target or caller:
+        next_actions.append({"label": "View Service", "entity": target or caller})
+    if user:
+        next_actions.append({"label": "View User", "entity": user})
+    trace_filters = {key: dimensions[key] for key in ("principal_name", "target_service", "operation")
+                     if isinstance(dimensions.get(key), str) and dimensions[key].strip()}
+    if trace_filters:
+        params = {"principal_name": "principal", "target_service": "service", "operation": "operation"}
+        next_actions.append({"label": "View related traces", "href": "/traces?" + urlencode({params[key]: value for key, value in trace_filters.items()})})
+
+    state = str(row.get("state") or "")
+    status = "done" if state == "succeeded" else "failed" if state in _TERMINAL else "running"
+    assessment = result.get("assessment")
+    summary = hypothesis.get("statement")
+    if not summary:
+        summary = "There is not enough evidence to produce a reliable explanation." if assessment == "insufficient_evidence" else "Investigation completed using the attached telemetry evidence."
+    limitations = list(snapshot.get("limitations") or [])
+    for missing in result.get("missing_evidence") or []:
+        if isinstance(missing, dict) and isinstance(missing.get("explanation"), str) and missing["explanation"] not in limitations:
+            limitations.append(missing["explanation"])
+    return {
+        "status": status,
+        "summary": summary,
+        "confidence": hypothesis.get("confidence"),
+        "evidence": evidence,
+        "next_actions": next_actions,
+        "limitations": limitations,
+    }
+
+
 def _public(row: dict[str, Any]) -> dict[str, Any]:
     result = {key: row.get(key) for key in ("id", "retry_index", "retry_of", "finding_kind", "finding_id", "source_version", "snapshot_schema_version", "prompt_version", "result_schema_version", "policy_version", "provider", "configured_model", "reported_model", "state", "state_version", "cancel_requested", "created_at_ms", "updated_at_ms", "started_at_ms", "finished_at_ms", "deadline_ms", "failure_code")}
     result["snapshot"] = row.get("snapshot", {})
     result["evidence_manifest"] = {"digest": row.get("evidence_digest"), **({"bundle": row.get("evidence", {})} if row.get("evidence") else {})}
     result["deterministic_summary"] = row.get("deterministic_summary", {})
     result["result"] = row.get("result")
+    result["operator_view"] = _operator_view(row)
     metadata = row.get("metadata", {})
     result["metadata"] = metadata if isinstance(metadata, dict) else {}
     result["source_check"] = row.get("source_check")
