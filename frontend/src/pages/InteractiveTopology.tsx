@@ -23,7 +23,6 @@ import { EntityLink } from "../components/EntityLink";
 import type { EntityRef } from "../entityRoutes";
 import {
   layoutServiceGraph,
-  serviceNodeWouldOverlap,
   SERVICE_NODE_HEIGHT,
   SERVICE_NODE_WIDTH,
   type Position,
@@ -673,10 +672,7 @@ function GraphSurface({
                 x: nodeDrag.current.origin.x + (dx / zoom) * (1000 / bounds.width),
                 y: nodeDrag.current.origin.y + (dy / zoom) * (620 / bounds.height),
               };
-              const collides = Object.entries(positions).some(([otherId, otherPosition]) =>
-                otherId !== node.id && serviceNodeWouldOverlap(nextPosition, otherPosition, bounds.width, bounds.height)
-              );
-              if (!collides) onMoveNode(node.id, nextPosition);
+              onMoveNode(node.id, nextPosition);
             }}
             onPointerUp={(event) => {
               if (!nodeDrag.current || nodeDrag.current.nodeId !== node.id) return;
@@ -925,7 +921,10 @@ export function InteractiveTopologyPage() {
   const [pathSelection, setPathSelection] = useState<{ service?: TopologyNode; api?: TopologyNode; principal?: TopologyNode }>({});
   const [selection, setSelection] = useState<Selection>(null);
   const [positions, setPositions] = useState<Record<string, Position>>({});
+  const layoutViewportRef = useRef<HTMLElement>(null);
+  const [layoutViewport, setLayoutViewport] = useState({ width: 0, height: 0 });
   const serviceLayoutSignatureRef = useRef<string | null>(null);
+  const serviceLayoutInitializedRef = useRef(false);
   const [ipCursor, setIpCursor] = useState<string | undefined>();
   const [ipItems, setIpItems] = useState<IpPage["items"]>([]);
   const [searchTerm, setSearchTerm] = useState("");
@@ -948,6 +947,24 @@ export function InteractiveTopologyPage() {
   const previewEndMs = previewStartMs + FIVE_MINUTE_MS;
   const qs = queryString(filters, { window: activityWindow, start: String(selectedStartMs), end: String(selectedEndMs) });
   const globalQs = queryString(filters, { window: "7d", start: String(sliderStartMs), end: String(sliderEndMs) });
+
+  useEffect(() => {
+    const viewport = layoutViewportRef.current;
+    if (!viewport) return;
+    const updateSize = () => {
+      const bounds = viewport.getBoundingClientRect();
+      const width = Math.round(bounds.width);
+      const height = Math.round(bounds.height);
+      if (width <= 0 || height <= 0) return;
+      setLayoutViewport((current) => current.width === width && current.height === height
+        ? current
+        : { width, height });
+    };
+    updateSize();
+    const observer = new ResizeObserver(updateSize);
+    observer.observe(viewport);
+    return () => observer.disconnect();
+  }, []);
   const sliderTimeFormatter = useMemo(() => new Intl.DateTimeFormat(undefined, {
     month: "short",
     day: "2-digit",
@@ -1012,9 +1029,19 @@ export function InteractiveTopologyPage() {
   }, [services, graphEdges]);
 
   useEffect(() => {
+    if (layoutViewport.width <= 0 || layoutViewport.height <= 0) return;
+    if (graphQuery.isLoading || globalGraphQuery.isLoading || !services.length) return;
     if (serviceLayoutSignatureRef.current === serviceLayoutSignature) return;
     serviceLayoutSignatureRef.current = serviceLayoutSignature;
-    const calculated = layoutServiceGraph(services, graphEdges);
+    const firstLayout = !serviceLayoutInitializedRef.current;
+    const calculated = layoutServiceGraph(
+      services,
+      graphEdges,
+      layoutViewport.width,
+      layoutViewport.height,
+      firstLayout,
+    );
+    serviceLayoutInitializedRef.current = true;
     const activeServiceIds = new Set(services.map((service) => service.id));
     setPositions((current) => {
       const next = { ...current };
@@ -1026,14 +1053,14 @@ export function InteractiveTopologyPage() {
         }
       }
       for (const service of services) {
-        if (!Object.prototype.hasOwnProperty.call(next, service.id) && calculated[service.id]) {
+        if ((firstLayout || !Object.prototype.hasOwnProperty.call(next, service.id)) && calculated[service.id]) {
           next[service.id] = calculated[service.id];
           changed = true;
         }
       }
       return changed ? next : current;
     });
-  }, [serviceLayoutSignature]);
+  }, [serviceLayoutSignature, layoutViewport.width, layoutViewport.height, graphQuery.isLoading, globalGraphQuery.isLoading, services]);
 
   function pageUrl(base: string, search: string, cursor?: string) {
     const params = new URLSearchParams(qs);
@@ -1231,7 +1258,7 @@ export function InteractiveTopologyPage() {
   }
 
   function relayout() {
-    const calculated = layoutServiceGraph(services, graphEdges);
+    const calculated = layoutServiceGraph(services, graphEdges, layoutViewport.width, layoutViewport.height);
     const activeServiceIds = new Set(services.map((service) => service.id));
     setPositions((current) => {
       const next = { ...current };
@@ -1296,7 +1323,7 @@ export function InteractiveTopologyPage() {
   const panelsOpen = directoryOpen || !!expandedServiceId || !!pathSelection.principal;
 
   return (
-    <main className="isolate relative h-full min-h-[600px] overflow-hidden border-t border-[#262838] bg-[#0c0d14]" onClickCapture={(event) => {
+    <main ref={layoutViewportRef} className="isolate relative h-full min-h-[600px] overflow-hidden border-t border-[#262838] bg-[#0c0d14]" onClickCapture={(event) => {
       if (panelsOpen && !(event.target as Element).closest("[data-testid='topology-drilldown-panel']")) dismissPanels();
     }}>
       {!graphQuery.isLoading && !globalGraphQuery.isLoading && !graphQuery.isError && !globalGraphQuery.isError && (

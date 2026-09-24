@@ -25,23 +25,11 @@ export const SERVICE_NODE_WIDTH = 156;
 export const SERVICE_NODE_HEIGHT = 66;
 export const SERVICE_NODE_CLEARANCE = 24;
 
-export function serviceNodeWouldOverlap(
-  position: Position,
-  other: Position,
-  canvasWidth: number,
-  canvasHeight: number,
-): boolean {
-  const horizontalThreshold = (SERVICE_NODE_WIDTH + SERVICE_NODE_CLEARANCE) * 1000 / canvasWidth;
-  const verticalThreshold = (SERVICE_NODE_HEIGHT + SERVICE_NODE_CLEARANCE) * 620 / canvasHeight;
-  return Math.abs(position.x - other.x) < horizontalThreshold
-    && Math.abs(position.y - other.y) < verticalThreshold;
-}
-
 const SERVICE_CARD_HALF_WIDTH = SERVICE_NODE_WIDTH / 2;
 const SERVICE_CARD_HALF_HEIGHT = SERVICE_NODE_HEIGHT / 2;
 const SCC_RADIUS = 120;
-const SCC_GRID_X_GAP = SERVICE_NODE_WIDTH + 32;
-const SCC_GRID_Y_GAP = SERVICE_NODE_HEIGHT + 32;
+const SCC_GRID_X_GAP = SERVICE_NODE_WIDTH + SERVICE_NODE_CLEARANCE;
+const SCC_GRID_Y_GAP = SERVICE_NODE_HEIGHT + SERVICE_NODE_CLEARANCE;
 
 type SccGroup = {
   id: string;
@@ -405,18 +393,60 @@ function findWeakComponents(nodes: LayoutNode[], edges: LayoutEdge[]): Array<{ n
     || compareIds(left.nodeIds[0] || "", right.nodeIds[0] || ""));
 }
 
-export function layoutServiceGraph(nodes: LayoutNode[], edges: LayoutEdge[]): Record<string, Position> {
+export function layoutServiceGraph(
+  nodes: LayoutNode[],
+  edges: LayoutEdge[],
+  canvasWidth = 1000,
+  canvasHeight = 620,
+  separateOverlaps = false,
+): Record<string, Position> {
   const positions: Record<string, Position> = {};
   const components = findWeakComponents(nodes, edges);
+  const widthScale = 1000 / Math.max(1, canvasWidth);
+  const heightScale = 620 / Math.max(1, canvasHeight);
   let componentY = 100;
 
   for (const component of components) {
     const layout = componentLayout(component.nodeIds, component.edges);
     for (const [nodeId, position] of Object.entries(layout.positions)) {
-      positions[nodeId] = { x: position.x, y: position.y + componentY };
+      positions[nodeId] = {
+        x: position.x * widthScale,
+        y: (position.y + componentY) * heightScale,
+      };
     }
     componentY += layout.height + COMPONENT_GAP;
   }
 
-  return positions;
+  if (!separateOverlaps) return positions;
+
+  // Layout coordinates render through percentages while cards keep fixed CSS
+  // dimensions. Resolve any remaining initial collisions in rendered pixels.
+  const placed: Array<{ id: string; x: number; y: number }> = [];
+  const separated: Record<string, Position> = {};
+  const horizontalThreshold = SERVICE_NODE_WIDTH + SERVICE_NODE_CLEARANCE;
+  const verticalThreshold = SERVICE_NODE_HEIGHT + SERVICE_NODE_CLEARANCE;
+  const ordered = Object.entries(positions).map(([id, position]) => ({
+    id,
+    x: position.x * canvasWidth / 1000,
+    y: position.y * canvasHeight / 620,
+  })).sort((left, right) => left.y - right.y || left.x - right.x || compareIds(left.id, right.id));
+
+  for (const node of ordered) {
+    let y = node.y;
+    while (true) {
+      const colliding = placed.filter((other) =>
+        Math.abs(node.x - other.x) < horizontalThreshold
+        && Math.abs(y - other.y) < verticalThreshold
+      );
+      if (!colliding.length) break;
+      y = Math.max(...colliding.map((other) => other.y + verticalThreshold));
+    }
+    placed.push({ id: node.id, x: node.x, y });
+    separated[node.id] = {
+      x: node.x * 1000 / Math.max(1, canvasWidth),
+      y: y * 620 / Math.max(1, canvasHeight),
+    };
+  }
+
+  return separated;
 }
