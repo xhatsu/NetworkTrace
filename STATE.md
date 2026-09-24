@@ -1522,3 +1522,8 @@ Exposes standard Prometheus 0.0.4 text exposition format at `GET /metrics` on po
 
 - The Elasticsearch metric worker now reads explicit caller service metadata from top-level, nested caller/parent/peer fields, and caller labels when grouping transactions. It stores a real caller in `metric_buckets.caller_service` and clears placeholder or self caller names. Topology prefers these worker buckets for matching relationships and uses time-scoped materialized edges for older observations that lack caller metadata.
 - A sample of 1,783 recent APM transaction/span documents across 15 minutes contained no explicit caller and no trace shared by multiple services. Those records cannot establish a service connection from the available evidence; source instrumentation must emit caller metadata or cross-service trace context for the worker to attribute one.
+
+## Global topology map with selected-window activity (2026-09-24)
+
+- `/topology` now requests a seven-day observed relationship map and a separate activity graph for the selected window. The default selected window is the last 24 hours; interacting with the history slider selects a five-minute slice. Blue lines and normal service cards reflect selected-window activity. Muted dashed lines and service cards retain earlier observed relationships and show last-seen time without presenting historical traffic as current.
+- The detail panel marks historical selections and shows zero selected-window traffic with the relationship's last-seen time. A refresh reloads both map and activity. Live read-only API checks returned 16 nodes/14 edges in seven days and 12 nodes/9 edges in 24 hours; the frontend TypeScript/Vite build completed successfully.

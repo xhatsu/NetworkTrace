@@ -75,6 +75,7 @@ type TopologyNode = {
   service_count?: number;
   api_count?: number;
   metrics: Metrics;
+  active_in_window?: boolean;
 };
 
 type TopologyEdge = {
@@ -87,6 +88,7 @@ type TopologyEdge = {
   evidence_type: "direct" | "inferred";
   direct: boolean;
   inferred: boolean;
+  active_in_window?: boolean;
 };
 
 type TopologyResponse = {
@@ -393,12 +395,13 @@ function ServiceNodeCard({
   const { t } = useI18n();
   const metrics = node.metrics;
   const traffic = hasServiceTraffic(metrics);
+  const historical = node.active_in_window === false;
   const health = getServiceHealth(metrics);
   const change = getPrimaryServiceChange(metrics);
 
   return (
     <div
-      className={`overflow-hidden rounded-md border bg-[#11131b]/95 shadow-sm transition-colors ${healthBorderClass(health)} ${selected ? "border-sky-200 bg-[#1a2b40] ring-2 ring-sky-300 ring-offset-2 ring-offset-[#0c0d14]" : ""}`}
+      className={`overflow-hidden rounded-md border bg-[#11131b]/95 shadow-sm transition-colors ${historical ? "border-[#34384c] opacity-60" : healthBorderClass(health)} ${selected ? "border-sky-200 bg-[#1a2b40] ring-2 ring-sky-300 ring-offset-2 ring-offset-[#0c0d14]" : ""}`}
       style={{ width: SERVICE_NODE_WIDTH, height: SERVICE_NODE_HEIGHT }}
       data-testid="topology-service-card"
     >
@@ -411,7 +414,7 @@ function ServiceNodeCard({
             title={node.name}
             aria-label={`Inspect service ${node.name}`}
           >
-            <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${healthDotClass(health)}`} title={health} />
+            <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${historical ? "bg-slate-500" : healthDotClass(health)}`} title={historical ? t("Previously observed") : health} />
             <span className="min-w-0 flex-1 truncate text-[11px] font-semibold leading-4 text-slate-100">{node.name}</span>
           </button>
           {canExpand && (
@@ -444,11 +447,11 @@ function ServiceNodeCard({
                 </span>
               </>
             ) : (
-              <span className="text-slate-500">No traffic</span>
+              <span className="text-slate-500">{historical ? t("Previously observed") : t("No traffic")}</span>
             )}
           </span>
           <span className="mt-0.5 h-3 w-full truncate text-[9px] font-medium leading-3" title={change?.label}>
-            {change && <span className={serviceChangeClass(change.severity)}>{change.label}</span>}
+            {historical ? <span className="text-slate-500">{t("Last seen")}: {formatTime(metrics.last_seen_ms)}</span> : change && <span className={serviceChangeClass(change.severity)}>{change.label}</span>}
           </span>
         </button>
       </div>
@@ -567,9 +570,10 @@ function GraphSurface({
     setZoom((current) => Math.min(2.5, Math.max(0.5, Number((current + delta).toFixed(2)))));
   }
 
-  const orderedEdges = highlightedEdgeIds.size
-    ? [...edges].sort((left, right) => Number(highlightedEdgeIds.has(left.id)) - Number(highlightedEdgeIds.has(right.id)))
-    : edges;
+  const orderedEdges = [...edges].sort((left, right) =>
+    Number(!!left.active_in_window) - Number(!!right.active_in_window)
+    || Number(highlightedEdgeIds.has(left.id)) - Number(highlightedEdgeIds.has(right.id))
+  );
 
   return (
     <div
@@ -626,14 +630,15 @@ function GraphSurface({
           const target = positions[edge.target];
           if (!source || !target) return null;
           const selected = highlightedEdgeIds.has(edge.id) || (selection?.kind === "edge" && selection.edge.id === edge.id);
+          const historical = edge.active_in_window === false;
           const scoped = selection?.kind === "node" && (selection.node.type !== "service" || !!selection.node.principal);
           const labelMetrics = scoped ? focusedEdgeMetrics.get(edge.id) : edge.metrics;
           const path = edgePath(source, target);
           return (
             <g key={edge.id} data-topology-object="true" onClick={(event) => { event.stopPropagation(); onSelect({ kind: "edge", edge }); }} className="cursor-pointer">
               <path d={path} fill="none" stroke="transparent" strokeWidth="16" />
-              <path d={path} fill="none" stroke={selected ? "#facc15" : "#5794c8"} strokeWidth={selected ? 4 : 1.5} strokeDasharray={edge.inferred ? "7 6" : undefined} markerEnd={selected ? "url(#topology-arrow-selected)" : "url(#topology-arrow)"} opacity={selected ? 1 : highlightedEdgeIds.size ? .16 : .22} />
-              {selected && labelMetrics && <text x={(source.x + target.x) / 2} y={(source.y + target.y) / 2 - 8} fill="#fde68a" fontSize="11" textAnchor="middle">{n(labelMetrics.tps, 1)} tps</text>}
+              <path d={path} fill="none" stroke={selected ? "#facc15" : historical ? "#6b7280" : "#5794c8"} strokeWidth={selected ? 4 : historical ? 1.5 : 2} strokeDasharray={historical ? "5 6" : edge.inferred ? "7 6" : undefined} markerEnd={historical ? undefined : selected ? "url(#topology-arrow-selected)" : "url(#topology-arrow)"} opacity={selected ? historical ? .8 : 1 : highlightedEdgeIds.size ? .13 : historical ? .3 : .72} />
+              {selected && (historical || labelMetrics) && <text x={(source.x + target.x) / 2} y={(source.y + target.y) / 2 - 8} fill="#fde68a" fontSize="11" textAnchor="middle">{historical ? `${t("Last seen")}: ${formatTime(edge.metrics.last_seen_ms)}` : `${n(labelMetrics?.tps, 1)} tps`}</text>}
             </g>
           );
         })}
@@ -852,7 +857,8 @@ function DetailPanel({
 }) {
   const { t } = useI18n();
   if (!selection) return null;
-  const metrics = selection.kind === "edge" ? selection.edge.metrics : detail?.metrics || selection.node.metrics || emptyMetrics();
+  const historical = selection.kind === "edge" ? selection.edge.active_in_window === false : selection.node.active_in_window === false;
+  const metrics = selection.kind === "edge" ? selection.edge.metrics : historical ? selection.node.metrics : detail?.metrics || selection.node.metrics || emptyMetrics();
   const entity = selection.kind === "edge" ? { name: `${selection.edge.source_name} → ${selection.edge.target_name}`, type: "relationship" } : detail?.entity || selection.node;
   const entityRef: EntityRef | undefined = selection.kind !== "node" ? undefined
     : selection.node.type === "service" ? { kind: "service", name: selection.node.name }
@@ -877,6 +883,7 @@ function DetailPanel({
       </div>
       {detailLoading ? <Loading /> : detailError ? <div className="p-4"><ErrorState message={t("The selected topology detail could not be loaded.")} /></div> : (
         <div className="space-y-4 p-4">
+          {historical && <div className="rounded border border-[#454856] bg-[#1b1d27] px-3 py-2 text-xs text-[#aeb4c2]">{t("Previously observed")}. {t("Last seen")}: {formatTime(metrics.last_seen_ms)}. {t("No activity in the selected window.")}</div>}
           <MetricStrip metrics={metrics} />
           <section>
             <div className="mb-2 flex items-center justify-between">
@@ -930,13 +937,15 @@ export function InteractiveTopologyPage() {
   const [focusRequest, setFocusRequest] = useState<{ nodeId: string; token: number }>();
   const sliderEndMs = useMemo(() => Math.floor(Date.now() / FIVE_MINUTE_MS) * FIVE_MINUTE_MS, []);
   const sliderStartMs = sliderEndMs - SEVEN_DAY_SLICES * FIVE_MINUTE_MS;
+  const [activityWindow, setActivityWindow] = useState<"24h" | "5m">("24h");
   const [timeSliceIndex, setTimeSliceIndex] = useState(SEVEN_DAY_SLICES - 1);
   const [sliderPreviewIndex, setSliderPreviewIndex] = useState(SEVEN_DAY_SLICES - 1);
-  const selectedStartMs = sliderStartMs + timeSliceIndex * FIVE_MINUTE_MS;
-  const selectedEndMs = selectedStartMs + FIVE_MINUTE_MS;
+  const selectedStartMs = activityWindow === "24h" ? sliderEndMs - 24 * 60 * 60 * 1000 : sliderStartMs + timeSliceIndex * FIVE_MINUTE_MS;
+  const selectedEndMs = activityWindow === "24h" ? sliderEndMs : selectedStartMs + FIVE_MINUTE_MS;
   const previewStartMs = sliderStartMs + sliderPreviewIndex * FIVE_MINUTE_MS;
   const previewEndMs = previewStartMs + FIVE_MINUTE_MS;
-  const qs = queryString(filters, { window: "5m", start: String(selectedStartMs), end: String(selectedEndMs) });
+  const qs = queryString(filters, { window: activityWindow, start: String(selectedStartMs), end: String(selectedEndMs) });
+  const globalQs = queryString(filters, { window: "7d", start: String(sliderStartMs), end: String(sliderEndMs) });
   const sliderTimeFormatter = useMemo(() => new Intl.DateTimeFormat(undefined, {
     month: "short",
     day: "2-digit",
@@ -962,8 +971,38 @@ export function InteractiveTopologyPage() {
     queryKey: ["interactive-topology-services", qs],
     queryFn: ({ signal }) => api<TopologyResponse>("/api/v1/topology/services?" + qs, { signal }),
   });
-  const services = useMemo(() => (graphQuery.data?.nodes || []).filter((node) => node.type === "service"), [graphQuery.data?.nodes]);
-  const graphEdges = graphQuery.data?.edges || [];
+  const globalGraphQuery = useQuery({
+    queryKey: ["interactive-topology-global-services", globalQs],
+    queryFn: ({ signal }) => api<TopologyResponse>("/api/v1/topology/services?" + globalQs, { signal }),
+  });
+  const services = useMemo(() => {
+    const globalNodes = globalGraphQuery.data?.nodes || [];
+    const activeNodes = graphQuery.data?.nodes || [];
+    const activeById = new Map(activeNodes.map((node) => [node.id, node]));
+    const allById = new Map([...globalNodes, ...activeNodes].map((node) => [node.id, node]));
+    return [...allById.values()].filter((node) => node.type === "service").map((node) => {
+      const active = activeById.get(node.id);
+      return {
+        ...node,
+        metrics: active?.metrics || { ...emptyMetrics(), first_seen_ms: node.metrics.first_seen_ms, last_seen_ms: node.metrics.last_seen_ms },
+        active_in_window: !!active,
+      };
+    });
+  }, [globalGraphQuery.data?.nodes, graphQuery.data?.nodes]);
+  const graphEdges = useMemo(() => {
+    const globalEdges = globalGraphQuery.data?.edges || [];
+    const activeEdges = graphQuery.data?.edges || [];
+    const activeById = new Map(activeEdges.map((edge) => [edge.id, edge]));
+    const allById = new Map([...globalEdges, ...activeEdges].map((edge) => [edge.id, edge]));
+    return [...allById.values()].map((edge) => {
+      const active = activeById.get(edge.id);
+      return {
+        ...edge,
+        metrics: active?.metrics || { ...emptyMetrics(), first_seen_ms: edge.metrics.first_seen_ms, last_seen_ms: edge.metrics.last_seen_ms, evidence_type: edge.metrics.evidence_type, evidence_types: edge.metrics.evidence_types, confidence: edge.metrics.confidence },
+        active_in_window: !!active,
+      };
+    });
+  }, [globalGraphQuery.data?.edges, graphQuery.data?.edges]);
   const serviceLayoutSignature = useMemo(() => {
     const nodePart = services.map((node) => node.id).sort().join("|");
     const edgePart = graphEdges.map((edge) => `${edge.source}>${edge.target}`).sort().join("|");
@@ -1056,13 +1095,13 @@ export function InteractiveTopologyPage() {
   const scopedApi = selectedNode?.type === "api" ? selectedNode.api || selectedNode.name : selectedNode?.api;
   const focusedPath = scopedPrincipal
     ? "/api/v1/topology/principals/" + encodeURIComponent(scopedPrincipal) + "/connections?" + queryString(filters, {
-        window: "5m", start: String(selectedStartMs), end: String(selectedEndMs),
+        window: activityWindow, start: String(selectedStartMs), end: String(selectedEndMs),
         ...(scopedService ? { service: scopedService } : {}),
         ...(scopedApi ? { api: scopedApi } : {}),
       })
     : selectedNode?.type === "api" && scopedService && scopedApi
       ? "/api/v1/topology/services/" + encodeURIComponent(scopedService) + "/api-connections?" + queryString(filters, {
-          window: "5m", start: String(selectedStartMs), end: String(selectedEndMs), api: scopedApi,
+          window: activityWindow, start: String(selectedStartMs), end: String(selectedEndMs), api: scopedApi,
         })
       : "";
   const focusedQuery = useQuery({
@@ -1207,6 +1246,14 @@ export function InteractiveTopologyPage() {
 
   function commitTimeSlice(index: number) {
     setTimeSliceIndex(index);
+    setActivityWindow("5m");
+    setExpandedServiceId(undefined);
+    setPathSelection({});
+    select(null);
+  }
+
+  function showLast24Hours() {
+    setActivityWindow("24h");
     setExpandedServiceId(undefined);
     setPathSelection({});
     select(null);
@@ -1251,7 +1298,7 @@ export function InteractiveTopologyPage() {
     <main className="isolate relative h-full min-h-[600px] overflow-hidden border-t border-[#262838] bg-[#0c0d14]" onClickCapture={(event) => {
       if (panelsOpen && !(event.target as Element).closest("[data-testid='topology-drilldown-panel']")) dismissPanels();
     }}>
-      {!graphQuery.isLoading && !graphQuery.isError && (
+      {!graphQuery.isLoading && !globalGraphQuery.isLoading && !graphQuery.isError && !globalGraphQuery.isError && (
         <GraphSurface
           nodes={services}
           edges={graphEdges}
@@ -1298,20 +1345,21 @@ export function InteractiveTopologyPage() {
 
         <div className="pointer-events-auto flex flex-wrap items-start justify-end gap-1.5">
           <div className="relative">
-            <button type="button" className="btn bg-[#141622]" onClick={() => setTimelineOpen((open) => !open)} aria-expanded={timelineOpen}><Clock size={13} /> {timelineOpen ? t("Hide history") : t("History")}</button>
+            <button type="button" className="btn bg-[#141622]" onClick={() => setTimelineOpen((open) => !open)} aria-expanded={timelineOpen}><Clock size={13} /> {activityWindow === "24h" ? t("Last 24h") : t("5-minute window")}</button>
             {timelineOpen && <div className="absolute right-0 top-8 w-[min(360px,calc(100vw-1.5rem))] rounded border border-[#303449] bg-[#141622] px-2.5 py-2" data-testid="topology-time-slider-panel">
-              <div className="mb-1.5 flex items-center justify-between gap-2 text-[10px] uppercase tracking-wider text-[#94a3b8]"><span>{t("Seven-day timeline")}</span><strong className="normal-case tracking-normal text-cyan-300" data-testid="topology-selected-window">{sliderTimeFormatter.format(previewStartMs)} – {sliderTimeFormatter.format(previewEndMs)}</strong></div>
+              <div className="mb-1.5 flex items-center justify-between gap-2 text-[10px] uppercase tracking-wider text-[#94a3b8]"><span>{t("Seven-day timeline")}</span><button type="button" onClick={showLast24Hours} className={`rounded px-2 py-0.5 normal-case tracking-normal ${activityWindow === "24h" ? "bg-[#263043] text-cyan-200" : "text-[#94a3b8] hover:text-white"}`}>{t("Last 24h")}</button></div>
+              <div className="mb-1.5 text-right font-mono text-[10px] text-cyan-300" data-testid="topology-selected-window">{activityWindow === "24h" ? `${sliderTimeFormatter.format(selectedStartMs)} – ${sliderTimeFormatter.format(selectedEndMs)}` : `${sliderTimeFormatter.format(previewStartMs)} – ${sliderTimeFormatter.format(previewEndMs)}`}</div>
               <input type="range" min={0} max={SEVEN_DAY_SLICES - 1} step={1} value={sliderPreviewIndex} data-testid="topology-time-slider" aria-label={t("Select a five-minute topology window within the last seven days")} className="h-2 w-full cursor-ew-resize accent-cyan-400" onChange={(event) => setSliderPreviewIndex(Number(event.target.value))} onPointerUp={(event) => commitTimeSlice(Number(event.currentTarget.value))} onKeyUp={(event) => commitTimeSlice(Number(event.currentTarget.value))} />
               <div className="mt-1 flex items-center justify-between font-mono text-[9px] text-[#64748b]"><span>{sliderTimeFormatter.format(sliderStartMs)}</span><span className="text-[#94a3b8]">{t("5-minute window")}</span><span>{t("Now")}</span></div>
             </div>}
           </div>
           <button type="button" className="btn bg-[#141622]" onClick={relayout}><Maximize2 size={13} /> {t("Re-layout")}</button>
-          <button type="button" className="btn bg-[#141622]" onClick={() => { void graphQuery.refetch(); }}><RefreshCw size={13} /> {t("Refresh")}</button>
+          <button type="button" className="btn bg-[#141622]" onClick={() => { void graphQuery.refetch(); void globalGraphQuery.refetch(); }}><RefreshCw size={13} /> {t("Refresh")}</button>
         </div>
       </div>
 
-      {graphQuery.isLoading && <div className="absolute inset-0 grid place-items-center"><Loading /></div>}
-      {graphQuery.isError && <div className="absolute inset-0 grid place-items-center p-8"><ErrorState message={t("Topology data is unavailable. Check the configured trace backend and worker aggregation status.")} /></div>}
+      {(graphQuery.isLoading || globalGraphQuery.isLoading) && <div className="absolute inset-0 grid place-items-center"><Loading /></div>}
+      {(graphQuery.isError || globalGraphQuery.isError) && <div className="absolute inset-0 grid place-items-center p-8"><ErrorState message={t("Topology data is unavailable. Check the configured trace backend and worker aggregation status.")} /></div>}
 
       <div className="pointer-events-none absolute left-3 top-44 z-20 flex max-w-[calc(100vw-1.5rem)] flex-col items-start gap-1.5 pb-1 sm:top-28">
         {mode === "user-first" && !directoryOpen && <button type="button" className="btn pointer-events-auto bg-[#141622]" onClick={() => setDirectoryOpen(true)}><UserRound size={13} /> {t("Users")}</button>}
@@ -1325,13 +1373,14 @@ export function InteractiveTopologyPage() {
         <div className="pointer-events-auto flex items-center gap-2 rounded border border-[#303449] bg-[#141622] px-2 py-1 text-[#cbd5e1]">
           <span className="font-medium text-cyan-300">{mode === "service-first" ? t("Service → API → User") : t("User → Service → API")}</span>
           <span className="font-mono text-[9px] uppercase tracking-wider text-[#64748b]">{graphQuery.data?.backend || "clickhouse"}</span>
-          <span className="inline-flex items-center gap-1.5"><span className="w-5 border-t-2 border-[#5794c8] opacity-60" />{t("Service connection")}</span>
+          <span className="inline-flex items-center gap-1.5"><span className="w-5 border-t-2 border-[#5794c8]" />{t("Observed in window")}</span>
+          <span className="inline-flex items-center gap-1.5"><span className="w-5 border-t-2 border-dashed border-[#6b7280]" />{t("Previously observed")}</span>
           <span className="inline-flex items-center gap-1.5"><span className="w-5 border-t-[3px] border-yellow-400" />{t("Selected path")}</span>
         </div>
         <div className="pointer-events-auto flex items-center divide-x divide-[#303449] rounded border border-[#303449] bg-[#141622] text-[#94a3b8]">
-          <span className="px-2 py-1">{t("New relationships")} <strong className="ml-1 font-mono text-cyan-300">{n(graphQuery.data?.changes?.new_edges?.length, 0)}</strong></span>
-          <span className="px-2 py-1">{t("Disappeared")} <strong className="ml-1 font-mono text-rose-300">{n(graphQuery.data?.changes?.disappeared_edges?.length, 0)}</strong></span>
-          <span className="px-2 py-1">{t("Baseline")} <strong className="ml-1 font-normal text-[#cbd5e1]">{graphQuery.data?.changes?.baseline || "insufficient history"}</strong></span>
+          <span className="px-2 py-1">{activityWindow === "24h" ? t("Last 24h") : t("5-minute window")}</span>
+          <span className="px-2 py-1">{t("Observed in window")} <strong className="ml-1 font-mono text-cyan-300">{graphEdges.filter((edge) => edge.active_in_window).length}</strong></span>
+          <span className="px-2 py-1">{t("Previously observed")} <strong className="ml-1 font-mono text-[#aeb4c2]">{graphEdges.filter((edge) => !edge.active_in_window).length}</strong></span>
         </div>
         {anonymous && <div className="pointer-events-auto flex items-center gap-2 rounded border border-amber-500/30 bg-[#141622] px-2 py-1 text-[#94a3b8]"><span>{t("Identified")} <strong className="ml-1 text-cyan-300">{n(anonymous.identified_request_percentage, 1)}%</strong></span><span>{t("Anonymous")} <strong className="ml-1 text-amber-300">{n(anonymous.anonymous_request_percentage, 1)}%</strong></span><span>{t("Anonymous TPS")} <strong className="ml-1 text-sky-300">{n(anonymous.anonymous_tps, 2)}</strong></span></div>}
       </div>
