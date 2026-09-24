@@ -3,6 +3,11 @@ export type Position = {
   y: number;
 };
 
+export function serviceNodeWouldOverlap(position: Position, other: Position): boolean {
+  return Math.abs(position.x - other.x) < SERVICE_NODE_WIDTH + SERVICE_NODE_CLEARANCE
+    && Math.abs(position.y - other.y) < SERVICE_NODE_HEIGHT + SERVICE_NODE_CLEARANCE;
+}
+
 export type LayoutNode = {
   id: string;
 };
@@ -16,19 +21,20 @@ export type LayoutEdge = {
 };
 
 const LAYER_GAP = 210;
-const NODE_GAP = 24;
-const COMPONENT_GAP = 100;
+const NODE_GAP = 40;
+const COMPONENT_GAP = 120;
 const MAX_NODES_PER_COLUMN = 14;
 const CROSSING_SWEEPS = 8;
 
 export const SERVICE_NODE_WIDTH = 156;
 export const SERVICE_NODE_HEIGHT = 66;
+export const SERVICE_NODE_CLEARANCE = 24;
 
 const SERVICE_CARD_HALF_WIDTH = SERVICE_NODE_WIDTH / 2;
 const SERVICE_CARD_HALF_HEIGHT = SERVICE_NODE_HEIGHT / 2;
-const SCC_RADIUS = 105;
-const SCC_GRID_X_GAP = SERVICE_NODE_WIDTH + 16;
-const SCC_GRID_Y_GAP = SERVICE_NODE_HEIGHT + 16;
+const SCC_RADIUS = 120;
+const SCC_GRID_X_GAP = SERVICE_NODE_WIDTH + 32;
+const SCC_GRID_Y_GAP = SERVICE_NODE_HEIGHT + 32;
 
 type SccGroup = {
   id: string;
@@ -187,7 +193,7 @@ function buildVisualColumns(groups: SccGroup[]): VisualColumn[] {
     if (!previous || !current) continue;
     const previousHalfWidth = Math.max(...previous.groups.map((group) => group.halfWidth));
     const currentHalfWidth = Math.max(...current.groups.map((group) => group.halfWidth));
-    current.offsetX = previous.offsetX + previousHalfWidth + currentHalfWidth + 16;
+    current.offsetX = previous.offsetX + previousHalfWidth + currentHalfWidth + 32;
   }
   return columns;
 }

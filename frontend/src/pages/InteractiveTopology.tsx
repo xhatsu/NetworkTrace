@@ -23,6 +23,7 @@ import { EntityLink } from "../components/EntityLink";
 import type { EntityRef } from "../entityRoutes";
 import {
   layoutServiceGraph,
+  serviceNodeWouldOverlap,
   SERVICE_NODE_HEIGHT,
   SERVICE_NODE_WIDTH,
   type Position,
@@ -668,10 +669,14 @@ function GraphSurface({
                 nodeDrag.current.moved = true;
                 event.currentTarget.setPointerCapture(event.pointerId);
               }
-              onMoveNode(node.id, {
+              const nextPosition = {
                 x: nodeDrag.current.origin.x + (dx / zoom) * (1000 / bounds.width),
                 y: nodeDrag.current.origin.y + (dy / zoom) * (620 / bounds.height),
-              });
+              };
+              const collides = Object.entries(positions).some(([otherId, otherPosition]) =>
+                otherId !== node.id && serviceNodeWouldOverlap(nextPosition, otherPosition)
+              );
+              if (!collides) onMoveNode(node.id, nextPosition);
             }}
             onPointerUp={(event) => {
               if (!nodeDrag.current || nodeDrag.current.nodeId !== node.id) return;

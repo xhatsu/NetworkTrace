@@ -1544,3 +1544,8 @@ Exposes standard Prometheus 0.0.4 text exposition format at `GET /metrics` on po
 - Training also excludes all five-minute service buckets covered by persisted traffic-spike, traffic-drop, latency, or error-rate incident intervals, regardless of operator status. This keeps repeated detected spikes and their active incident period out of later service, API, caller, and principal metric baselines.
 - A new service still needs earlier completed healthy buckets before metric anomaly detection has enough samples. Historical windows whose reference is already contaminated may require a subsequent eligible rebuild; this change does not reconstruct an unknown pre-incident baseline.
 - The managed host API and worker were restarted after commit `93bc0e5`. The worker completed its first post-restart ELK, aggregation, baseline, anomaly, principal, and metrics stages without an error; baseline cadence deferred the next actual training refresh. The Helm worker still needs an image update to receive this code.
+
+## Topology service node spacing (2026-09-24)
+
+- Increased separation between service groups, SCC grid members, and disconnected components in the topology auto-layout.
+- Dragging a service node now checks its destination against other service cards and holds its last clear position when the proposed location would overlap a neighbor.
