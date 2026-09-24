@@ -102,6 +102,8 @@ export const translations: Record<Language, Record<string, string>> = {
     "Previously observed": "Đã từng quan sát",
     "No activity in the selected window.": "Không có hoạt động trong khoảng thời gian đã chọn.",
     "No traffic": "Không có lưu lượng",
+    "More metrics": "Thêm chỉ số",
+    "Evidence & time": "Bằng chứng và thời gian",
     "Now": "Hiện tại",
     "Move the seven-day slider to another five-minute window.": "Di chuyển thanh trượt 7 ngày sang một cửa sổ 5 phút khác.",
     "Infrastructure": "Hạ tầng",
