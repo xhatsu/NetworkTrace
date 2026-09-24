@@ -180,8 +180,11 @@ def test_materialized_topology_has_metrics_evidence_anonymous_and_ip_status(tmp_
 
 
 def test_split_trace_storage_topology_reads_worker_metric_buckets(tmp_path, monkeypatch):
+    from types import SimpleNamespace
+
     from backend.app.models.aggregate import MetricBucket
     from backend.app.repositories.aggregate_repository import AggregateRepository
+    import backend.app.repositories.interactive_topology_repository as topology_repository
     from backend.config import settings
 
     db_path = tmp_path / "split-trace-topology.db"
@@ -208,8 +211,11 @@ def test_split_trace_storage_topology_reads_worker_metric_buckets(tmp_path, monk
         request_bytes_samples=15,
         response_bytes_samples=15,
     )])
-    monkeypatch.setattr(settings, "storage_backend", "clickhouse")
-    monkeypatch.setattr(settings, "trace_storage_backend", "elasticsearch")
+    monkeypatch.setattr(topology_repository, "settings", SimpleNamespace(
+        storage_backend="clickhouse",
+        trace_storage_backend="elasticsearch",
+        max_range_days=settings.max_range_days,
+    ))
 
     repo = InteractiveTopologyRepository(str(db_path))
     window = {

@@ -551,7 +551,7 @@ class InteractiveTopologyRepository:
         group = ",".join(columns[dimension] for dimension in dimensions)
         sql = f"""
             SELECT {select_dimensions}
-              sum(request_count) request_count, sum(error_count) error_count,
+              sum(request_count) total_request_count, sum(error_count) error_count,
               0 auth_failure_count, 0 http_4xx_count, 0 http_5xx_count,
               0 timeout_count, 0 tcp_reset_count, 0 incomplete_count,
               sum(latency_sum) latency_sum, max(latency_p50) p50_latency_ms,
@@ -568,12 +568,14 @@ class InteractiveTopologyRepository:
             FROM metric_buckets FINAL WHERE {' AND '.join(clauses)}
             {f'GROUP BY {group}' if group else ''}
             {f"HAVING {' AND '.join(having)}" if having else ''}
-            ORDER BY request_count DESC, {sort_column} ASC LIMIT ?
+            ORDER BY total_request_count DESC, {sort_column} ASC LIMIT ?
         """
         args.extend(having_args)
         args.append(max(1, min(MAX_LIMIT, page_size)) + 1)
         with get_connection(self.db_path) as db:
             rows = [dict(row) for row in db.execute(sql, args)]
+        for row in rows:
+            row["request_count"] = row.pop("total_request_count", 0)
         has_more = len(rows) > page_size
         rows = rows[:page_size]
         next_cursor = None
@@ -1302,7 +1304,7 @@ class InteractiveTopologyRepository:
         group_sql = ",".join(column_map[dimension] for dimension in dimensions)
         select_sql = f"{dimensions_sql}," if dimensions_sql else ""
         sql = f"""
-            SELECT {select_sql}sum(request_count) request_count,sum(error_count) error_count,
+            SELECT {select_sql}sum(request_count) total_request_count,sum(error_count) error_count,
                    max(latency_p50) p50_latency_ms,max(latency_p95) p95_latency_ms,
                    max(latency_p99) p99_latency_ms,sum(request_bytes) request_bytes,
                    sum(response_bytes) response_bytes,
@@ -1316,10 +1318,13 @@ class InteractiveTopologyRepository:
                    sum(response_bytes_samples) response_bytes_samples
             FROM metric_buckets FINAL WHERE {' AND '.join(clauses)}
             {f'GROUP BY {group_sql}' if group_sql else ''}
-            ORDER BY request_count DESC LIMIT 500
+            ORDER BY total_request_count DESC LIMIT 500
         """
         with get_connection(self.db_path) as db:
-            return [dict(row) for row in db.execute(sql, args)]
+            rows = [dict(row) for row in db.execute(sql, args)]
+        for row in rows:
+            row["request_count"] = row.pop("total_request_count", 0)
+        return rows
 
     def _es_graph(self, window: Dict[str, Any]) -> Dict[str, Any]:
         rows = self._es_rows(["caller_service", "target_service"], window)

@@ -920,6 +920,7 @@
 ## Raw-trace read boundary and topology navigation (2026-09-24)
 
 - User-facing analytics and topology APIs must read worker-owned `metric_buckets`, topology rollups, and other aggregate/read-model tables. Keep raw ClickHouse `traces` access in ingestion and explicit worker/backfill processing only; do not add a request-time fallback to raw spans.
+- When analytics use ClickHouse while raw traces use Elasticsearch/ELK, interactive topology must read the worker's ClickHouse `metric_buckets`; the legacy topology edge tables may be empty in this split-storage mode. A transaction with no caller service still contributes its target service/API, but must not create a fabricated caller node or edge.
 - Prometheus `/metrics` reads the worker snapshot/checkpoint; if neither exists yet, return an empty snapshot instead of running worker aggregation in the API process.
 - Trace Explorer remains a separately documented temporary exception: it reads the store selected by `OTEL_TRACE_STORAGE_BACKEND` (Elasticsearch for live APM, ClickHouse `traces` for an offline testbed). Keep raw table reads isolated to its two repository methods and ingestion deduplication; do not add this access to other APIs.
 - Interactive topology renders service nodes and service-to-service edges only. API, principal, and IP detail stays in lazy, bounded DOM panels; navigation supports Service → API → User and User → Service → API. Use the stable `service_edge_id` helper and backend `edge_ids` for yellow path highlighting.
