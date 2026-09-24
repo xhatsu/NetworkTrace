@@ -60,6 +60,41 @@ def rebuild_baselines(
             FROM metric_buckets FINAL
             WHERE """ + " AND ".join(clauses), args).fetchall()
 
+        # A detected metric incident is evidence about the observed traffic,
+        # not a healthy training sample. Keep its full coalesced interval out
+        # of every baseline dimension for the affected service. This remains
+        # true even when an operator later resolves or suppresses the event.
+        incident_clauses = [
+            "anomaly_type IN ('traffic_spike', 'traffic_drop', 'latency', 'error_rate')",
+            "target_service IS NOT NULL",
+            "first_seen IS NOT NULL",
+            "last_seen IS NOT NULL",
+        ]
+        incident_args: List[Any] = []
+        if target_services is not None:
+            incident_clauses.append(f"target_service IN ({placeholders})")
+            incident_args.extend(target_services)
+        if max_bucket_start is not None:
+            incident_clauses.append("first_seen <= ?")
+            incident_args.append((max_bucket_start + 300) * 1000)
+        incidents = db.execute("""
+            SELECT target_service, first_seen, last_seen
+            FROM anomaly_events FINAL
+            WHERE """ + " AND ".join(incident_clauses), incident_args).fetchall()
+
+    incident_windows: Dict[str, List[tuple[int, int]]] = {}
+    for event in incidents:
+        incident_windows.setdefault(event["target_service"], []).append(
+            (int(event["first_seen"]), int(event["last_seen"]))
+        )
+    rows = [
+        row for row in rows
+        if not any(
+            start <= int(row["bucket_start"]) * 1000 < end
+            for start, end in incident_windows.get(row["target_service"], ())
+        )
+    ]
+
     # Dimensions to track:
     # 1. 'service': target_service
     # 2. 'caller_target': caller_service + '->' + target_service

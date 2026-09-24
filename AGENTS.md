@@ -9,7 +9,7 @@
   - Sanitizes Basic authentication in-memory (passwords and tokens scrubbed before storage/logging/hashing).
   - Analytical data model: `caller_service` -> `principal_name` -> `target_service` -> `operation` -> `status + latency`.
   - Computes 1-minute (`60s`) and 5-minute (`300s`) rollups with exact p50/p95/p99 percentiles.
-  - Computes rolling medians and MAD (Median Absolute Deviation) baselines across matching minute-of-week and hour-of-day.
+  - Computes rolling medians and MAD (Median Absolute Deviation) baselines across matching minute-of-week and hour-of-day. Worker baseline training stops before the earliest pending five-minute anomaly window and excludes windows covered by detected service metric incidents, so later spikes cannot train their own reference.
   - Detectors: Traffic spike (`traffic_spike`), traffic drop (`traffic_drop`), latency shift (`latency`), error rate increase (`error_rate`), new service relationship (`new_service_edge`), new principal relationship (`new_principal_edge`), unusual access (`unusual_access` / "Truy cập Bất thường"), unusual execution time (`unusual_time`), and source IP behavioral anomalies (`user_new_source_ip` / `ip_new_user`).
   - Incident blast-radius analysis (upstream callers, affected principals/operations) and deterministic root-cause heuristic origin.
   - Serves fast analytics dashboards via FastAPI and an interactive React/TypeScript frontend.
@@ -86,7 +86,7 @@
   - `behavioral_engine.py`: Canonical identity normalization, detector readiness, multi-layer baselines, bounded incident lifecycle, capped family scoring (Origin cap 35, Access cap 40, Activity cap 35, Identity mapping cap 30, Authentication cap 45), 7-question explainability cards, and new behavioral/auth detectors (`OPERATION_MIX_SHIFT`, `CALLER_PRINCIPAL_SWITCH`, `TARGET_FANOUT_SURGE`, `SOURCE_FANOUT_SURGE`, `PRINCIPAL_RATE_SURGE`, `AUTH_FAILURE_BURST`, `FAILURE_THEN_SUCCESS`, `SOURCE_IDENTITY_FANOUT`, telemetry quality gates).
   - `normalization.py`: Normalizes OTel / ELK payloads, extracts canonical `enduser.id` / `labels.enduser.id` / `user.id` as principal username, derives trusted IP / proxies, extracts WSSE usernames with case preservation, sets canonical `operation_key` (`Service/operation`), and maps decoupled `auth_result` / `auth_evidence`.
   - `aggregation.py`: Computes 60s and 300s rollups with exact p50/p95/p99 percentiles.
-  - `baseline.py`: Computes rolling median and MAD across dimensions.
+  - `baseline.py`: Computes rolling median and MAD across dimensions from eligible five-minute windows, excluding detected service traffic, latency, and error incident intervals.
   - `anomaly_detection.py`: Detectors: traffic_spike, traffic_drop, latency, error_rate, new_service_edge, new_principal_edge, unusual_access (behavioral shift by learned user or IP accessing a new endpoint never seen in baseline, or 401/403 authorization failure bursts without hardcoded strings), unusual_time (off-hours activity for established accounts), and user_new_source_ip / ip_new_user.
   - `blast_radius.py`: Recursive caller traversal and impact calculation.
   - `root_cause.py`: Probable origin heuristic.

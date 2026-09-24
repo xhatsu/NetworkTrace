@@ -112,8 +112,18 @@ def _run_changed_baselines(db_path=None) -> int:
             "ORDER BY bucket_version,target_service LIMIT ?",
             (cursor_version, cursor_target, settings.baseline_series_budget),
         ).fetchall()
+        # The detector consumes these windows later in this worker cycle.
+        # Never let a pending observation teach its own baseline, including
+        # when several revised windows arrive together after an ELK sync.
+        pending_row = db.execute(
+            "SELECT bucket_ms FROM dirty_buckets FINAL "
+            "WHERE reason='aggregation-revised' ORDER BY bucket_ms LIMIT 1"
+        ).fetchone()
     targets = [str(row[0]) for row in rows]
-    count = rebuild_baselines(db_path=db_path, target_services=targets)
+    training_end = int(pending_row[0]) // 1000 - 300 if pending_row else None
+    count = rebuild_baselines(
+        db_path=db_path, target_services=targets, max_bucket_start=training_end
+    )
     if rows:
         state["bucket_version"] = int(rows[-1][1])
         state["target_service"] = str(rows[-1][0])
