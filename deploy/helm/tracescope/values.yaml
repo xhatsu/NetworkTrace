@@ -13,7 +13,7 @@ global:
   # Configure this once (e.g. "0.3.3") so all components share the unified version.
   # Can be overridden per workload below (app.image.tag, ingest.image.tag, etc.).
   image:
-    tag: "0.3.9"
+    tag: "0.4.0"
 
 nameOverride: ""
 fullnameOverride: ""
@@ -48,18 +48,19 @@ clickhouse:
   secure: false
 
 # -----------------------------------------------------------------------------
-# Storage Backend & Elasticsearch Integration
-# Options for storage.backend: "clickhouse" (default) or "elasticsearch" / "elk"
-# When "elasticsearch" is configured, trace queries (search, waterfall) query ELK
-# directly via ElasticsearchTraceRepository while ClickHouse stores host/agent traces.
+# ClickHouse analytics with Elasticsearch APM trace and worker source
 # -----------------------------------------------------------------------------
 storage:
   backend: "clickhouse"
+  # Trace search/waterfalls read application APM spans from Elasticsearch.
+  # Worker metrics are materialized into ClickHouse while analytics stay there.
+  traceBackend: "elasticsearch"
   clickhouseOnlyAgentTraces: true
 
 elasticsearch:
-  enabled: false
-  url: "http://elasticsearch:9200"
+  enabled: true
+  # Existing ELK service in namespace tmp-elk.
+  url: "http://tmp-elk-svc.tmp-elk.svc.cluster.local:9200"
   index: "traces-apm*,apm-*,traces-*"
   apiKey: ""
   user: ""

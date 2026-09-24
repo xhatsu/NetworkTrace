@@ -510,12 +510,23 @@ def get_worker_metrics_snapshot(db_path=None) -> Dict[str, Any]:
     except Exception:
         pass
 
-    # Fallback only when worker has never run yet
-    snapshot = compute_domain_metrics_snapshot(db_path=db_path)
-    with _worker_snapshot_lock:
-        _cached_worker_snapshot = snapshot
-        _cached_worker_snapshot_time = now
-    return snapshot
+    # Do not run worker derivation inline on a scrape request. In particular,
+    # the worker snapshot may read raw input tables; before the first worker
+    # cycle the API reports an empty snapshot until the checkpoint is written.
+    return {
+        "total_spans": 0,
+        "nodes_reporting": 1,
+        "c_2xx": 0,
+        "c_err": 0,
+        "nodes": [],
+        "users_rpm": [],
+        "open_anomalies": 0,
+        "observed_tps": 0.0,
+        "baseline_tps": 0.0,
+        "updated_at_ms": 0,
+        "worker_last_run_seconds": 0.0,
+        "worker_cycle_duration_seconds": 0.0,
+    }
 
 
 # Global singleton registry instance
@@ -563,4 +574,3 @@ class PrometheusMiddleware:
                 status_code=status_code,
                 duration_sec=duration,
             )
-

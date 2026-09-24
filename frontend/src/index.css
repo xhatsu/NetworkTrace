@@ -15,7 +15,36 @@ html {
   font-synthesis: none;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+  --canvas: #0b0c0e;
+  --surface: #111217;
+  --surface-raised: #181b1f;
+  --surface-hover: #202226;
+
+  --border: #2a2d30;
+  --border-strong: #34373b;
+  --grid: #303236;
+
+  --text: #d8d9da;
+  --text-secondary: #a7a9ab;
+  --text-muted: #7b7d80;
+
+  --blue: #5794f2;
+  --green: #73bf69;
+  --orange: #ff9830;
+  --red: #f2495c;
+  --yellow: #f2cc0c;
+  --purple: #b877d9;
+
+  --radius-panel: 3px;
+  --radius-control: 2px;
   --chart-line-width: 1.25px;
+
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 24px;
+
   --theme-canvas: #0b0c0e;
   --theme-sidebar: #111217;
   --theme-surface: #111217;
@@ -259,13 +288,13 @@ select {
 .recharts-cartesian-grid-line {
   stroke: var(--theme-grid);
 }
+
 /* Keep time-series peaks legible across Line, Area, and composed charts. */
 .recharts-line-curve,
 .recharts-area-curve,
 .time-series-curve {
   stroke-width: var(--chart-line-width);
 }
-
 
 .recharts-tooltip-wrapper {
   outline: none;

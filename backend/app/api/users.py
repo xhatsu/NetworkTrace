@@ -32,7 +32,7 @@ class ChangeUpdate(BaseModel):
 
 
 class ChangeReview(BaseModel):
-    action: Literal["expected", "investigate", "data_quality"]
+    action: Literal["expected", "investigate", "resolve", "data_quality"]
     scope: Optional[str] = None
     reason: Optional[str] = None
     operator: Optional[str] = "operator"

@@ -19,7 +19,12 @@ import { api, queryString } from "../api";
 import { ErrorState, Loading, MetricCard, n, pct } from "../components";
 import { useFilters } from "../App";
 import { useI18n } from "../i18n";
-import { layoutServiceGraph, type Position } from "../topologyLayout";
+import {
+  layoutServiceGraph,
+  SERVICE_NODE_HEIGHT,
+  SERVICE_NODE_WIDTH,
+  type Position,
+} from "../topologyLayout";
 
 type Metrics = {
   tps: number;
@@ -152,6 +157,15 @@ type Selection =
   | { kind: "edge"; edge: TopologyEdge }
   | null;
 
+type ServiceHealth = "healthy" | "degraded" | "critical" | "unknown";
+
+type ServiceChangeSeverity = "info" | "warning" | "critical";
+
+type ServiceChange = {
+  label: string;
+  severity: ServiceChangeSeverity;
+};
+
 const FIVE_MINUTE_MS = 5 * 60 * 1000;
 const SEVEN_DAY_SLICES = 7 * 24 * 12;
 
@@ -186,6 +200,104 @@ function childPosition(parent: Position, index: number, total: number, vertical 
   const angle = -Math.PI / 2 + (Math.PI * (index + 1)) / (total + 1);
   const radius = vertical ? 170 : 150;
   return { x: parent.x + Math.cos(angle) * radius, y: parent.y + Math.sin(angle) * radius };
+}
+
+function metricNumber(value: number | null | undefined): number {
+  if (value === null || value === undefined || Number.isNaN(value)) return 0;
+  return value;
+}
+
+function hasServiceTraffic(metrics: Metrics): boolean {
+  return metricNumber(metrics.request_count) > 0 || metricNumber(metrics.tps) > 0;
+}
+
+function getServiceHealth(metrics: Metrics): ServiceHealth {
+  if (!hasServiceTraffic(metrics)) return "unknown";
+
+  const errorRate = metricNumber(metrics.error_rate);
+  const http5xxRate = metricNumber(metrics.http_5xx_rate);
+  const timeoutCount = metricNumber(metrics.timeout_count);
+  const tcpResetCount = metricNumber(metrics.tcp_reset_count);
+  const latencyChangePct = metricNumber(metrics.change?.latency_change_pct);
+  const errorRateDelta = metricNumber(metrics.change?.error_rate_delta);
+
+  if (http5xxRate >= 0.05 || errorRate >= 0.1 || timeoutCount > 0 || tcpResetCount > 0) {
+    return "critical";
+  }
+  if (http5xxRate >= 0.01 || errorRate >= 0.03 || latencyChangePct >= 50 || errorRateDelta >= 0.02) {
+    return "degraded";
+  }
+  return "healthy";
+}
+
+function healthDotClass(health: ServiceHealth): string {
+  switch (health) {
+    case "healthy": return "bg-emerald-400";
+    case "degraded": return "bg-amber-400";
+    case "critical": return "bg-red-400";
+    case "unknown":
+    default: return "bg-slate-500";
+  }
+}
+
+function healthBorderClass(health: ServiceHealth): string {
+  switch (health) {
+    case "degraded": return "border-amber-400/40";
+    case "critical": return "border-red-400/55";
+    case "unknown": return "border-slate-700";
+    case "healthy":
+    default: return "border-slate-700/80";
+  }
+}
+
+function formatCompactTps(value: number | null | undefined): string {
+  const tps = metricNumber(value);
+  if (tps >= 1000) return `${(tps / 1000).toFixed(tps >= 10000 ? 0 : 1)}k`;
+  if (tps >= 100) return tps.toFixed(0);
+  if (tps >= 10) return tps.toFixed(1);
+  return tps.toFixed(2);
+}
+
+function formatCompactLatency(value: number | null | undefined): string {
+  const ms = metricNumber(value);
+  if (ms >= 1000) {
+    const seconds = ms / 1000;
+    return `${seconds.toFixed(seconds >= 10 ? 0 : 1)}s`;
+  }
+  return `${Math.round(ms)}ms`;
+}
+
+function formatCompactErrorRate(value: number | null | undefined): string {
+  const percent = metricNumber(value) * 100;
+  if (percent >= 10) return `${percent.toFixed(0)}%`;
+  if (percent >= 1) return `${percent.toFixed(1)}%`;
+  return `${percent.toFixed(2)}%`;
+}
+
+function getPrimaryServiceChange(metrics: Metrics): ServiceChange | null {
+  const change = metrics.change;
+  if (!change) return null;
+
+  const errorDelta = metricNumber(change.error_rate_delta);
+  const latencyPct = metricNumber(change.latency_change_pct);
+  const tpsPct = metricNumber(change.tps_change_pct);
+
+  if (errorDelta >= 0.05) return { label: "↑ errors", severity: "critical" };
+  if (errorDelta >= 0.02) return { label: "↑ errors", severity: "warning" };
+  if (latencyPct >= 100) return { label: `↑ latency ${Math.round(latencyPct)}%`, severity: "critical" };
+  if (latencyPct >= 50) return { label: `↑ latency ${Math.round(latencyPct)}%`, severity: "warning" };
+  if (tpsPct >= 50) return { label: `↑ traffic ${Math.round(tpsPct)}%`, severity: "info" };
+  if (tpsPct <= -50) return { label: `↓ traffic ${Math.abs(Math.round(tpsPct))}%`, severity: "warning" };
+  return null;
+}
+
+function serviceChangeClass(severity: ServiceChangeSeverity): string {
+  switch (severity) {
+    case "critical": return "text-red-300";
+    case "warning": return "text-amber-300";
+    case "info":
+    default: return "text-sky-300";
+  }
 }
 
 function edgePath(source: Position, target: Position): string {
@@ -257,6 +369,90 @@ function MetricStrip({ metrics, vertical = false }: { metrics: Metrics; vertical
       <div className={metricClass}><div className="label">p95</div><div className="font-mono text-sm text-violet-300">{n(metrics.p95_latency_ms, 1)} ms</div></div>
       <div className={metricClass}><div className="label">{t("Errors")}</div><div className={`font-mono text-sm ${metrics.error_rate > 0.05 ? "text-rose-300" : "text-emerald-300"}`}>{pct(metrics.error_rate)}</div></div>
       <div className={metricClass}><div className="label">{t("Change")}</div><div className={`inline-flex rounded border px-1.5 py-0.5 text-[10px] font-bold uppercase ${statusTone(metrics.change?.status)}`}>{metrics.change?.status || "normal"}</div></div>
+    </div>
+  );
+}
+
+function ServiceNodeCard({
+  node,
+  selected,
+  expanded,
+  canExpand,
+  onSelect,
+  onToggleExpand,
+}: {
+  node: TopologyNode;
+  selected: boolean;
+  expanded: boolean;
+  canExpand: boolean;
+  onSelect: () => void;
+  onToggleExpand: () => void;
+}) {
+  const { t } = useI18n();
+  const metrics = node.metrics;
+  const traffic = hasServiceTraffic(metrics);
+  const health = getServiceHealth(metrics);
+  const change = getPrimaryServiceChange(metrics);
+
+  return (
+    <div
+      className={`overflow-hidden rounded-md border bg-[#11131b]/95 shadow-sm transition-colors ${healthBorderClass(health)} ${selected ? "ring-2 ring-sky-300/80" : ""}`}
+      style={{ width: SERVICE_NODE_WIDTH, height: SERVICE_NODE_HEIGHT }}
+      data-testid="topology-service-card"
+    >
+      <div className="flex h-full flex-col px-2 py-1.5">
+        <div className="flex min-w-0 items-center gap-1.5 leading-4">
+          <button
+            type="button"
+            onClick={(event) => {
+              event.stopPropagation();
+              onSelect();
+            }}
+            className="flex min-w-0 flex-1 items-center gap-1.5 text-left focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-sky-300"
+            aria-label={`Inspect service ${node.name}`}
+            title={node.name}
+          >
+            <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${healthDotClass(health)}`} title={health} />
+            <span className="min-w-0 flex-1 truncate text-[11px] font-semibold leading-4 text-slate-100">{node.name}</span>
+          </button>
+          {canExpand && (
+            <button
+              type="button"
+              data-node-drag-ignore="true"
+              className="-mr-1 flex h-4 w-4 shrink-0 items-center justify-center rounded text-[11px] text-slate-500 hover:bg-white/5 hover:text-slate-200 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-sky-300"
+              title={expanded ? t("Collapse") : t("Expand")}
+              aria-label={`${expanded ? t("Collapse") : t("Expand")} service ${node.name}`}
+              onClick={(event) => {
+                event.stopPropagation();
+                onToggleExpand();
+              }}
+            >
+              {expanded ? <ChevronDown size={11} /> : <ChevronRight size={11} />}
+            </button>
+          )}
+        </div>
+
+        <button type="button" onClick={(event) => { event.stopPropagation(); onSelect(); }} className="mt-0.5 flex w-full min-w-0 flex-col text-left focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-sky-300">
+          <span className="flex w-full min-w-0 items-center whitespace-nowrap text-[10px] leading-4">
+            {traffic ? (
+              <>
+                <span className="text-sky-300" title="TPS">{formatCompactTps(metrics.tps)}t</span>
+                <span className="mx-1 text-slate-700">·</span>
+                <span className="text-violet-300" title="p95 latency">{formatCompactLatency(metrics.p95_latency_ms)}</span>
+                <span className="mx-1 text-slate-700">·</span>
+                <span className={health === "critical" ? "text-red-300" : health === "degraded" ? "text-amber-300" : "text-slate-400"} title="Error rate">
+                  {formatCompactErrorRate(metrics.error_rate)}
+                </span>
+              </>
+            ) : (
+              <span className="text-slate-500">No traffic</span>
+            )}
+          </span>
+          <span className="mt-0.5 h-3 w-full truncate text-[9px] font-medium leading-3" title={change?.label}>
+            {change && <span className={serviceChangeClass(change.severity)}>{change.label}</span>}
+          </span>
+        </button>
+      </div>
     </div>
   );
 }
@@ -457,8 +653,8 @@ function GraphSurface({
             data-topology-object="true"
             data-topology-node="true"
             data-topology-node-type={node.type}
-            className="absolute w-44 -translate-x-1/2 -translate-y-1/2 cursor-move"
-            style={{ left: `${pos.x / 10}%`, top: `${pos.y / 6.2}%`, zIndex: isSelected ? 30 : 10 }}
+            className={`absolute ${node.type === "service" ? "" : "w-44"} -translate-x-1/2 -translate-y-1/2 cursor-move`}
+            style={{ left: `${pos.x / 10}%`, top: `${pos.y / 6.2}%`, width: node.type === "service" ? SERVICE_NODE_WIDTH : undefined, zIndex: isSelected ? 30 : 10 }}
             onPointerDown={(event) => {
               if (event.button !== 0 || (event.target as Element).closest("[data-node-drag-ignore='true']")) return;
               nodeDrag.current = { nodeId: node.id, startX: event.clientX, startY: event.clientY, origin: pos, moved: false };
@@ -487,30 +683,31 @@ function GraphSurface({
             onPointerCancel={() => { nodeDrag.current = null; }}
             onLostPointerCapture={() => { nodeDrag.current = null; }}
           >
-            <button
-              type="button"
-              onClick={(event) => {
-                event.stopPropagation();
-                onSelect({ kind: "node", node });
-              }}
-              className={`group w-full rounded-lg border border-l-4 bg-[#171a28] px-3 py-2 text-left transition hover:border-white/70 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400 ${tone.border} ${isSelected ? "border-white ring-1 ring-white/70" : node.metrics.change?.status === "new" ? "border-cyan-400/70" : node.metrics.change?.status === "changed" ? "border-amber-400/70" : "border-[#303449]"}`}
-              aria-label={`Inspect ${node.type} ${node.name}`}
-            >
-              <span className={`flex items-center gap-2 text-xs font-semibold ${tone.text}`}><NodeIcon type={node.type} /><span className="truncate">{node.name}</span></span>
-              <span className={`mt-0.5 block text-[9px] uppercase tracking-wider ${tone.text}`}>{node.type === "principal" ? t("User") : t(node.type === "api" ? "API" : "Service")}</span>
-              <span className="mt-1 block"><MetricStrip metrics={node.metrics} vertical /></span>
-            </button>
-            {canExpand && (
-              <button
-                type="button"
-                data-node-drag-ignore="true"
-                className="absolute -right-2 -top-2 grid h-6 w-6 place-items-center rounded-full border border-cyan-400/60 bg-[#0e1621] text-cyan-300 shadow-sm hover:bg-cyan-400 hover:text-black focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400"
-                onClick={(event) => { event.stopPropagation(); onToggleExpand(node); }}
-                aria-label={`${isExpanded ? "Collapse" : "Expand"} ${node.type} ${node.name}`}
-                title={`${isExpanded ? "Collapse" : "Expand"} ${node.type}`}
-              >
-                {isExpanded ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
-              </button>
+            {node.type === "service" ? (
+              <ServiceNodeCard
+                node={node}
+                selected={isSelected}
+                expanded={isExpanded}
+                canExpand={canExpand}
+                onSelect={() => onSelect({ kind: "node", node })}
+                onToggleExpand={() => onToggleExpand(node)}
+              />
+            ) : (
+              <>
+                <button
+                  type="button"
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    onSelect({ kind: "node", node });
+                  }}
+                  className={`group w-full rounded-lg border border-l-4 bg-[#171a28] px-3 py-2 text-left transition hover:border-white/70 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400 ${tone.border} ${isSelected ? "border-white ring-1 ring-white/70" : node.metrics.change?.status === "new" ? "border-cyan-400/70" : node.metrics.change?.status === "changed" ? "border-amber-400/70" : "border-[#303449]"}`}
+                  aria-label={`Inspect ${node.type} ${node.name}`}
+                >
+                  <span className={`flex items-center gap-2 text-xs font-semibold ${tone.text}`}><NodeIcon type={node.type} /><span className="truncate">{node.name}</span></span>
+                  <span className={`mt-0.5 block text-[9px] uppercase tracking-wider ${tone.text}`}>{node.type === "principal" ? t("User") : t("API")}</span>
+                  <span className="mt-1 block"><MetricStrip metrics={node.metrics} vertical /></span>
+                </button>
+              </>
             )}
           </div>
         );

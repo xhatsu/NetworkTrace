@@ -27,8 +27,8 @@ def wipe_clickhouse():
     print("ClickHouse tables wiped cleanly.")
 
 def wipe_elasticsearch():
-    print("Wiping Elasticsearch APM indices...")
-    for pattern in ("apm-*", "traces-apm*"):
+    print("Wiping Elasticsearch APM and TraceScope indices...")
+    for pattern in ("apm-*", "traces-apm*", "tracescope-*"):
         try:
             req = urllib.request.Request(f"{ES_URL}/{pattern}", method="DELETE")
             with urllib.request.urlopen(req, timeout=10) as resp:

@@ -16,16 +16,19 @@ export type LayoutEdge = {
 };
 
 const LAYER_GAP = 260;
-const NODE_GAP = 110;
+const NODE_GAP = 90;
 const COMPONENT_GAP = 220;
 const MAX_NODES_PER_COLUMN = 14;
 const CROSSING_SWEEPS = 8;
 
-const SERVICE_CARD_HALF_WIDTH = 88;
-const SERVICE_CARD_HALF_HEIGHT = 40;
+export const SERVICE_NODE_WIDTH = 156;
+export const SERVICE_NODE_HEIGHT = 66;
+
+const SERVICE_CARD_HALF_WIDTH = SERVICE_NODE_WIDTH / 2;
+const SERVICE_CARD_HALF_HEIGHT = SERVICE_NODE_HEIGHT / 2;
 const SCC_RADIUS = 122;
-const SCC_GRID_X_GAP = 220;
-const SCC_GRID_Y_GAP = 170;
+const SCC_GRID_X_GAP = SERVICE_NODE_WIDTH + 24;
+const SCC_GRID_Y_GAP = SERVICE_NODE_HEIGHT + 24;
 
 type SccGroup = {
   id: string;

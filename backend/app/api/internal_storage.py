@@ -78,7 +78,7 @@ async def ingestion_status(
     require_internal_token(token)
     with StorageRepository().connect() as db:
         count, min_ts, max_ts = db.execute(
-            "SELECT COUNT(*),MIN(timestamp_ms),MAX(timestamp_ms) FROM traces"
+            "SELECT COALESCE(SUM(request_count),0),MIN(bucket_start)*1000,MAX(bucket_start+bucket_size)*1000 FROM metric_buckets FINAL WHERE bucket_size=300"
         ).fetchone()
         jobs = [dict(row) for row in db.execute("SELECT * FROM jobs ORDER BY started_at_ms DESC")]
     return {

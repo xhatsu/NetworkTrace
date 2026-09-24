@@ -55,6 +55,11 @@ class Settings:
     clickhouse_database: str = os.getenv("OTEL_CLICKHOUSE_DATABASE", "tracescope")
     clickhouse_user: str = os.getenv("OTEL_CLICKHOUSE_USER", "default")
     clickhouse_password: str = os.getenv("OTEL_CLICKHOUSE_PASSWORD", "")
+    clickhouse_role: str = os.getenv("OTEL_CLICKHOUSE_ROLE", "api").lower()
+    clickhouse_api_user: str = os.getenv("OTEL_CLICKHOUSE_API_USER") or os.getenv("OTEL_CLICKHOUSE_USER", "default")
+    clickhouse_api_password: str = os.getenv("OTEL_CLICKHOUSE_API_PASSWORD") or os.getenv("OTEL_CLICKHOUSE_PASSWORD", "")
+    clickhouse_worker_user: str = os.getenv("OTEL_CLICKHOUSE_WORKER_USER") or os.getenv("OTEL_CLICKHOUSE_USER", "default")
+    clickhouse_worker_password: str = os.getenv("OTEL_CLICKHOUSE_WORKER_PASSWORD") or os.getenv("OTEL_CLICKHOUSE_PASSWORD", "")
     clickhouse_secure: bool = os.getenv("OTEL_CLICKHOUSE_SECURE", "false").lower() == "true"
     clickhouse_connect_timeout: float = float(os.getenv("OTEL_CLICKHOUSE_CONNECT_TIMEOUT", "10.0"))
     clickhouse_send_receive_timeout: float = float(os.getenv("OTEL_CLICKHOUSE_TIMEOUT", "30.0"))
@@ -70,6 +75,10 @@ class Settings:
     )
     # Storage Backend: 'clickhouse' (default for local testbed) or 'elasticsearch' / 'elk'
     storage_backend: str = os.getenv("OTEL_STORAGE_BACKEND", "clickhouse").lower()
+    # Trace Explorer can read application APM spans from ELK while analytics use ClickHouse rollups.
+    trace_storage_backend: str = os.getenv(
+        "OTEL_TRACE_STORAGE_BACKEND", os.getenv("OTEL_STORAGE_BACKEND", "clickhouse")
+    ).lower()
     elasticsearch_url: str = os.getenv("OTEL_ES_URL", os.getenv("ELASTICSEARCH_URL", "http://127.0.0.1:32073")).rstrip("/")
     elasticsearch_index: str = os.getenv("OTEL_ES_INDEX", "apm-*,traces-apm*")
     elasticsearch_api_key: str = os.getenv("OTEL_ES_API_KEY", "")
@@ -159,6 +168,7 @@ class Settings:
     max_range_days: int = 31
     slow_threshold_us: int = 1_000_000
     retention_days: int = int(os.getenv("OTEL_RETENTION_DAYS", "0"))
+    trace_retention_days: int = max(1, int(os.getenv("OTEL_TRACE_RETENTION_DAYS", "1")))
     # Schema ownership. Exactly one pod in a fleet should run migrations
     # (default "true" preserves the historical single-process behaviour).
     run_migrations: bool = os.getenv("OTEL_RUN_MIGRATIONS", "true").lower() == "true"

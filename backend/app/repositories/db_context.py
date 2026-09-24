@@ -355,12 +355,22 @@ def get_connection(db_path: Optional[str] = None) -> ClickHouseConnection:
 
     client = clients.get(target_db)
     if client is None:
+        if settings.clickhouse_role == "api":
+            username = settings.clickhouse_api_user
+            password = settings.clickhouse_api_password
+        elif settings.clickhouse_role == "worker":
+            username = settings.clickhouse_worker_user
+            password = settings.clickhouse_worker_password
+        else:
+            # Schema migration jobs use the configured owner credential.
+            username = settings.clickhouse_user
+            password = settings.clickhouse_password
         client = clickhouse_connect.get_client(
             host=settings.clickhouse_host,
             port=settings.clickhouse_port,
             database=target_db,
-            username=settings.clickhouse_user,
-            password=settings.clickhouse_password,
+            username=username,
+            password=password,
             secure=settings.clickhouse_secure,
             connect_timeout=settings.clickhouse_connect_timeout,
             send_receive_timeout=settings.clickhouse_send_receive_timeout,

@@ -218,7 +218,7 @@ export function UserDirectory() {
                   return (
                     <tr
                       key={u.principal_name}
-                      onClick={() => nav(`/users/${encodeURIComponent(u.principal_name)}/overview`)}
+                      onClick={() => nav(`/users/${encodeURIComponent(u.principal_name)}/activity`)}
                       className="cursor-pointer hover:bg-white/[0.06] transition"
                     >
                       <td className="px-5 py-3 font-bold text-white flex items-center gap-2.5">
@@ -294,7 +294,7 @@ export function UserDirectory() {
                         <button
                           onClick={(e) => {
                             e.stopPropagation();
-                            nav(`/users/${encodeURIComponent(u.principal_name)}/overview`);
+                            nav(`/users/${encodeURIComponent(u.principal_name)}/activity`);
                           }}
                           className="inline-flex items-center gap-1 rounded-lg border border-cyan-400/50 bg-cyan-500/15 px-2.5 py-1 text-xs font-bold text-cyan-200 hover:bg-cyan-500/30 transition"
                         >

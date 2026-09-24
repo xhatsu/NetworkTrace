@@ -15,6 +15,7 @@ from backend.app.repositories.interactive_topology_repository import (
     canonical_principal,
     decode_cursor,
     encode_cursor,
+    service_edge_id,
 )
 from backend.app.repositories.trace_repository import TraceRepository
 from backend.app.repositories.principal_repository import PrincipalRepository
@@ -96,7 +97,9 @@ def test_materialized_topology_has_metrics_evidence_anonymous_and_ip_status(tmp_
     graph = repo.service_graph(window)
     assert graph["nodes"]
     assert graph["edges"]
+    assert {node["type"] for node in graph["nodes"]} == {"service"}
     edge = graph["edges"][0]
+    assert edge["id"] == service_edge_id("orders", "payment")
     assert edge["metrics"]["request_count"] == 4
     assert edge["metrics"]["request_bytes"] == 480
     assert edge["metrics"]["response_bytes"] == 1920
@@ -126,12 +129,15 @@ def test_materialized_topology_has_metrics_evidence_anonymous_and_ip_status(tmp_
 
     apis = repo.service_apis("payment", window)
     assert apis["nodes"]
+    assert apis["nodes"][0]["edge_ids"] == [edge["id"]]
     connections = repo.api_connections("payment", apis["nodes"][0]["api"], window)
     assert connections["edges"]
     assert {edge["source"] for edge in connections["edges"]} == {"service:orders"}
-    assert all(edge["target"] == f"api:payment:{apis['nodes'][0]['api']}" for edge in connections["edges"])
+    assert all(edge["target"] == "service:payment" for edge in connections["edges"])
+    assert {edge["id"] for edge in connections["edges"]} == {service_edge_id("orders", "payment")}
     principals = repo.api_principals("payment", apis["nodes"][0]["api"], window)
     assert {node["name"] for node in principals["nodes"]} >= {"partner-a", "-anonymous-"}
+    assert all(node["edge_ids"] == [service_edge_id("orders", "payment")] for node in principals["nodes"])
     api_detail = repo.api_metrics(apis["nodes"][0]["api"], window, "payment")
     assert api_detail["metrics"]["bandwidth_bytes_per_second"] == 4.0
     principal_detail = repo.principal_metrics("partner-a", window)
@@ -139,10 +145,18 @@ def test_materialized_topology_has_metrics_evidence_anonymous_and_ip_status(tmp_
     assert principal_detail["metrics"]["bandwidth_bytes_per_second"] == 3.0
     services = repo.principal_services("partner-a", window)
     assert [node["name"] for node in services["nodes"]] == ["payment"]
+    assert services["nodes"][0]["edge_ids"] == [service_edge_id("orders", "payment")]
     assert services["parent"]["type"] == "principal"
     user_apis = repo.principal_service_apis("partner-a", "payment", window)
     assert [node["name"] for node in user_apis["nodes"]] == ["payment/{id}"]
+    assert user_apis["nodes"][0]["edge_ids"] == [service_edge_id("orders", "payment")]
     assert user_apis["parent"]["type"] == "service"
+    user_page = repo.principal_directory(window, limit=1)
+    assert len(user_page["items"]) == 1
+    assert user_page["next_cursor"] is not None
+    user_page_two = repo.principal_directory(window, limit=1, cursor=user_page["next_cursor"])
+    assert len(user_page_two["items"]) == 1
+    assert user_page["items"][0]["name"] != user_page_two["items"][0]["name"]
     ips = repo.principal_ips("partner-a", window, 1, None)
     assert ips["items"]
     assert ips["items"][0]["is_load_balancer"] is False
@@ -212,6 +226,10 @@ def test_topology_api_surface_is_bounded_and_backward_compatible():
         "/api/v1/topology/principals/partner-a/metrics?window=5m",
         "/api/v1/topology/principals/partner-a/services?window=5m",
         "/api/v1/topology/principals/partner-a/services/payment/apis?window=5m",
+        "/api/v1/topology/users?window=5m&limit=1",
+        "/api/v1/topology/users/partner-a/services?window=5m&limit=1",
+        "/api/v1/topology/users/partner-a/services/payment/apis?window=5m&limit=1",
+        "/api/v1/topology/users/partner-a/ips?window=5m&page_size=1",
         "/api/v1/services/payment/bandwidth?from=1789700000000&to=1789700300000",
         "/api/v1/topology/principals/partner-a/ips?window=5m&page_size=1",
     ]

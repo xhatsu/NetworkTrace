@@ -149,10 +149,9 @@ def get_service_detail(
         """, (service, start_sec, end_sec)).fetchone()
 
         if not summary_row or not summary_row["total_requests"]:
-            # Fallback check
-            exists = db.execute("SELECT 1 FROM traces WHERE service_name = ? OR target_service = ? LIMIT 1", (service, service)).fetchone()
+            exists = db.execute("SELECT 1 FROM services WHERE name = ? LIMIT 1", (service,)).fetchone()
             if not exists:
-                exists = db.execute("SELECT 1 FROM services WHERE name = ? LIMIT 1", (service,)).fetchone()
+                exists = db.execute("SELECT 1 FROM topology_service_edges_5m FINAL WHERE target_service=? LIMIT 1", (service,)).fetchone()
             if not exists:
                 raise HTTPException(status_code=404, detail="Service not found")
 
@@ -196,14 +195,14 @@ def get_service_detail(
 
         # Instances
         instances = [dict(r) for r in db.execute("""
-            SELECT service_instance as name, COUNT(*) as requests,
-                   ROUND(AVG(duration_ms), 2) as avg_latency,
-                   ROUND(SUM(CASE WHEN http_status >= 400 OR outcome = 'failure' THEN 1.0 ELSE 0.0 END) / COUNT(*), 4) as error_rate
-            FROM traces
-            WHERE target_service = ? AND timestamp_ms >= ? AND timestamp_ms < ?
-              AND service_instance IS NOT NULL
+            SELECT service_instance as name, SUM(request_count) as requests,
+                   ROUND(SUM(latency_sum) / GREATEST(SUM(request_count),1), 2) as avg_latency,
+                   ROUND(SUM(error_count) / GREATEST(SUM(request_count),1), 4) as error_rate
+            FROM service_instance_edges_5m FINAL
+            WHERE target_service = ? AND bucket_start >= ? AND bucket_start < ?
+              AND service_instance NOT IN ('', 'unknown')
             GROUP BY service_instance ORDER BY requests DESC
-        """, (service, start_sec * 1000, end_sec * 1000)).fetchall()]
+        """, (service, start_sec, end_sec)).fetchall()]
 
         meta_row = db.execute("SELECT name, environment, service_group, service_module, first_seen_ms, last_seen_ms FROM services WHERE name = ?", (service,)).fetchone()
         service_meta = dict(meta_row) if meta_row else {

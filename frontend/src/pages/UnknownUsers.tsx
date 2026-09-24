@@ -8,7 +8,6 @@ import {
   Layers,
   Clock,
   ArrowRight,
-  ExternalLink,
   Globe,
   Server,
   AlertTriangle,
@@ -66,20 +65,19 @@ export function UnknownUsersPage() {
   const topTargets: any[] = data?.top_targets || [];
   const topOperations: any[] = data?.top_operations || [];
   const topSources: any[] = data?.top_sources || [];
-  const recentTraces: any[] = data?.recent_traces || [];
+  const recentRollups: any[] = data?.recent_rollups || [];
 
-  // Filter recent traces based on search term and selected tab
-  const filteredTraces = recentTraces.filter((tr) => {
-    if (selectedTab === "auth_fails" && tr.http_status !== 401 && tr.http_status !== 403) return false;
-    if (selectedTab === "errors" && tr.http_status < 400 && tr.outcome !== "failure") return false;
+  // These rows summarize five-minute worker rollups; they are not individual traces.
+  const filteredRollups = recentRollups.filter((row) => {
+    if (selectedTab === "auth_fails" && !row.auth_failure_count) return false;
+    if (selectedTab === "errors" && !row.errors) return false;
     if (searchTerm) {
       const s = searchTerm.toLowerCase();
       return (
-        tr.trace_id?.toLowerCase().includes(s) ||
-        tr.target_service?.toLowerCase().includes(s) ||
-        tr.operation?.toLowerCase().includes(s) ||
-        tr.caller_ip?.toLowerCase().includes(s) ||
-        tr.original_client_ip?.toLowerCase().includes(s)
+        row.target_service?.toLowerCase().includes(s) ||
+        row.operation?.toLowerCase().includes(s) ||
+        row.source_ip?.toLowerCase().includes(s) ||
+        row.caller_service?.toLowerCase().includes(s)
       );
     }
     return true;
@@ -463,7 +461,7 @@ export function UnknownUsersPage() {
               <Search size={13} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-[#64748b]" />
               <input
                 type="text"
-                placeholder={t("Filter by service, op, IP...", "Lọc theo service, API, IP...")}
+                placeholder={t("Filter by service, API, IP...", "Lọc theo service, API, IP...")}
                 value={searchTerm}
                 onChange={(e) => setSearchTerm(e.target.value)}
                 className="h-8 rounded-lg border border-white/10 bg-[#10121e] pl-8 pr-3 text-xs text-white placeholder-[#64748b] focus:border-cyan-400 focus:outline-none"
@@ -481,64 +479,39 @@ export function UnknownUsersPage() {
                 <th className="py-2.5 px-3">{t("Target Service", "Dịch vụ Đích")}</th>
                 <th className="py-2.5 px-3">{t("Operation / Endpoint", "Thao tác / API")}</th>
                 <th className="py-2.5 px-3">{t("Source IP", "Địa chỉ IP")}</th>
-                <th className="py-2.5 px-3 text-center">{t("Status", "Mã HTTP")}</th>
-                <th className="py-2.5 px-3 text-right">{t("Duration", "Độ trễ")}</th>
-                <th className="py-2.5 px-3 text-right">{t("Action", "Hành động")}</th>
+                <th className="py-2.5 px-3 text-right">{t("Requests", "Yêu cầu")}</th>
+                <th className="py-2.5 px-3 text-right">{t("Errors", "Lỗi")}</th>
+                <th className="py-2.5 px-3 text-right">{t("Auth failures", "Lỗi xác thực")}</th>
+                <th className="py-2.5 px-3 text-right">{t("P95 latency", "Độ trễ P95")}</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-white/5 font-mono">
-              {filteredTraces.length === 0 ? (
+              {filteredRollups.length === 0 ? (
                 <tr>
-                  <td colSpan={7} className="py-10 text-center text-xs text-[#94a3b8]">
-                    {t("No matching unattributed traces found", "Không tìm thấy giao dịch chưa định danh phù hợp")}
+                  <td colSpan={8} className="py-10 text-center text-xs text-[#94a3b8]">
+                    {t("No matching unattributed activity found", "Không tìm thấy hoạt động chưa định danh phù hợp")}
                   </td>
                 </tr>
               ) : (
-                filteredTraces.map((tr) => {
-                  const isAuthFail = tr.http_status === 401 || tr.http_status === 403;
-                  const is5xx = tr.http_status >= 500;
-                  const isSuccess = tr.http_status >= 200 && tr.http_status < 300;
-
+                filteredRollups.map((row) => {
                   return (
-                    <tr key={tr.trace_id} className="hover:bg-white/5 transition-colors">
+                    <tr key={[row.timestamp_ms, row.caller_service, row.target_service, row.operation, row.source_ip].join("|")} className="hover:bg-white/5 transition-colors">
                       <td className="py-2.5 px-3 text-[#94a3b8]">
-                        {new Date(tr.timestamp_ms).toLocaleTimeString([], {
+                        {new Date(row.timestamp_ms).toLocaleTimeString([], {
                           hour: "2-digit",
                           minute: "2-digit",
                           second: "2-digit",
                         })}
                       </td>
-                      <td className="py-2.5 px-3 font-bold text-white">{tr.target_service}</td>
-                      <td className="py-2.5 px-3 text-cyan-300 max-w-[240px] truncate" title={tr.operation}>
-                        {tr.operation}
+                      <td className="py-2.5 px-3 font-bold text-white">{row.target_service}</td>
+                      <td className="py-2.5 px-3 text-cyan-300 max-w-[240px] truncate" title={row.operation}>
+                        {row.operation}
                       </td>
-                      <td className="py-2.5 px-3 text-[#94a3b8]">{tr.caller_ip || tr.original_client_ip || "—"}</td>
-                      <td className="py-2.5 px-3 text-center">
-                        <span
-                          className={`inline-block px-2 py-0.5 rounded text-[10px] font-bold border ${
-                            isSuccess
-                              ? "bg-emerald-500/15 border-emerald-500/30 text-emerald-300"
-                              : isAuthFail
-                              ? "bg-rose-500/15 border-rose-500/30 text-rose-300 font-black"
-                              : is5xx
-                              ? "bg-amber-500/15 border-amber-500/30 text-amber-300"
-                              : "bg-white/5 border-white/10 text-white"
-                          }`}
-                        >
-                          {tr.http_status || tr.outcome || "N/A"}
-                        </span>
-                      </td>
-                      <td className="py-2.5 px-3 text-right text-[#94a3b8]">{tr.duration_ms} ms</td>
-                      <td className="py-2.5 px-3 text-right">
-                        <Link
-                          to={`/traces/${tr.trace_id}`}
-                          className="inline-flex items-center gap-1 rounded bg-white/5 px-2 py-1 text-[10px] text-cyan-300 hover:bg-cyan-500/20 hover:text-white transition-colors"
-                          title={t("Inspect Trace Waterfall", "Xem Chi Tiết Waterfall")}
-                        >
-                          <span>Waterfall</span>
-                          <ExternalLink size={10} />
-                        </Link>
-                      </td>
+                      <td className="py-2.5 px-3 text-[#94a3b8]">{row.source_ip || "—"}</td>
+                      <td className="py-2.5 px-3 text-right text-white">{Number(row.requests || 0).toLocaleString()}</td>
+                      <td className={"py-2.5 px-3 text-right " + (row.errors ? "text-rose-300" : "text-[#94a3b8]")}>{Number(row.errors || 0).toLocaleString()}</td>
+                      <td className={"py-2.5 px-3 text-right " + (row.auth_failure_count ? "text-amber-300" : "text-[#94a3b8]")}>{Number(row.auth_failure_count || 0).toLocaleString()}</td>
+                      <td className="py-2.5 px-3 text-right text-[#94a3b8]">{Number(row.duration_ms || 0).toLocaleString()} ms</td>
                     </tr>
                   );
                 })

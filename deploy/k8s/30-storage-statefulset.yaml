@@ -46,6 +46,8 @@ spec:
             - secretRef:
                 name: tracescope-secrets
           env:
+            - name: OTEL_CLICKHOUSE_ROLE
+              value: "owner"
             - name: OTEL_RUN_MIGRATIONS
               value: "true"
           resources:
@@ -76,6 +78,8 @@ spec:
             - secretRef:
                 name: tracescope-secrets
           env:
+            - name: OTEL_CLICKHOUSE_ROLE
+              value: "api"
             - name: OTEL_RUN_MIGRATIONS
               value: "false"
           # Separate startup/readiness/liveness avoids restarting a booting app while
@@ -127,6 +131,8 @@ spec:
             - secretRef:
                 name: tracescope-secrets
           env:
+            - name: OTEL_CLICKHOUSE_ROLE
+              value: "worker"
             - name: OTEL_RUN_MIGRATIONS
               value: "false"
           livenessProbe:

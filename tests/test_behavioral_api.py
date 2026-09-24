@@ -316,7 +316,9 @@ def test_anomaly_uses_observation_window_and_measured_evidence(client):
     assert item["baseline_samples"] == 7
     detail = client.get(f"/api/v1/anomalies/{anomaly_id}").json()
     assert detail["series"]
-    assert detail["trace_ids"]
+    # Trace links are returned only when the worker persisted references on the
+    # anomaly row; request-time raw trace searches are intentionally forbidden.
+    assert detail["trace_ids"] == []
     assert detail["explanation"] == "Measured observation-window explanation"
     related = client.get("/api/v1/anomalies?principal=checkout-user").json()["items"]
     assert any(row["id"] == anomaly_id for row in related)

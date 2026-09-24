@@ -46,25 +46,27 @@ helm install tracescope deploy/helm/tracescope \
   --set clickhouse.password="secret"
 ```
 
-### 4. Elasticsearch / ELK Storage Backend Mode
-In environments where trace data is stored in Elasticsearch / ELK, query ELK directly while retaining host/agent traces in ClickHouse:
+### 4. Current ELK APM with ClickHouse Analytics
+The default chart keeps analytics and rollups in ClickHouse, reads application trace details from Elasticsearch, and has the worker materialize ELK transaction metrics into ClickHouse. The configured service is `tmp-elk-svc` in namespace `tmp-elk`:
 ```sh
-helm install tracescope deploy/helm/tracescope \
-  --set storage.backend=elasticsearch \
+helm upgrade --install tracescope deploy/helm/tracescope \
+  --namespace tracescope --reuse-values \
+  --set storage.backend=clickhouse \
+  --set storage.traceBackend=elasticsearch \
   --set elasticsearch.enabled=true \
-  --set elasticsearch.url="http://elasticsearch.logging.svc:9200" \
-  --set elasticsearch.index="traces-apm*,apm-*,traces-*" \
-  --set elasticsearch.apiKey="<api-key>"
+  --set elasticsearch.url="http://tmp-elk-svc.tmp-elk.svc.cluster.local:9200"
 ```
+For another cluster, replace the URL with its Elasticsearch service DNS name. `elasticsearch.enabled=false` clears the configured URL from the worker environment, so the worker skips ELK processing.
 
 ### 5. External OpenTelemetry Collector Ingestion
 If an OpenTelemetry Collector already receives and exports application traces, disable TraceScope's ingest edge. The chart then omits the ingest Deployment, Service, HPA, and public OTLP/ingest routes; TraceScope continues to serve the UI, queries, analytics worker, and agent telemetry.
 ```sh
 helm install tracescope deploy/helm/tracescope \
   --set ingest.enabled=false \
-  --set storage.backend=elasticsearch \
+  --set storage.backend=clickhouse \
+  --set storage.traceBackend=elasticsearch \
   --set elasticsearch.enabled=true \
-  --set elasticsearch.url="http://elasticsearch.logging.svc:9200"
+  --set elasticsearch.url="http://tmp-elk-svc.tmp-elk.svc.cluster.local:9200"
 ```
 
 ---
@@ -75,15 +77,16 @@ helm install tracescope deploy/helm/tracescope \
 | :--- | :--- | :--- |
 | `clickhouse.enabled` | Deploy bundled ClickHouse StatefulSet | `true` |
 | `clickhouse.persistence.size` | Storage volume size for ClickHouse | `5Gi` |
-| `storage.backend` | Query storage backend (`clickhouse` or `elasticsearch`) | `clickhouse` |
+| `storage.backend` | Analytics and rollup storage backend | `clickhouse` |
+| `storage.traceBackend` | Backend for raw trace search and waterfall details | `elasticsearch` |
 | `storage.clickhouseOnlyAgentTraces` | Retain ClickHouse strictly for agent trace data | `true` |
-| `elasticsearch.enabled` | Enable Elasticsearch integration | `false` |
-| `elasticsearch.url` | Elasticsearch HTTP/HTTPS cluster URL | `""` |
+| `elasticsearch.enabled` | Enable Elasticsearch trace reads and worker metric aggregation | `true` |
+| `elasticsearch.url` | Elasticsearch HTTP/HTTPS cluster URL | `http://tmp-elk-svc.tmp-elk.svc.cluster.local:9200` |
 | `elasticsearch.index` | Elasticsearch index pattern for trace queries | `traces-apm*,apm-*,traces-*` |
 | `elasticsearch.apiKey` | Elasticsearch API key for authentication | `""` |
 | `elasticsearch.verifyTls` | Verify Elasticsearch TLS certificates | `true` |
 | `elasticsearch.timeout` | Elasticsearch HTTP request timeout (seconds) | `10` |
-| `global.image.tag` | Unified global image tag for all TraceScope workloads | `0.3.3` |
+| `global.image.tag` | Unified global image tag for all TraceScope workloads | `0.4.0` |
 | `app.replicaCount` | Storage & Worker replicas (must remain 1) | `1` |
 | `app.image.tag` | Application image tag (defaults to `global.image.tag`) | `""` |
 | `ingest.replicaCount` | Initial replicas for trace ingestion | `2` |

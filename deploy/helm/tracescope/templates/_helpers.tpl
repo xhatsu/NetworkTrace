@@ -180,7 +180,7 @@ Ingress path routing rules
 
 {{- define "tracescope.elasticsearchUrl" -}}
 {{- $es := default (dict) .Values.elasticsearch -}}
-{{- if $es.url -}}
+{{- if and $es.enabled $es.url -}}
 {{- $es.url -}}
 {{- end -}}
 {{- end -}}

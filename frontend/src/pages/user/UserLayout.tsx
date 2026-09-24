@@ -9,17 +9,10 @@ import {
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import {
   Activity,
-  AlertOctagon,
   ArrowLeft,
-  Calendar,
-  CheckCircle2,
   ChevronDown,
-  Clock,
-  Compass,
   GitCompareArrows,
-  Layers,
-  Network,
-  Radio,
+  KeyRound,
   Search,
   Shield,
   ShieldAlert,
@@ -31,6 +24,7 @@ import { api, queryString } from "../../api";
 import { useFilters } from "../../App";
 import { Panel, TpsLineChart, n } from "../../components";
 import { useI18n } from "../../i18n";
+import { episodeStatusClass, episodeStatusLabel, type Episode, type EpisodeResponse } from "../../components/EpisodePrimitives";
 
 export function UserLayout() {
   const { principal = "" } = useParams<{ principal: string }>();
@@ -43,17 +37,17 @@ export function UserLayout() {
   const [searchQuery, setSearchQuery] = useState("");
 
   // Determine current active subtab
-  const currentTab = location.pathname.split("/")[3] || "overview";
+  const currentTab = location.pathname.split("/")[3] || "activity";
 
-  // Fetch full user profile
+  // The User Intelligence profile comes from derived principal summaries; activity charts read metric buckets separately.
   const {
-    data: profile,
+    data: fetchedProfile,
     isLoading: profileLoading,
     error: profileError,
   } = useQuery({
     queryKey: ["user-detail", principal, filters],
     queryFn: () =>
-      api<any>(`/api/v1/principals/${encodeURIComponent(principal)}?${queryString(filters)}`),
+      api<any>(`/api/v1/users/${encodeURIComponent(principal)}?${queryString(filters)}`),
     enabled: !!principal,
   });
 
@@ -77,6 +71,25 @@ export function UserLayout() {
       tps: Number(row.requests || 0) / 300,
     }))
     .filter((row: { timestamp_ms: number; tps: number }) => Number.isFinite(row.timestamp_ms) && row.timestamp_ms > 0);
+  // Retained five-minute buckets can outlive the worker's one-minute profile view.
+  const profile = fetchedProfile || (metricBuckets?.length ? {
+    principal_name: principal,
+    principal_type: "unknown",
+    status: "Historical",
+    learning_status: "learning",
+    total_requests: metricBuckets.reduce((sum, row) => sum + Number(row.requests || 0), 0),
+    hourly_activity: [],
+  } : undefined);
+
+  const { data: episodeData } = useQuery({
+    queryKey: ["user-episodes", principal, filters],
+    queryFn: () => api<EpisodeResponse>(`/api/v1/changes?${queryString(filters, { principal, limit: "100" })}`),
+    enabled: !!principal,
+    refetchInterval: 60_000,
+  });
+  const episodeRank: Record<Episode["state"], number> = { expected: 0, changed: 1, needs_attention: 2, critical: 3 };
+  const activeEpisodes = (episodeData?.items || []).filter((episode) => episode.status !== "resolved");
+  const behaviorState: Episode["state"] = activeEpisodes.reduce<Episode["state"]>((current, episode) => episodeRank[episode.state] > episodeRank[current] ? episode.state : current, "expected");
 
   // Update principal type
   const updateTypeMutation = useMutation({
@@ -99,13 +112,6 @@ export function UserLayout() {
 
   const tabs = [
     {
-      id: "overview",
-      label: t("Overview"),
-      question: t("Is this user behaving normally right now?"),
-      path: `/users/${encodeURIComponent(principal)}/overview`,
-      icon: Radio,
-    },
-    {
       id: "activity",
       label: t("Activity"),
       question: t("How has traffic & performance changed?"),
@@ -113,318 +119,249 @@ export function UserLayout() {
       icon: Activity,
     },
     {
-      id: "topology",
-      label: t("Access"),
-      question: t("What systems is this user touching?"),
-      path: `/users/${encodeURIComponent(principal)}/topology`,
-      icon: Network,
-    },
-    {
       id: "changes",
       label: t("Changes"),
       question: t("What is different from normal behavior?"),
       path: `/users/${encodeURIComponent(principal)}/changes`,
       icon: GitCompareArrows,
-      badge: profile?.changes?.length || profile?.recent_changes || 0,
-    },
-    {
-      id: "patterns",
-      label: t("Patterns"),
-      question: t("When and how does this user normally operate?"),
-      path: `/users/${encodeURIComponent(principal)}/patterns`,
-      icon: Layers,
-    },
-    {
-      id: "investigations",
-      label: t("Investigations"),
-      question: t("What needs investigation?"),
-      path: `/users/${encodeURIComponent(principal)}/investigations`,
-      icon: AlertOctagon,
-      alert: (profile?.behavior_score || 0) >= 60,
+      badge: episodeData?.total || profile?.changes?.length || profile?.recent_changes || 0,
     },
   ];
 
   const score = profile?.behavior_score ?? 0;
-  const isHighRisk = score >= 60;
-  const isMedRisk = score >= 25 && score < 60;
+  const principalType = String(profile?.principal_type || "unknown");
+  const isHumanPrincipal = principalType === "human";
+  const principalRoleLabel = isHumanPrincipal
+    ? t("User identity", "User identity")
+    : principalType === "unknown"
+      ? t("Observed principal", "Principal quan sát được")
+      : t("Observed credential", "Credential quan sát được");
 
   return (
-    <div className="mx-auto max-w-[1720px] px-4 py-5 md:px-8">
-      {/* Top breadcrumb & quick back */}
-      <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
-        <div className="flex items-center gap-2 text-xs text-[#94a3b8]">
-          <button
-            onClick={() => nav("/users")}
-            className="flex items-center gap-1.5 rounded-lg border border-[rgba(255,255,255,0.18)] bg-[rgba(255,255,255,0.06)] px-2.5 py-1 text-xs font-semibold text-white transition hover:border-cyan-400/60 hover:bg-cyan-500/20 hover:text-cyan-200"
-          >
-            <ArrowLeft size={13} />
-            <span>{t("User Directory")}</span>
-          </button>
-          <span className="text-white/40">/</span>
-          <span className="font-mono font-semibold text-white">{principal}</span>
-          <span className="text-white/40">/</span>
-          <span className="capitalize text-cyan-400 font-semibold">{currentTab}</span>
-        </div>
+    <div className="mx-auto max-w-[1720px] px-3 py-3 md:px-6">
+      {/* Compressed Grafana-style User Header */}
+      <div className="panel mb-3 p-3">
+        {/* Row 1: Back link, Identity, Badges, and Switcher */}
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <div className="flex flex-wrap items-center gap-2 sm:gap-2.5">
+            <button
+              onClick={() => nav("/users")}
+              className="inline-flex items-center gap-1 border border-[#2a2d30] bg-[#181b1f] px-2 py-0.5 text-[11px] font-semibold text-[#a7a9ab] transition hover:border-[#5794f2]/50 hover:text-white"
+              title={t("Back to User Directory")}
+            >
+              <ArrowLeft size={12} />
+              <span>{t("Users")}</span>
+            </button>
 
-        {/* Quick User Switcher dropdown */}
-        <div className="relative">
-          <button
-            onClick={() => setSwitcherOpen(!switcherOpen)}
-            className="flex items-center gap-2 rounded-lg border border-[rgba(255,255,255,0.22)] bg-[#191530] px-3 py-1.5 text-xs font-semibold text-white shadow-sm transition hover:border-cyan-400 hover:bg-[#211c40]"
-          >
-            <Users size={14} className="text-cyan-400" />
-            <span className="text-[#94a3b8]">{t("Switch Account:")}</span>
-            <span className="font-mono text-white font-bold">{principal}</span>
-            <ChevronDown size={14} className="text-[#cbd5e1]" />
-          </button>
-
-          {switcherOpen && (
-            <div className="absolute right-0 top-full z-50 mt-1.5 w-80 rounded-xl border border-[#2e3247] bg-[#161825] p-2.5 shadow-xl">
-              <div className="relative mb-2">
-                <Search className="absolute left-2.5 top-2.5 text-[#94a3b8]" size={13} />
-                <input
-                  type="text"
-                  autoFocus
-                  placeholder={t("Filter users...")}
-                  value={searchQuery}
-                  onChange={(e) => setSearchQuery(e.target.value)}
-                  className="w-full rounded-lg border border-[#2e3247] bg-[#0e1019] pl-8 pr-3 py-1.5 text-xs text-white placeholder:text-[#94a3b8] focus:border-cyan-400 focus:outline-none"
-                />
+            <div className="flex items-center gap-2">
+              <div className="grid h-6 w-6 place-items-center rounded-[2px] border border-[#b877d9]/40 bg-[#b877d9]/10 text-[#d9b4ea]">
+                {isHumanPrincipal ? <User size={13} strokeWidth={2} /> : <KeyRound size={13} strokeWidth={2} />}
               </div>
-              <div className="max-h-60 overflow-y-auto space-y-1 scrollbar">
-                {filteredUsers.slice(0, 30).map((u) => (
-                  <button
-                    key={u.principal_name}
-                    onClick={() => {
-                      setSwitcherOpen(false);
-                      setSearchQuery("");
-                      nav(`/users/${encodeURIComponent(u.principal_name)}/${currentTab}`);
-                    }}
-                    className={`flex w-full items-center justify-between rounded-lg px-2.5 py-1.5 text-xs transition ${
-                      u.principal_name === principal
-                        ? "bg-cyan-500/20 border border-cyan-500/40 text-white font-bold"
-                        : "text-[#cbd5e1] hover:bg-[#202436] hover:text-white"
-                    }`}
-                  >
-                    <div className="flex items-center gap-2 truncate">
-                      <div className="grid h-5 w-5 place-items-center rounded-md bg-white/10 text-cyan-300 text-[10px]">
-                        {u.principal_name.slice(0, 2).toUpperCase()}
-                      </div>
-                      <span className="truncate font-mono">{u.principal_name}</span>
-                    </div>
-                    <span
-                      className={`text-[10px] font-bold px-1.5 py-0.5 rounded ${
-                        (u.behavior_score || 0) >= 60
-                          ? "bg-rose-500/20 text-rose-300 border border-rose-500/40"
-                          : (u.behavior_score || 0) >= 25
-                          ? "bg-amber-500/20 text-amber-300 border border-amber-500/40"
-                          : "bg-emerald-500/20 text-emerald-300 border border-emerald-500/40"
-                      }`}
-                    >
-                      {u.behavior_score || 0}
-                    </span>
-                  </button>
-                ))}
-              </div>
-            </div>
-          )}
-        </div>
-      </div>
-
-      {/* User Identity Banner */}
-      <div className="mb-5 rounded-xl border border-[#262838] bg-[#141622] p-4 shadow-sm">
-        <div className="flex flex-wrap items-center justify-between gap-4">
-          <div className="flex items-center gap-4">
-            <div className="relative grid h-11 w-11 place-items-center rounded-xl bg-indigo-600 border border-indigo-400/40 text-white">
-              <User size={22} strokeWidth={2.2} />
-              <span
-                className={`absolute -bottom-1 -right-1 h-4 w-4 rounded-full border-2 border-[#141622] ${
-                  profile?.status === "Active"
-                    ? "bg-emerald-400"
-                    : "bg-slate-500"
-                }`}
-              />
-            </div>
-
-            <div>
-              <div className="flex flex-wrap items-center gap-2.5">
-                <span className="text-[11px] font-bold uppercase tracking-[0.15em] text-cyan-400">
-                  User identity
-                </span>
-                <span className="text-white/30">•</span>
-                <span className="text-xs font-semibold text-[#cbd5e1]">
-                  Environment: <strong className="text-white">{profile?.environment || "production"}</strong>
-                </span>
-              </div>
-              <h1 className="mt-0.5 text-xl md:text-2xl font-bold tracking-tight text-white font-mono">
-                <span className="text-cyan-300">{principal}</span>
+              <h1 className="font-mono text-base font-bold text-white tracking-tight">
+                {principal}
               </h1>
             </div>
-          </div>
 
-          {/* Badges & Health status */}
-          <div className="flex flex-wrap items-center gap-2.5">
-            {/* Status pill */}
-            <div
-              className={`inline-flex items-center gap-2 rounded-xl border px-3 py-1.5 text-xs font-bold ${
-                profile?.status === "Active"
-                  ? "border-emerald-500/50 bg-emerald-500/15 text-emerald-300"
-                  : "border-slate-600/50 bg-slate-800/40 text-slate-300"
-              }`}
-            >
+            <div className="flex flex-wrap items-center gap-1.5 text-[11px]">
+              <span className="text-[#7b7d80]">•</span>
+              <select
+                aria-label={t("Principal type")}
+                value={profile?.principal_type || "service_account"}
+                onChange={(e) => updateTypeMutation.mutate(e.target.value)}
+                className="toolbar-control cursor-pointer h-6 px-1.5 py-0 text-[10px] font-medium"
+              >
+                <option value="service_account">{t("Service Account")}</option>
+                <option value="human">{t("Human User")}</option>
+                <option value="system_account">{t("System Account")}</option>
+                <option value="shared_credential">{t("Shared Credential")}</option>
+                <option value="integration_account">{t("Integration Account")}</option>
+                <option value="unknown">{t("Unknown")}</option>
+              </select>
+              <span className="text-[#7b7d80]">·</span>
+              <span className="text-[10px] text-[#a7a9ab]">
+                <strong className="text-[#d8d9da]">{profile?.environment || "—"}</strong>
+              </span>
+            </div>
+
+            {/* Badges: Active, Baseline, Behavior State */}
+            <div className="flex flex-wrap items-center gap-1.5 text-[9.5px]">
               <span
-                className={`h-2 w-2 rounded-full ${
-                  profile?.status === "Active" ? "bg-emerald-400" : "bg-slate-400"
+                className={`inline-flex items-center gap-1 border px-1.5 py-0.5 font-semibold ${
+                  profile?.status === "Active"
+                    ? "border-[#73bf69]/50 bg-[#73bf69]/10 text-[#73bf69]"
+                    : "border-[#7b7d80]/50 bg-[#181b1f] text-[#a7a9ab]"
                 }`}
-              />
-              <span>{profile?.status || "Active"}</span>
-            </div>
+              >
+                <span className={`h-1.5 w-1.5 rounded-full ${profile?.status === "Active" ? "bg-[#73bf69]" : "bg-[#7b7d80]"}`} />
+                {profile?.status || "Active"}
+              </span>
 
-            {/* Principal Type dropdown selector */}
-            <select
-              aria-label={t("Principal type")}
-              value={profile?.principal_type || "service_account"}
-              onChange={(e) => updateTypeMutation.mutate(e.target.value)}
-              className="rounded-xl border border-[#2e3247] bg-[#141622] px-3 py-1.5 text-xs font-bold text-white shadow-sm transition hover:border-cyan-400 focus:outline-none cursor-pointer"
+              <span className="inline-flex items-center gap-1 border border-[#b877d9]/40 bg-[#b877d9]/10 px-1.5 py-0.5 font-semibold text-[#b877d9]">
+                <Sparkles size={10} className="text-[#b877d9]" />
+                {profile?.learning_status === "learning" ? t("Learning Baseline") : profile?.learning_status ? t("Established Baseline") : t("Baseline unavailable")}
+              </span>
+
+              <span className={`inline-flex items-center gap-1 border px-1.5 py-0.5 font-semibold ${episodeStatusClass(behaviorState)}`}>
+                {behaviorState === "critical" || behaviorState === "needs_attention" ? <ShieldAlert size={10} /> : <Shield size={10} />}
+                {activeEpisodes.length ? episodeStatusLabel(behaviorState, t) : t("Normal")}
+                <span className="font-mono opacity-70">({score})</span>
+              </span>
+            </div>
+          </div>
+
+          {/* Quick User Switcher dropdown */}
+          <div className="relative">
+            <button
+              onClick={() => setSwitcherOpen(!switcherOpen)}
+              className="toolbar-control flex items-center gap-1.5 h-6 px-2 py-0 text-[11px] font-semibold text-[#d8d9da] hover:text-white"
             >
-              <option value="service_account" className="bg-[#141622]">{t("Service Account")}</option>
-              <option value="human" className="bg-[#141622]">{t("Human User")}</option>
-              <option value="system_account" className="bg-[#141622]">{t("System Account")}</option>
-              <option value="shared_credential" className="bg-[#141622]">{t("Shared Credential")}</option>
-              <option value="integration_account" className="bg-[#141622]">{t("Integration Account")}</option>
-              <option value="unknown" className="bg-[#141622]">{t("Unknown")}</option>
-            </select>
+              <Users size={12} className="text-[#5794f2]" />
+              <span>{t("Switch")}</span>
+              <ChevronDown size={11} className="text-[#7b7d80]" />
+            </button>
 
-            {/* Baseline learning status */}
-            <div className="inline-flex items-center gap-1.5 rounded-xl border border-violet-500/40 bg-violet-500/15 px-3 py-1.5 text-xs font-bold text-violet-200">
-              <Sparkles size={13} className="text-violet-300" />
-              <span>{profile?.learning_status === "learning" ? t("Learning Baseline") : t("Established Baseline")}</span>
-            </div>
-
-            {/* Behavioral Score Badge */}
-            <div
-              className={`inline-flex items-center gap-2 rounded-xl border px-3 py-1.5 text-xs font-bold shadow-sm ${
-                isHighRisk
-                  ? "border-rose-500/60 bg-rose-500/15 text-rose-200"
-                  : isMedRisk
-                  ? "border-amber-500/60 bg-amber-500/15 text-amber-200"
-                  : "border-emerald-500/60 bg-emerald-500/15 text-emerald-200"
-              }`}
-            >
-              {isHighRisk ? <ShieldAlert size={14} /> : <Shield size={14} />}
-              <span>{t("Anomaly Score")}: {score}/100</span>
-              <span className="opacity-80">({isHighRisk ? t("HIGH") : isMedRisk ? t("MEDIUM") : t("LOW")})</span>
-            </div>
-          </div>
-        </div>
-
-        {/* Mini stats ribbon */}
-        <div className="mt-4 grid grid-cols-2 gap-2 border-t border-[rgba(255,255,255,0.12)] pt-3 text-xs sm:grid-cols-4 md:grid-cols-4">
-          <div>
-            <span className="text-[10px] font-bold uppercase tracking-wider text-[#94a3b8]">{t("Total Requests")}</span>
-            <div className="font-mono text-sm font-bold text-white">
-              {(profile?.total_requests || 0).toLocaleString()}
-            </div>
-          </div>
-          <div>
-            <span className="text-[10px] font-bold uppercase tracking-wider text-[#94a3b8]">{t("Active Targets")}</span>
-            <div className="font-mono text-sm font-bold text-cyan-300">
-              {profile?.unique_targets ?? profile?.current?.targets?.length ?? 0} {t("services")}
-            </div>
-          </div>
-          <div>
-            <span className="text-[10px] font-bold uppercase tracking-wider text-[#94a3b8]">{t("Active Callers")}</span>
-            <div className="font-mono text-sm font-bold text-violet-300">
-              {profile?.unique_callers ?? profile?.current?.callers?.length ?? 0} {t("callers")}
-            </div>
-          </div>
-          <div>
-            <span className="text-[10px] font-bold uppercase tracking-wider text-[#94a3b8]">{t("Active Operations")}</span>
-            <div className="font-mono text-sm font-bold text-emerald-300">
-              {profile?.unique_operations ?? profile?.current?.operations?.length ?? 0} {t("endpoints")}
-            </div>
-          </div>
-          <div>
-            <span className="text-[10px] font-bold uppercase tracking-wider text-[#94a3b8]">{t("Source IPs")}</span>
-            <div className="font-mono text-sm font-bold text-amber-300">
-              {profile?.unique_sources ?? profile?.current?.sources?.length ?? 0} {t("IPs")}
-            </div>
-          </div>
-          <div>
-            <span className="text-[10px] font-bold uppercase tracking-wider text-[#94a3b8]">{t("Active Window")}</span>
-            <div className="font-mono text-xs font-bold text-[#e2e8f0]">
-              {profile?.typical_active_window || t("All Hours")}
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <Panel
-        title={t("TPS")}
-        subtitle={t("Observed user throughput over the selected window")}
-        className="mb-3"
-        action={<span className="font-mono text-[11px] text-[#5794f2]">{n(tpsSeries[tpsSeries.length - 1]?.tps || 0, 2)} TPS</span>}
-      >
-        <TpsLineChart data={tpsSeries} />
-      </Panel>
-
-      {/* Compact user investigation navigation */}
-      <div className="mb-5 flex flex-wrap gap-1.5 border-b border-[rgba(255,255,255,0.16)] pb-2">
-        {tabs.map((tab) => {
-          const Icon = tab.icon;
-          const isActive = currentTab === tab.id;
-          return (
-            <NavLink
-              key={tab.id}
-              to={tab.path}
-              className={`group flex min-w-[118px] flex-1 items-center justify-center gap-2 rounded-lg border px-3 py-2 transition-colors duration-150 ${
-                isActive
-                  ? "border-cyan-500 bg-[#191c2b] text-white"
-                  : "border-[#262838] bg-[#141622] text-[#cbd5e1] hover:border-[#383b52] hover:bg-[#181a28] hover:text-white"
-              }`}
-            >
-              <div className="flex items-center justify-between gap-2">
-                <div className="flex items-center gap-2">
-                  <div
-                    className={`grid h-6 w-6 shrink-0 place-items-center rounded-md ${
-                      isActive
-                        ? "bg-cyan-500 text-black font-bold"
-                        : "bg-white/10 text-cyan-300 group-hover:bg-white/20"
-                    }`}
-                  >
-                    <Icon size={16} strokeWidth={2.4} />
-                  </div>
-                  <span className="text-[11px] font-bold tracking-tight">{tab.label}</span>
+            {switcherOpen && (
+              <div className="absolute right-0 top-full z-50 mt-1.5 w-80 rounded-[2px] border border-[#2e3247] bg-[#161825] p-2.5 shadow-xl">
+                <div className="relative mb-2">
+                  <Search className="absolute left-2.5 top-2.5 text-[#94a3b8]" size={13} />
+                  <input
+                    type="text"
+                    autoFocus
+                    placeholder={t("Filter users...")}
+                    value={searchQuery}
+                    onChange={(e) => setSearchQuery(e.target.value)}
+                    className="w-full border border-[#2e3247] bg-[#0e1019] pl-8 pr-3 py-1.5 text-xs text-white placeholder:text-[#94a3b8] focus:border-[#5794f2] focus:outline-none"
+                  />
                 </div>
-
-                {tab.badge !== undefined && tab.badge > 0 && (
-                  <span className="rounded-full bg-cyan-500/30 border border-cyan-400/50 px-2 py-0.5 text-[10px] font-bold text-cyan-200">
-                    {tab.badge}
-                  </span>
-                )}
-                {tab.alert && (
-                  <span className="flex h-2 w-2 rounded-full bg-rose-400 animate-ping" />
-                )}
+                <div className="max-h-60 overflow-y-auto space-y-1 scrollbar">
+                  {filteredUsers.slice(0, 30).map((u) => (
+                    <button
+                      key={u.principal_name}
+                      onClick={() => {
+                        setSwitcherOpen(false);
+                        setSearchQuery("");
+                        nav(`/users/${encodeURIComponent(u.principal_name)}/${currentTab}`);
+                      }}
+                      className={`flex w-full items-center justify-between px-2 py-1 text-xs transition ${
+                        u.principal_name === principal
+                          ? "bg-[#5794f2]/20 border border-[#5794f2]/40 text-white font-bold"
+                          : "text-[#cbd5e1] hover:bg-[#202436] hover:text-white"
+                      }`}
+                    >
+                      <div className="flex items-center gap-2 truncate">
+                        <div className="grid h-5 w-5 place-items-center rounded-sm bg-white/10 text-cyan-300 text-[10px]">
+                          {u.principal_name.slice(0, 2).toUpperCase()}
+                        </div>
+                        <span className="truncate font-mono">{u.principal_name}</span>
+                      </div>
+                      <span
+                        className={`text-[10px] font-bold px-1.5 py-0.5 rounded ${
+                          (u.behavior_score || 0) >= 60
+                            ? "bg-rose-500/20 text-rose-300 border border-rose-500/40"
+                            : (u.behavior_score || 0) >= 25
+                            ? "bg-amber-500/20 text-amber-300 border border-amber-500/40"
+                            : "bg-emerald-500/20 text-emerald-300 border border-emerald-500/40"
+                        }`}
+                      >
+                        {u.behavior_score || 0}
+                      </span>
+                    </button>
+                  ))}
+                </div>
               </div>
-            </NavLink>
-          );
-        })}
+            )}
+          </div>
+        </div>
+
+        {/* Row 2: Compact metrics ribbon and Activity / Changes tabs */}
+        <div className="mt-2 flex flex-wrap items-center justify-between gap-y-2 border-t border-[#2a2d30] pt-2 text-[11px]">
+          <div className="flex flex-wrap items-center gap-x-3 gap-y-1 font-mono text-[11px] text-[#a7a9ab]">
+            <span>
+              <span className="text-[#7b7d80] text-[10px] uppercase font-sans mr-1">{t("Requests")}</span>
+              <strong className="text-[#d8d9da] font-semibold tabular-nums">{(profile?.total_requests || 0).toLocaleString()}</strong>
+            </span>
+            <span className="text-[#303236]">|</span>
+            <span>
+              <span className="text-[#7b7d80] text-[10px] uppercase font-sans mr-1">{t("Services")}</span>
+              <strong className="text-[#5794f2] font-semibold tabular-nums">{profile?.unique_targets ?? profile?.current?.targets?.length ?? 0}</strong>
+            </span>
+            <span className="text-[#303236]">|</span>
+            <span>
+              <span className="text-[#7b7d80] text-[10px] uppercase font-sans mr-1">APIs</span>
+              <strong className="text-[#73bf69] font-semibold tabular-nums">{profile?.unique_operations ?? profile?.current?.operations?.length ?? 0}</strong>
+            </span>
+            <span className="text-[#303236]">|</span>
+            <span>
+              <span className="text-[#7b7d80] text-[10px] uppercase font-sans mr-1">{t("Callers")}</span>
+              <strong className="text-[#b877d9] font-semibold tabular-nums">{profile?.unique_callers ?? profile?.current?.callers?.length ?? 0}</strong>
+            </span>
+            <span className="text-[#303236]">|</span>
+            <span>
+              <span className="text-[#7b7d80] text-[10px] uppercase font-sans mr-1">IPs</span>
+              <strong className="text-[#ff9830] font-semibold tabular-nums">{profile?.unique_sources ?? profile?.current?.sources?.length ?? 0}</strong>
+            </span>
+            <span className="text-[#303236]">|</span>
+            <span>
+              <span className="text-[#7b7d80] text-[10px] uppercase font-sans mr-1">{t("Window")}</span>
+              <span className="text-[#d8d9da] text-[10px]">{profile?.typical_active_window || t("All Hours")}</span>
+            </span>
+          </div>
+
+          {/* Navigation tabs */}
+          <div className="flex items-center gap-1.5">
+            {tabs.map((tab) => {
+              const Icon = tab.icon;
+              const isActive = currentTab === tab.id;
+              return (
+                <NavLink
+                  key={tab.id}
+                  to={tab.path}
+                  className={`inline-flex items-center gap-1.5 border px-2.5 py-1 text-[11px] font-medium transition ${
+                    isActive
+                      ? "border-[#5794f2] bg-[#181b1f] text-white font-semibold"
+                      : "border-[#2a2d30] bg-[#111217] text-[#a7a9ab] hover:border-[#34373b] hover:bg-[#181b1f] hover:text-[#d8d9da]"
+                  }`}
+                >
+                  <Icon size={12} className={isActive ? "text-[#5794f2]" : "text-[#7b7d80]"} />
+                  <span>{tab.label}</span>
+                  {tab.badge !== undefined && tab.badge > 0 && (
+                    <span className="rounded-[2px] bg-[#5794f2]/20 border border-[#5794f2]/40 px-1 py-0 text-[9px] font-mono text-[#5794f2]">
+                      {tab.badge}
+                    </span>
+                  )}
+                </NavLink>
+              );
+            })}
+          </div>
+        </div>
       </div>
+
+      {/* Scoped TPS panel for non-overview workspace tabs */}
+      {currentTab === "changes" && (
+        <Panel
+          title={t("TPS")}
+          subtitle={t("Observed user throughput over the selected window")}
+          className="mb-4"
+          action={<span className="font-mono text-[11px] text-[#5794f2]">{n(tpsSeries[tpsSeries.length - 1]?.tps || 0, 2)} TPS</span>}
+        >
+          <TpsLineChart data={tpsSeries} />
+        </Panel>
+      )}
 
       {/* Main Tab Content View */}
       <div className="min-h-[500px]">
-        {profileLoading ? (
-          <div className="grid h-64 place-items-center rounded-2xl border border-[rgba(255,255,255,0.14)] bg-[#161228]">
+        {profileLoading || (profileError && metricBucketsLoading) ? (
+          <div className="grid h-64 place-items-center rounded-[3px] border border-[#2a2d30] bg-[#111217]">
             <div className="flex flex-col items-center gap-3">
-              <div className="h-8 w-8 animate-spin rounded-full border-2 border-cyan-400 border-t-transparent" />
-              <span className="text-xs font-semibold text-cyan-200">{t("Loading user intelligence signals...")}</span>
+              <div className="h-7 w-7 animate-spin rounded-full border-2 border-[#5794f2] border-t-transparent" />
+              <span className="text-xs font-medium text-[#a7a9ab]">{t("Loading user intelligence signals...")}</span>
             </div>
           </div>
-        ) : profileError ? (
-          <div className="rounded-2xl border border-rose-500/50 bg-rose-500/10 p-6 text-center text-rose-200">
-            <ShieldAlert size={28} className="mx-auto mb-2 text-rose-400" />
-            <h3 className="text-sm font-bold">Failed to load user intelligence for {principal}</h3>
-            <p className="mt-1 text-xs text-[#cbd5e1]">{(profileError as Error).message}</p>
+        ) : profileError && !profile ? (
+          <div className="rounded-[3px] border border-red-500/50 bg-red-500/10 p-6 text-center text-red-200">
+            <ShieldAlert size={26} className="mx-auto mb-2 text-[#f2495c]" />
+            <h3 className="text-sm font-semibold text-[#d8d9da]">Failed to load user intelligence for {principal}</h3>
+            <p className="mt-1 text-xs text-[#a7a9ab]">{(profileError as Error).message}</p>
           </div>
         ) : (
           <Outlet context={{ principal, profile }} />

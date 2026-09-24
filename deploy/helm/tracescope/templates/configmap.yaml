@@ -12,6 +12,7 @@ data:
   OTEL_CLICKHOUSE_USER: {{ .Values.clickhouse.user | quote }}
   OTEL_CLICKHOUSE_SECURE: {{ .Values.clickhouse.secure | quote }}
   OTEL_STORAGE_BACKEND: {{ default "clickhouse" .Values.storage.backend | quote }}
+  OTEL_TRACE_STORAGE_BACKEND: {{ default .Values.storage.backend .Values.storage.traceBackend | quote }}
   OTEL_CLICKHOUSE_ONLY_AGENT_TRACES: {{ default true .Values.storage.clickhouseOnlyAgentTraces | quote }}
   OTEL_ES_URL: {{ include "tracescope.elasticsearchUrl" . | quote }}
   OTEL_ES_INDEX: {{ default "traces-apm*,apm-*,traces-*" .Values.elasticsearch.index | quote }}

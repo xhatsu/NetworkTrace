@@ -4,6 +4,7 @@ from typing import Any, Dict, List, Optional
 from backend.app.models.trace import NormalizedTrace
 from backend.app.repositories.db_context import get_connection, db_transaction
 from backend.app.repositories.elasticsearch_trace_repository import ElasticsearchTraceRepository
+from backend.config import settings
 
 log = logging.getLogger("tracescope-trace-repo")
 
@@ -12,7 +13,7 @@ class TraceRepository:
         self.db_path = db_path
         self._es_repo = ElasticsearchTraceRepository()
 
-    def insert_traces(self, traces: List[NormalizedTrace]) -> int:
+    def insert_traces(self, traces: List[NormalizedTrace], skip_dedup: bool = False) -> int:
         if not traces:
             return 0
         all_cols = [
@@ -35,20 +36,24 @@ class TraceRepository:
             table_info = db.execute("PRAGMA table_info(traces)").fetchall()
             existing = {row[1] for row in table_info}
             cols = [c for c in all_cols if c in existing]
-            # Filter out traces whose dedup_key already exists
-            dedup_keys = [t.dedup_key for t in traces if getattr(t, "dedup_key", None)]
-            existing_keys = set()
-            if dedup_keys:
-                chunk_sz = 500
-                for k in range(0, len(dedup_keys), chunk_sz):
-                    dk_chunk = dedup_keys[k:k + chunk_sz]
-                    placeholders = ",".join("?" for _ in dk_chunk)
-                    rows = db.execute(f"SELECT dedup_key FROM traces WHERE dedup_key IN ({placeholders})", dk_chunk).fetchall()
-                    existing_keys.update(r[0] for r in rows if r[0])
 
-            traces_to_insert = [t for t in traces if not getattr(t, "dedup_key", None) or t.dedup_key not in existing_keys]
-            if not traces_to_insert:
-                return 0
+            if skip_dedup:
+                traces_to_insert = traces
+            else:
+                # Filter out traces whose dedup_key already exists
+                dedup_keys = [t.dedup_key for t in traces if getattr(t, "dedup_key", None)]
+                existing_keys = set()
+                if dedup_keys:
+                    chunk_sz = 500
+                    for k in range(0, len(dedup_keys), chunk_sz):
+                        dk_chunk = dedup_keys[k:k + chunk_sz]
+                        placeholders = ",".join("?" for _ in dk_chunk)
+                        rows = db.execute(f"SELECT dedup_key FROM traces WHERE dedup_key IN ({placeholders})", dk_chunk).fetchall()
+                        existing_keys.update(r[0] for r in rows if r[0])
+
+                traces_to_insert = [t for t in traces if not getattr(t, "dedup_key", None) or t.dedup_key not in existing_keys]
+                if not traces_to_insert:
+                    return 0
 
             sql = f"INSERT INTO traces ({','.join(cols)}) VALUES ({','.join('?' for _ in cols)})"
             before = db.total_changes
@@ -57,21 +62,26 @@ class TraceRepository:
         return inserted
 
     def get_trace(self, trace_id: str) -> Dict[str, Any] | None:
-        if self._es_repo.is_configured():
+        # Trace Explorer remains the documented temporary exception to the
+        # aggregate-read boundary. Use the configured trace store, while
+        # keeping all other user-facing reads on precomputed models.
+        if settings.trace_storage_backend in ("elasticsearch", "elk"):
+            if not self._es_repo.is_configured():
+                return None
             try:
-                es_res = self._es_repo.get_trace(trace_id)
-                if es_res and es_res.get("spans"):
-                    return es_res
-            except Exception as e:
-                log.warning("Elasticsearch get_trace failed for %s, falling back: %s", trace_id, e)
+                return self._es_repo.get_trace(trace_id)
+            except Exception as exc:
+                log.warning("Elasticsearch get_trace failed for %s: %s", trace_id, exc)
+                return None
 
         with get_connection(self.db_path) as db:
-            rows = [dict(r) for r in db.execute(
-                "SELECT * FROM traces WHERE trace_id=? ORDER BY timestamp_ms ASC LIMIT 1000", (trace_id,)
+            rows = [dict(row) for row in db.execute(
+                "SELECT * FROM traces WHERE trace_id=? ORDER BY timestamp_ms ASC LIMIT 1000",
+                (trace_id,),
             )]
-            if not rows:
-                return None
-            return {"trace_id": trace_id, "spans": rows, "count": len(rows)}
+        if not rows:
+            return None
+        return {"trace_id": trace_id, "spans": rows, "count": len(rows), "backend": "clickhouse"}
 
     def list_traces(
         self,
@@ -88,17 +98,20 @@ class TraceRepository:
         limit: int = 50,
         offset: int = 0
     ) -> List[Dict[str, Any]]:
-        if self._es_repo.is_configured():
+        # Trace Explorer's raw-span list is the same documented temporary
+        # exception as its waterfall lookup above.
+        if settings.trace_storage_backend in ("elasticsearch", "elk"):
+            if not self._es_repo.is_configured():
+                return []
             try:
-                es_rows = self._es_repo.list_traces(
+                return self._es_repo.list_traces(
                     start_ms=start_ms, end_ms=end_ms, service=service, caller=caller,
                     target=target, principal=principal, operation=operation, source_ip=source_ip,
                     status=status, trace_id=trace_id, limit=limit, offset=offset
-                )
-                if es_rows is not None and len(es_rows) > 0:
-                    return es_rows
-            except Exception as e:
-                log.warning("Elasticsearch list_traces failed, falling back: %s", e)
+                ) or []
+            except Exception as exc:
+                log.warning("Elasticsearch list_traces failed: %s", exc)
+                return []
 
         clauses = []
         args: List[Any] = []
@@ -139,6 +152,5 @@ class TraceRepository:
         where = " AND ".join(clauses) if clauses else "1=1"
         sql = f"SELECT * FROM traces WHERE {where} ORDER BY timestamp_ms DESC LIMIT ? OFFSET ?"
         args.extend([limit, offset])
-
         with get_connection(self.db_path) as db:
-            return [dict(r) for r in db.execute(sql, args)]
+            return [dict(row) for row in db.execute(sql, args)]

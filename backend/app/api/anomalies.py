@@ -59,10 +59,9 @@ def _enrich_evidence(item: Dict[str, Any], include_traces: bool = False) -> None
                 persistence += 1
                 cursor = int(observed["first_seen"])
             if include_traces:
-                trace_ids = [trace[0] for trace in db.execute("""SELECT trace_id FROM traces
-                  WHERE target_service=? AND timestamp_ms>=? AND timestamp_ms<?
-                  GROUP BY trace_id ORDER BY MAX(timestamp_ms) DESC LIMIT 20""",
-                  (service, start_ms, end_ms))]
+                # The anomaly's stored trace references are the only permitted
+                # span links here; do not discover them with a request-time scan.
+                trace_ids = list(item.get("trace_ids") or [])[:20]
     baseline_samples = int(baseline.get("sample_count") or 0) if baseline else 0
     mad = 0.0
     if baseline:

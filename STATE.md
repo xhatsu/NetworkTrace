@@ -4,15 +4,23 @@
 
 ### Kubernetes Testbed Services
 - **Elasticsearch Datastore (`tmp-elk-svc`)**:
+  - Namespace: `tmp-elk`; in-cluster service URL: `http://tmp-elk-svc.tmp-elk.svc.cluster.local:9200`.
   - Service Type: `NodePort` (previously `ClusterIP`)
   - Cluster IP: `10.97.180.119:9200`
   - NodePort: `32073` (`http://127.0.0.1:32073` or `http://<NODE_IP>:32073`)
   - Status: Healthy, open, serving cluster `tracescope-elk-testbed` (version 7.17.24).
+  - **Elasticsearch 7-Day Retention Invariant**:
+    - Strictly stores a maximum of 7 days of APM traces and telemetry (`min_age: "7d"`).
+    - Enforced on cluster level via ILM policy `tracescope-7day-retention` and override of default `apm-rollover-30-days` (delete phase at 7 days).
+    - Applied via index template `tracescope-7day-retention-template` matching `apm-*`, `traces-apm*`, `tracescope-*`.
+    - Automated worker background document pruning: `_run_elasticsearch_sync()` executes asynchronous `_delete_by_query` (`@timestamp < now - 7d`) on APM indices to keep un-rolled individual indices strictly pruned.
   - Indices:
     - `apm-*-transaction-*`: Ingested APM transaction traces across `networktracing`, `order-service`, `payment-service`.
     - `apm-*-metric-*`: System and runtime metrics.
     - `apm-*-span-*`: Distributed span hierarchy.
     - `apm-*-error-*`: Unhandled exceptions and error envelopes.
+  - TraceScope Helm chart defaults keep analytics in ClickHouse, set raw trace reads to Elasticsearch, and use this service URL for worker metric aggregation. Release `tracescope` was upgraded to revision 27 on 2026-09-24; its app/worker pod returned to 2/2 Running. The new worker source inserted 57 `metric_buckets` batches and 42 checkpoint updates after rollout, with no ClickHouse insert exceptions.
+  - Root cause: the old release passed `http://elasticsearch:9200` to the newest worker even while `elasticsearch.enabled=false`; the actual service is `tmp-elk-svc` in namespace `tmp-elk`. The chart now gates the URL on `elasticsearch.enabled` and supplies the current service DNS name.
 
 - **Elastic APM Server Ingestion Gateway (`apm-server`)**:
   - Service Type: `NodePort`
@@ -24,12 +32,35 @@
   - Service Type: `ClusterIP`
   - Cluster IP: `10.105.101.253:8123` (auto-detected by `backend/config.py:_detect_clickhouse_host`)
   - Status: Healthy, open, serving ClickHouse 24.8.14.39.
-    - `tracescope` (Application database): **2,000,000 traces, 43,616 1m buckets, 14,538 5m buckets, 1,304 baselines, 915 anomaly events, 399 principal behavioral change events, 11 enterprise system accounts + unauthenticated traffic** (Populated via `backend/scripts/generate_2m_enterprise_dataset.py` with authentic telecom/enterprise system accounts: `telecom_sync_svc`, `vtp_express_dispatch`, `pos_checkout_terminal`, `billing_reconcile_job`, `interbank_settlement_gw`, `partner_sales_broker`, `enterprise_b2b_gateway`, `secops_monitor_agent`, `sysadmin_deploy_agent`, `mobile_miniapp_gateway`, `audit_compliance_worker`, and `unknown` / unauthenticated public traffic across `apex-*` microservices).
-    - **2,000,000 Trace Storage Benchmark & ClickHouse Trace Cleanup**:
-      - ClickHouse `tracescope.traces`: **Truncated & cleaned to 0 rows / 0 bytes** (Freed ~388 MiB of redundant disk storage; active application database size dropped from 413.5 MiB to **25.8 MiB**).
-      - Derived Aggregates Retained: All 1m & 5m `metric_buckets` (488k rows), `topology_*` (274k rows), `principals`, `baseline_metrics`, `anomaly_events`, and `incidents` remain 100% intact and serving all dashboards.
-      - Elasticsearch Datastore (`tmp-elk-svc` on `:32073`): **542.79 MiB**, 2,014,679 transaction documents retained permanently as the primary system of record for distributed waterfall traces and deep audits.
-      - Storage Invariant: ClickHouse only needs raw trace data during the worker aggregation stage to produce compact rollups, topology edges, and baselines; once processed, ClickHouse does not require past raw traces, as trace search and span waterfall queries resolve transparently against Elasticsearch via `ElasticsearchTraceRepository`.
+    - `tracescope` (Application database): **Populated with 10-day continuous dataset across all 24 hours of every day (175,164 1m buckets, 35,420 5m buckets in ClickHouse; 225,982 traces in Elasticsearch; 41,808 traces in ClickHouse with 1-day TTL)**.
+    - **ClickHouse Trace Retention Invariant (1-Day TTL)**:
+      - Raw traces copied into ClickHouse for worker SQL rollups expire automatically after 1 day (`TTL toDateTime(intDiv(timestamp_ms, 1000)) + toIntervalDay(1)` applied via `backend/clickhouse_migrations/009_trace_1day_ttl.sql`).
+      - All permanent multi-tier span waterfalls on `/traces/:id` are served directly by Elasticsearch (`tmp-elk-svc`), preventing dual-storage bloat while giving the worker its required window for calculations.
+    - **10-Day Dataset, 24/7 Continuous Hourly Coverage & Randomized Abnormalities on Last 3 Days**:
+      - **10-Day Timespan & Complete 24/7 Hourly Coverage**:
+        - Days 0 through 6 (Days -10 to -4, 7 full days): Clean historical baseline traffic covering all 24 hours of every single day (24/24 hours continuous, zero dead hours) modeled with smooth diurnal curves ($0.30 + 0.70 \sin^2$).
+        - Normal baseline traffic across all personas is steady and gentle (~0.15 - 0.32 TPS peak per 1m bucket).
+      - **Fresh Enterprise Personas (Zero PCAP Usernames)**:
+        - All PCAP usernames (`cm2.0`, `sale`, `myViettel`, `vtp`) were eliminated and replaced with 13 fresh enterprise personas: `svc_checkout_gateway`, `batch_settlement_reconciler`, `payment_clearing_engine`, `partner_order_broker`, `enterprise_sync_agent`, `secops_audit_scanner`, `devops_release_operator`, `remote_workplace_client`, `retail_miniapp_client`, `catalog_discovery_sync`, `customer_support_bot`, `logistics_fulfillment_svc`, `mobile_banking_gateway`.
+      - **Spike ONLY at Abnormality**:
+        - On Day 9 (Today / -1d), `svc_checkout_gateway` surges with a realistic ~200% increase over baseline (from ~0.20 TPS up to ~0.60–0.78 TPS peak; ~47 requests in a 1-minute bucket) calling `apex-order-service` / `OrderService/createOrder`. Avoids aggressive 22 TPS spikes while reliably triggering traffic spike detectors.
+      - **Randomized Abnormalities Distributed on the Last 3 Days (Days 7, 8, and 9)**:
+        - Day 7 (-3d): Randomized anomalies: `operation_mix_shift`, `target_fanout_surge`, and `rogue_source_ip`.
+        - Day 8 (-2d): Randomized anomalies: `dormant_reactivation`, `error_rate_surge`, and `auth_failure_burst`.
+        - Day 9 (Today / -1d): Randomized anomalies: `traffic_spike` (~200% increase to ~0.60–0.78 TPS peak), `latency_blowout`, and `unusual_time_access`.
+      - **Bandwidth Telemetry & 10-Day Availability Root Cause & Permanent Resolution**:
+        - **Root Cause of Single-Day Bandwidth Data**:
+          1. **ClickHouse 1-Day TTL on `traces` Table**: ClickHouse enforces a strict 1-day TTL on `traces` (`TTL toDateTime(intDiv(timestamp_ms, 1000)) + toIntervalDay(1)` via Migration 009) to keep local disk usage minimal. The worker's `materialize_slice` queries `FROM traces WHERE timestamp_ms >= ...` to compute the 5m topology byte rollups. Because raw traces older than 24h were purged upon insert, ClickHouse topology tables (`topology_service_edges_5m`, `topology_api_edges_5m`, `topology_principal_edges_5m`, `topology_principal_ip_5m`) were only populated for the most recent 24 hours.
+          2. **Separate Bandwidth Rollup Backfill**: User workspace and overview previously depended on an Elasticsearch bandwidth index with its own six-hour-per-cycle backfill. This duplicated work and left bandwidth history empty until that index caught up.
+          3. **Default Time Window**: In `backend/app/api/services.py`, `_time_window(from_t, to_t)` defaulted to `max(min_max[0], min_max[1] - 86400)` (last 24h) when explicit parameters were omitted.
+        - **Permanent Resolution Implemented**:
+          - Enhanced [`backend/scripts/generate_10day_demo_dataset.py`](file:///home/ubuntu/Viettel/OtelTrace/backend/scripts/generate_10day_demo_dataset.py) to seed byte metrics through the existing bucket model:
+            * Aggregates 5-minute byte-aware rollups directly in Python from all 314,912 records across the full 10-day span.
+            * Inserts full 10-day rollups into ClickHouse: `topology_service_edges_5m` (24,318 rows), `topology_api_edges_5m` (32,570 rows), `topology_principal_edges_5m` (35,423 rows), `topology_principal_ip_5m` (35,423 rows), and current tables.
+            * Writes request/response byte sums and sample counts to the same 1-minute and 5-minute `metric_buckets` as request counts and latency.
+            * Removes the separate Elasticsearch bandwidth index and its checkpoint; an Elasticsearch metrics schema version triggers one retained-window rebackfill for existing buckets.
+          - Overview, Service, API, and User Activity bandwidth series now read from worker `metric_buckets`; no chart endpoint reads trace documents or a separate bandwidth index.
+    - Elasticsearch Datastore (`tmp-elk-svc` on `:32073`): **225,982 transactions in `apm-7.17.24-transaction`**, 100% synchronized with ClickHouse traces for the active 7-day forensics window.
     - **TPS Surge Detection & Anomalies Page Visibility**:
       - Detected and verified all 3 principal-level TPS surge cases requested:
         1. `pos_checkout_terminal` on `apex-order-service`: baseline 0.15 -> current 0.59 TPS (+293.3%, Anomaly ID `879726895952825`).
@@ -53,6 +84,13 @@
     - **100% Anomaly & Behavioral Coverage Verified**:
       - 10/10 Anomaly Detectors active: `unusual_access`, `new_service_edge`, `new_principal_edge`, `error_rate`, `latency`, `unusual_time`, `traffic_spike`, `traffic_drop`, `ip_new_user`, `user_new_source_ip`.
       - All Behavioral Detectors active: `NEW_IP_CALLER_PAIR`, `NEW_OPERATION`, `UNUSUAL_TIME`, `NEW_TARGET`, `NEW_RELATIONSHIP`, `NEW_SOURCE_IP`, `TARGET_FANOUT_SURGE`, `NEW_CALLER`, `CALLER_PRINCIPAL_SWITCH`, `PRINCIPAL_RATE_SURGE`, `AUTH_FAILURE_BURST`, `FAILURE_THEN_SUCCESS`, `DORMANT_REACTIVATED`, `USERNAME_FIRST_SEEN`, `OPERATION_MIX_SHIFT`.
+    - **Baseline Generation & Detector Readiness Timelines**:
+      - **Metric Baselines (`baseline_metrics`)**: Do **NOT** require 28 days. Generated immediately once `>= 2` five-minute bucket samples exist for a matching `(hour_of_day, day_of_week)` dimension.
+      - **Behavioral Readiness Tiers (`evaluate_readiness_from_stats`)**:
+        - **Day 0 (Immediate)**: `AUTH_FAILURE_BURST`, `FAILURE_THEN_SUCCESS`, `SOURCE_IDENTITY_FANOUT`, `NEW_PRINCIPAL_ON_SOURCE`, and `DORMANT_REACTIVATED` (requires only `>= 5 total observations` prior to dormancy gap).
+        - **Day 1 to 7**: `NEW_CALLER`, `NEW_TARGET`, `NEW_OPERATION`, `NEW_SOURCE_IP`, `NEW_IP_CALLER_PAIR` emit with `low_confidence` starting on Day 1 (if `total_obs >= 5` or `10`), and reach full `ready` confidence at Day 7 (`elapsed_days >= 7.0`, `active_days >= 3`, `total_obs >= 100`). `RELATIONSHIP_DISAPPEARED` activates at Day 7.
+        - **Day 14**: `OPERATION_MIX_SHIFT`, `PRINCIPAL_RATE_SURGE`, `CALLER_PRINCIPAL_SWITCH`, `TARGET_FANOUT_SURGE` activate (`elapsed_days >= 14.0`, `active_days >= 5`, `total_obs >= 200`).
+        - **Day 28 (Only 1 Detector)**: `UNUSUAL_TIME` is the **only** detector that requires 28 days (`elapsed_days >= 28.0`, `active_days >= 10`), strictly because learning a user's true off-hours work pattern requires a 4-week monthly baseline to prevent false alarms on first-week shift workers.
     - `system` (ClickHouse internal engine logs): Truncated with enforced 1-day TTL retention (`event_date + toIntervalDay(1)`).
   - Elasticsearch Datastore on `:32073`: APM index `apm-7.17.24-transaction` holds **2,000,334 transaction documents** with canonical `enduser.id` field and zero mapper parsing errors.
   - Table Engine: `ReplacingMergeTree`. Queries across `principals`, `principal_callers`, etc., use `FINAL` (e.g. `FROM principals AS p FINAL`) to guarantee deduplicated records across asynchronous background merges.
@@ -66,6 +104,7 @@
 
 - **TraceScope Dashboard Hub & Aggregation Worker**:
   - Dashboard API & Frontend: `http://0.0.0.0:30102` (FastAPI + React 19 SPA)
+    - Operational Dashboard: 6 top KPI cards (`TPS`, `Error rate`, `P95 latency`, `Active users`, `Services`, `Needs attention`) equipped with instant SVG gradient sparklines, colored accent dots, and dense secondary telemetry (`avg/peak`, `5xx max`, `p50/p99`, active users now, degraded service count, critical change count).
   - Aggregation Worker: `tracescope-worker` (`python -m backend.worker --interval 60`)
   - Ingest NodePort: `http://<node-ip>:30103/api/ingest`
   - Ingress HTTP NodePort: `http://<node-ip>:31561`
@@ -94,13 +133,14 @@
 - **Environment Variables**:
   - `OTEL_ES_URL="http://127.0.0.1:32073"`
   - `OTEL_ES_INDEX="apm-*,traces-apm*"`
-  - `OTEL_STORAGE_BACKEND="clickhouse"` (with transparent Elasticsearch query bridge)
+  - `OTEL_STORAGE_BACKEND="clickhouse"` for active analytics and topology read models.
+  - `OTEL_TRACE_STORAGE_BACKEND="elasticsearch"` for active application trace list and waterfall reads.
 - **Lifecycle Integration (`run_server.sh`)**:
   - Default `ELASTICSEARCH_NODEPORT="32073"`
-  - Automatically exports `OTEL_ES_URL` and `OTEL_ES_INDEX` to both `tracescope-30102` and `tracescope-worker` tmux sessions.
+  - Automatically exports `OTEL_STORAGE_BACKEND`, `OTEL_TRACE_STORAGE_BACKEND`, `OTEL_ES_URL`, and `OTEL_ES_INDEX` to both `tracescope-30102` and `tracescope-worker` tmux sessions. Set `OTEL_TRACE_STORAGE_BACKEND=clickhouse` explicitly for an offline ClickHouse trace testbed.
   - `run_server.sh status` verifies connectivity directly to NodePort 32073.
 - **Worker Stages (`backend/worker.py`)**:
-  1. `sync_elasticsearch`: Incremental trace reader (`ElasticsearchReader`) pulls APM transaction hits from NodePort 32073, normalizes them via `normalize_otel_record`, and persists them into ClickHouse `traces` table with checkpoint deduplication.
+  1. `process_elasticsearch`: In the active `OTEL_CLICKHOUSE_ONLY_AGENT_TRACES=true` mode, server-side Elasticsearch transaction aggregation writes grouped 60-second and 300-second `metric_buckets` to ClickHouse; raw application APM traces stay in ELK. The legacy incremental `ElasticsearchReader` trace-copy path is used only when that agent-only setting is disabled.
      - **ELK `enduser.id` Extraction**: Automatically extracts username from `enduser.id`, `labels.enduser.id`, `labels.enduser_id`, `enduser: {id}`, `attributes: [{"key": "enduser.id", ...}]`, `user.id`, `user.name`, and search `fields["enduser.id"]`. Sets `principal_name = enduser.id`, `identity_source = "enduser_id"`, and `principal_id = "<env>:<enduser.id>"`.
      - **ELK Trace Search Isolation**: `ElasticsearchTraceRepository.list_traces()` strictly filters for `processor.event: ["transaction", "span"]` or `exists: trace.id` and excludes `processor.event: "metric"`. Prevents non-trace metric documents from generating synthetic hash IDs that fail resolution in `/traces/{id}`. `get_trace()` includes `_id` fallback in search.
   2. `aggregate_traces`: Bounded 1m/5m rollups computed across newly ingested traces.
@@ -1204,7 +1244,7 @@ Exposes standard Prometheus 0.0.4 text exposition format at `GET /metrics` on po
 ## Service/API/User Bandwidth Backend (2026-09-19)
 
 - Service, API, and principal topology metrics now expose cumulative `request_bytes`, `response_bytes`, and `total_bytes`, plus explicit rates: `request_bytes_per_second`, `response_bytes_per_second`, `bandwidth_bytes_per_second`, and `bandwidth_bits_per_second`.
-- Five-minute topology series expose the same bandwidth fields for line-chart use. ClickHouse reads the existing bounded topology byte rollups; Elasticsearch uses runtime byte extraction and server-side sum aggregations without copying application traces into ClickHouse.
+- Five-minute transaction series expose the same bandwidth fields for line-chart use. Both ClickHouse and Elasticsearch worker paths write and read these fields through `metric_buckets`.
 - `GET /api/v1/services/{service}/bandwidth` provides a dedicated service bandwidth response with window totals and five-minute series. Existing service detail health includes the bandwidth totals/rates and a nested `bandwidth` payload.
 - `GET /api/v1/users/{principal}/performance` now includes bandwidth fields per bucket, a top-level bandwidth summary, current/baseline five-minute bandwidth KPIs, and `bandwidth_pct` delta. API drilldowns receive the same fields through the existing topology API metrics response.
 - Units are explicit: byte totals are bytes, `*_bytes_per_second` values are bytes/second, and `bandwidth_bits_per_second` is bits/second. Missing byte telemetry remains zero and is never inferred from request counts.
@@ -1214,5 +1254,252 @@ Exposes standard Prometheus 0.0.4 text exposition format at `GET /metrics` on po
 
 - Root cause of `/anomalies/6739330567467241` returning `Anomaly not found`: the ID is a `principal_change_events` record (`CALLER_PRINCIPAL_SWITCH` for `partner_sales_broker`), not an `anomaly_events` record.
 - Added `GET /api/v1/user-changes/{change_id}` and `UserRepository.get_change()` for exact behavioral-change lookup.
-- Overview change cards now open `/users/{principal}/changes?change_id=...`; legacy direct anomaly links fall back to that User Changes tab after resolving the change ID.
+- Overview change cards now open `/changes/chg-<id>`; legacy direct anomaly links fall back to the same Change detail after resolving the change ID.
 - Frontend type-check/build, backend Python compilation, and `git diff --check` passed. The public API was checked read-only: health is `200`, the supplied anomaly URL is `404`, and a current anomaly detail URL returns `200`.
+
+## Changes episode adapter and UI (2026-09-22)
+
+- Added `backend/app/api/changes.py`, a compatibility adapter that combines existing service anomaly rows and principal behavioral-change rows into operator-facing episodes without changing detector storage or algorithms.
+- New API routes: `GET /api/v1/changes` and `GET /api/v1/changes/{episode_id}`. Episode IDs preserve source identity with `chg-<principal_change_events.id>` and `anm-<anomaly_events.id>`.
+- Episode presentation is intentionally simplified to `subject`, `summary`, `state`, `status`, metric/categorical `highlights`, relationship `context`, evidence, and timeline. Detector scores and baseline mechanics remain in the detail debug/evidence surface.
+- Added `frontend/src/pages/Changes.tsx` with the `/changes` list/detail routes, Now/Earlier episode grouping, Users/Services filters, state filter, search, evidence panel, timeline, relationship path, and links into User/Service/Trace views.
+- `/anomalies` now redirects to `/changes` as the compatibility entrypoint; `/anomalies/:id` remains for old anomaly URLs.
+- The primary User workspace now exposes three views: Overview, combined Activity (performance + patterns + IP-first topology), and Changes. Former `topology`, `patterns`, and `investigations` URLs remain compatibility redirects; the UserLayout TPS graph still renders before the selected view.
+- Verification completed: frontend lint/build, backend compilation, `git diff --check`, isolated FastAPI Changes endpoint smoke test, and application OpenAPI route registration. Storage-backed API tests were not runnable because local ClickHouse `127.0.0.1:8123` refused connections.
+
+## Public Changes deployment and browser verification (2026-09-22)
+
+- Installed Playwright `1.63.0` and Chromium in `.venv`.
+- Restarted the active `tracescope-30102` and `tracescope-worker` sessions so the `/api/v1/changes` router and built frontend are live on port `30102`.
+- Public checks now pass: `/api/v1/changes` returns HTTP 200 with grouped episodes, `/changes` renders HTTP 200, and `/changes/anm-1886229056538689` renders HTTP 200 with zero Chromium console/page errors.
+- The previously failing behavioral ID is now available through `/api/v1/changes/chg-6739330567467241` with HTTP 200 and subject `partner_sales_broker`.
+
+## Episode-based User Changes and Investigations redesign (2026-09-22)
+
+- Replaced the former detector-family `UserChangesTab` with an operator-facing episode workflow driven by `GET /api/v1/changes?principal=<name>`. The page now presents Changes, Need attention, and Last change summary metrics; Current behavior; All/Needs attention/Reviewed filters; operational Access/Traffic/Performance/Errors/Authentication/Network type filters; human-readable episode cards; and a dedicated `/users/:principal/changes/:episodeId` detail route.
+- Added shared `frontend/src/components/EpisodePrimitives.tsx` components for episode status, readable title, relationship path, metric diff table, timeline, evidence, baseline context, source finding reference, and episode cards. Detector names are secondary technical evidence instead of primary card titles.
+- Reintroduced `/users/:principal/investigations` as a real four-tab workspace view rather than a redirect. It uses the same episode objects and provides an Open/Monitoring/Resolved queue, Summary, Evidence, Traces, AI analysis, History, and explicit Expected behavior / Keep monitoring / Resolve decisions. Removed the previous invented fallback topology chain.
+- The AI analysis entry point is now visible on the investigation workspace and opens the existing source-versioned `InvestigationPanel` using the episode's `anomaly_event` or `principal_change_event` reference. The active deployment currently has `OTEL_LLM_INVESTIGATION_ENABLED=false`, so investigation API calls intentionally report the disabled state until an LLM provider is configured.
+- Playwright 1.63.0 Chromium checks passed with zero browser errors for `/users/telecom_sync_svc/changes`, `/users/telecom_sync_svc/investigations` including opening the AI panel, and `/users/fefsf/changes/chg-5427563056243275`. Frontend `npm run lint` and `npm run build` passed; active port `30102` was restarted with the new built output.
+
+## Unified Change and Abnormality evaluation (2026-09-22)
+
+- `Change` is now the observed fact and `abnormality` is a separate deterministic episode evaluation. The API returns `EXPECTED`, `CHANGED`, `NEEDS ATTENTION`, or `CRITICAL` plus `is_abnormal`, evidence domains, correlation status, infrastructure-only attribution, reasons, and evaluator version.
+- Known/low-confidence F5, load-balancer, reverse-proxy, NAT, or ingress source-IP-only episodes remain `CHANGED` even if a source detector assigned high severity. Correlated access, Traffic, Performance, Error, or Authentication evidence can promote an episode; detector score remains secondary evidence.
+- `GET /api/v1/changes/{id}` now reconstructs the related 15-minute episode around a source signal and accepts legacy unprefixed numeric IDs. Both `/anomalies` and `/anomalies/:id` redirect to the unified Changes UI.
+- Dashboard, global Changes, User Changes, User header state, and User Investigations consume the same episode contract. Score-bucket UI was removed. Global detail shows the abnormality rationale and the LLM investigation panel; the investigation queue defaults to promoted/reviewed episodes rather than every informational change.
+- Operator decisions distinguish `Expected behavior` from `Resolve`: expected principal behavior is added to the scoped baseline; resolved behavior closes workflow without teaching it as expected. Anomaly expected actions use suppression, while resolved remains resolved.
+- Added focused evaluator tests covering expected review, known load-balancer IP, correlated access/rate changes, and critical error correlation.
+- Validation: focused evaluator plus behavioral API tests passed **20/20**; frontend TypeScript lint and production build passed; live API and Chromium checks passed for Dashboard, Changes, Change detail with LLM panel, User Changes, User Investigations with AI panel, `/anomalies` compatibility redirect, and legacy numeric change-ID redirect. The full backend suite reached **196 passed / 1 failed**; the only failure was the pre-existing infrastructure retention test because ClickHouse rejected a `system.metric_log` TTL mutation at its 3.60 GiB memory ceiling (`MEMORY_LIMIT_EXCEEDED`), unrelated to Change evaluation logic.
+
+## User Overview TPS and Bandwidth layout (2026-09-22)
+
+- Final arrangement: first operational row is TPS vs Baseline plus the 2×2 KPI grid; unified Change episodes follow, then paired Error/Latency charts, Bandwidth history, and a source-IP evidence table. Removed decorative intent banners, unused hidden markup, and the legacy score chart. Missing KPI values render as unavailable; Bandwidth automatically uses B/s, KiB/s, or MiB/s.
+
+- `/users/:principal/overview` omits the shared standalone TPS panel and places the `TPS vs Baseline` chart on the left of the first Overview content row. Other User workspace routes retain the single scoped TPS panel.
+- The Overview 2×2 KPI grid now contains `Requests`, `Bandwidth`, `Error Rate`, and `P95 Latency`; the former TPS KPI was replaced with `bandwidth_bytes_per_second` formatted as MiB/s and compared using `bandwidth_pct`.
+- Added browser assertions for the two-column TPS-vs-Baseline/KPI row and one Bandwidth KPI. Frontend lint/build passed and the deployed Playwright check for `/users/telecom_sync_svc/overview` passed with zero JavaScript errors.
+
+## Changes usability and workflow consistency (2026-09-22)
+
+- Global Changes and User Changes now share the same `Needs attention`, `All`, and `Reviewed` predicates. Attention excludes resolved episodes; Reviewed means explicitly expected behavior or a resolved workflow.
+- Removed the User Changes “Current behavior” hero, which previously treated the newest unresolved result as the most important/current event and could imply normal behavior before query completion.
+- Episode cards now separate evaluation state from workflow state, use “Last observed” instead of inferring ongoing activity, render one relationship path, show only two primary comparisons, and treat missing values as unavailable rather than `NEW`.
+- Delta color is neutral because a positive or negative change is not universally good or bad. Evidence markers no longer imply confirmation strength that the API does not provide.
+- Global and User detail pages preserve time/filter context, use the selected dashboard timezone, expose the same review controls, and identify that decisions currently apply to the episode's representative source finding.
+- The User “Investigate with AI” action opens the AI tab directly. Investigation search uses operator-visible fields instead of serialized internal JSON, and unavailable source findings render an explicit AI empty state.
+- Only explicit principal-change acceptance is classified as expected behavior. Suppressed/ignored findings remain workflow outcomes and are not taught as behavioral truth.
+- Offline verification completed while the live API was unavailable for a data update: focused Change evaluator tests passed **5/5**, frontend TypeScript lint passed, and the production frontend build passed. Live API and browser verification were intentionally deferred.
+- Global `/changes` episode cards now expose the same `Investigate` action as User Changes. It opens `/changes/:id#ai-investigation`, and the detail page scrolls to the LLM panel after asynchronous episode loading. A persistent `Investigate with AI` header action provides the same shortcut from the detail page. Frontend lint and production build passed; live verification remains deferred during the data update.
+
+## User Investigation consolidation (2026-09-22)
+
+- Removed the separate User Investigations navigation tab and deleted its queue/tab workspace. It duplicated the selected Change episode across Summary, Evidence, Traces, AI analysis, and History tabs and introduced a second mental model for the same workflow.
+- User Change Detail is now the single investigation page. It presents What changed, evaluation reasons, Before vs now, Timeline, Evidence, related Traces, inline LLM investigation, and operator decisions as one vertical operational flow.
+- User Change cards and the detail header both expose `Investigate`; they open or scroll directly to `#ai-investigation`. The LLM panel remains visible when disabled and reports its availability state rather than disappearing.
+- `/users/:principal/investigations` remains as a compatibility redirect. With `episode_id`, it redirects to the corresponding User Change detail and AI section; without an episode it redirects to User Changes.
+- Updated the Playwright route contract to verify the compatibility redirect and the inline LLM panel on User Change detail. Frontend lint and production build passed; live browser/API checks remain deferred while the API data update is in progress.
+
+## Entity identity colors (2026-09-22)
+
+- Added stable entity accents to relationship UI: User lavender (`#b877d9`), Service blue (`#5794f2`), API teal (`#56b9a8`), and IP neutral gray (`#a7a9ab`).
+- Episode relationship paths now render typed tokens instead of one generic gray token. User topology columns and relationship detail use the same mapping, while IP remains supporting neutral context.
+- Interactive topology nodes and search results now color the node icon/name and add a typed entity label. Operational state colors remain independent for new/changed/error conditions.
+- Frontend lint and production build passed; live browser/API checks were not run because the API data update is still in progress.
+- Relationship paths now include explicit role labels above every value. Full detail paths explain that the relationship is logical telemetry and that related Trace evidence is required to confirm exact request causality.
+- User topology now names the Service column as Target Service, with source IP retained as supporting metadata.
+
+## Service-first credential relationship semantics (2026-09-22)
+
+- Corrected the relationship model so non-human principals are not portrayed as people actively calling a Service. The primary operational path is now `Caller Service → Target Service → API / Operation`.
+- An observed service/system/shared/integration principal is rendered separately as `Credential observed on this call`, visually attached to the service call rather than inserted as the first causal node.
+- Confirmed `principal_type=human` identities retain User wording and the User icon. Unknown identities use `Observed Principal`; non-human identities use `Observed Credential` and a key icon throughout the User workspace header and topology.
+- User topology keeps the already-selected principal visible before any IP selection. Selecting an IP only scopes where that principal was observed; it does not replace the principal as the workspace subject.
+- Topology observed-path rows now lead with `Caller Service → Target Service → API` and show `Credential: <principal> · IP: <address>` as supporting context. Relationship detail follows the same semantic order.
+- Episode cards and detail paths use the same service-first visualization and state explicitly that related Trace evidence is required to prove exact request causality or credential forwarding.
+- Frontend TypeScript lint and production build passed. Live API and browser verification remain deferred while the data update is in progress.
+
+## User Activity workspace redesign (2026-09-22)
+
+- Replaced the long stacked Activity workspace with an internal `Performance | Normal Pattern | Access` segmented control. No router-level tabs or routes were added; `/topology` and `/patterns` remain compatibility redirects to Activity.
+- Performance is the default segment and preserves TPS-first behavior without the duplicate parent TPS panel. TPS vs Baseline sits beside a current 2×2 TPS/Error/P95/Bandwidth summary, followed by paired Error Rate/HTTP Status charts and a full-width p50/p95/p99 chart.
+- Normal Pattern contains only historical/baseline evidence: the real 24×7 active-hour heatmap, baseline-vs-current footprint, normal Target Services, normal APIs, established Caller Services, and known Source IPs. No synthetic activity is generated when history is absent.
+- Access now uses a progressive four-column board: `Selected IP → User/Credential → Service → API`. The route-selected identity is always visible before an IP is selected. Choosing an IP reveals its observed Target Services; choosing a Service reveals APIs.
+- The selected Access relationship shows TPS, Requests, Error rate, P95, Bandwidth, first/last seen, and a separate Caller Service table. This avoids presenting a non-human credential as the network caller while preserving the requested IP/User/Service/API exploration path.
+- Related Trace and API links are available from the selected relationship. Copy states that Caller Service is observed telemetry and that Trace evidence is required to confirm the exact request chain or credential propagation.
+- HTTP status retains count/percentage switching. Missing byte telemetry displays Bandwidth as unavailable rather than a synthetic zero.
+- Frontend TypeScript lint and production build passed. Live API and browser verification remain deferred while the API data update is in progress.
+
+## Grafana-style Activity Performance refinement (2026-09-22)
+
+- Reworked the default Performance segment into a compact observability layout: four Stat panels with mini sparklines for TPS, Error rate, P95 latency, and Bandwidth; the largest panel is observed TPS versus Baseline with an optional normal range, selected bucket, and change markers.
+- Replaced the former status-code-heavy visualization with a default 100% stacked status chart grouped into 2xx, 3xx, 4xx, 5xx, and timeout classes. Count/percentage switching remains available, and selecting a bucket reveals class percentages, counts, and top status codes.
+- Added paired percentile latency (p50/p95/p99) and Request/Response bandwidth area charts. Missing byte telemetry stays explicitly unavailable instead of being presented as a fabricated zero.
+- Updated `user_repository.performance()` to return 3xx counts and to keep 4xx, 5xx, and timeout classes mutually exclusive for the grouped status chart; overall error-rate semantics remain unchanged.
+- Validation passed: frontend TypeScript lint, Vite production build, and Python syntax compilation for `user_repository.py`. Live API/browser verification remains deferred while the data update is in progress.
+
+## User Overview consolidation (2026-09-22)
+
+- Removed Overview from the active User workspace navigation. The workspace now has two operator-facing tabs: `Activity` and `Changes`.
+- `/users/:principal` now opens Activity directly. `/users/:principal/overview` remains a compatibility redirect to Activity so saved links continue to work.
+- Global search, User Directory rows, Dashboard user links, Service user tables, API user tables, and Change actions now link directly to `/users/:principal/activity` instead of passing through the compatibility redirect.
+- The persistent identity header retains the compact identity type, status, baseline state, behavior state, request count, target/caller/API/IP counts, and active window that previously justified a separate summary page.
+- Updated the Playwright route contract to verify the Overview compatibility redirect and the Activity segmented control rather than the removed Overview card layout.
+- The modified `UserOverviewTab.tsx` file remains in the repository as inactive legacy source because the working tree already contained unrelated edits to it; no active route imports or renders it.
+
+## Dense Dashboard & User Activity Layout Refactor (2026-09-22)
+
+- **Dashboard (`Overview.tsx`) Density**:
+  - Expanded first KPI row from 5 to 6 compact metric cards: **TPS | Error rate | P95 latency | Active users | Services | Needs attention** (`abnormalCount` from change episodes).
+  - Consolidated Row 2: Total TPS chart beside consolidated **Important changes** panel with inline filter badges for `Critical`, `Attention`, and `Changed` counts and top 5 recent episodes.
+  - Eliminated redundant separate bottom `Recent Changes` and `Change evaluation` panels completely.
+  - Retained Row 3 for Top Services and Top Users tables with direct links into drill-down pages.
+- **User Workspace Header (`UserLayout.tsx`) Compression**:
+  - Compressed the former multi-tier header (breadcrumbs, large identity card, 6-box ribbon, and tabs) into a dense 2-row Grafana-style banner.
+  - Saves 100–150px of vertical height above the fold before the first chart.
+  - Row 1: Back link to Users, principal name in bold monospace, principal type dropdown, environment tag, status badges (Active, Baseline status, Behavior state with score), and quick `Switch ▾` account dropdown.
+  - Row 2: Single-line inline metrics ribbon (`Requests`, `Services`, `APIs`, `Callers`, `IPs`, `Window`) paired with embedded `Activity` and `Changes` navigation tabs.
+- **User Activity Workspace (`UserActivityWorkspace.tsx`) Density**:
+  - **Performance View**:
+    - Enriched 4 KPI StatCards with secondary operational telemetry: TPS (observed + baseline delta, `avg · peak`), Error rate (observed + baseline pp delta, `5xx · timeout`), P95 (`p50 · p99`), Bandwidth (`req · resp` breakdown).
+    - Compact StatCard height (75–80px).
+    - Compressed main TPS vs baseline chart height from `340px` to `230px`.
+    - Compressed secondary charts (Error rate & HTTP status) from `224px` to `185px`.
+    - Compacted HTTP status bucket drilldown into a single-line horizontal strip (`14:32 | 2xx 94.2%  4xx 3.4%  5xx 2.1%  timeout .3%`) instead of 5 column boxes.
+    - Compressed Latency and Bandwidth charts from `240px` to `195px`.
+    - Eliminated dead `{false && activeView === "performance" && ...}` block and unused states.
+  - **Normal Pattern View**:
+    - Packed Active-hour heatmap and Baseline-vs-current footprint side-by-side on wide displays (`xl:grid-cols-[minmax(0,1.5fr)_minmax(300px,1fr)]`), saving an entire full-width row above the 4 distribution lists.
+  - **Access View**:
+    - Streamlined to 3 columns: `Selected IP (25%) → Service (35%) → API (40%)`.
+    - Removed redundant static User/Credential column since the identity is already established and prominent in the panel title (`Access for {principal}`).
+- **Legacy Cleanup**:
+  - Cleaned up unreferenced legacy tab files: `UserActivityTab.tsx`, `UserPatternsTab.tsx`, `UserTopologyTab.tsx`, `UserOverviewTab.tsx`.
+- **Validation**:
+  - Production Vite build and TypeScript compilation succeeded without errors (`dist/index.html`, `dist/assets/index-BZrMY-LF.css`, `dist/assets/index-5ljkTHYt.js`).
+
+## User Activity horizontal density redesign (2026-09-22)
+
+- Reduced the Activity internal navigation to `Behavior | Access`. Behavior now combines current telemetry, baseline context, and normal-pattern evidence without restoring the legacy standalone pages or changing the User workspace’s separate `Activity | Changes` navigation.
+- Reorganized Behavior into paired desktop panels: TPS vs Baseline beside the real active-hour heatmap; Error Rate beside HTTP Status; p50/p95/p99 Latency beside Request/Response Bandwidth; and Baseline vs Current beside a compact Normal Footprint selector for Services, APIs, Callers, and Source IPs.
+- Preserved existing chart heights, data/query semantics, status percentage/count interaction, missing-profile empty state, and measured-only baseline data. No stability score, privilege heuristic, or synthetic heatmap fallback was introduced.
+- Access remains separate and uses the compact `Source IP → Service → API` board while keeping the selected principal visible in the Access context. Changes remains a separate User workspace tab.
+- Updated `backend/scripts/test_pages_playwright.py` to verify the two Activity modes, Behavior-first rendering, required paired panels, and Access board presence. Live browser execution remains deferred while the API data update is unavailable.
+
+## Shared dashboard sparkline readability (2026-09-22)
+
+- Replaced the dashboard’s dense custom SVG sparklines with the same fixed-height Recharts line treatment used by User Activity StatCards.
+- Shared sparklines now normalize invalid values, cap long histories to 48 representative points, disable animation, and keep a simple line-only presentation so narrow KPI cards remain readable.
+- User Activity StatCards now consume the shared `Sparkline` component, keeping dashboard and user-level KPI visual behavior consistent.
+
+## User Activity KPI overlay and panel layout (2026-09-23)
+
+- Behavior keeps TPS and its baseline visible in the main chart. Clicking an Error rate, P95 latency, or Bandwidth KPI card overlays the selected metric lines on a labeled right axis; clicking TPS returns to the default view. The four cards retain compact sparklines. Chart animations are disabled for immediate switching.
+- The 100% HTTP status chart occupies the panel beside the main chart on wide screens. The responsive 24-hour active-hour heatmap is below that row. Baseline-vs-current and Normal Footprint panels and their unused display code were removed.
+- Hovering either chart updates the selected time bucket's metrics and HTTP status percentages/counts. The frontend production build passed. A Chromium render with mocked telemetry at 1440×900 showed 2 TPS lines by default, 4 lines with Error rate, 5 with Latency, and 4 with Bandwidth; the main and status panels were both 357px tall. At 390px width there was no horizontal overflow, and no page errors occurred.
+- Follow-up: the main chart now uses a typed variable configuration (series, colors, formatter, availability, and scale) so another KPI can be added without branching its chart rendering. A 78px right-axis slot and fixed-height legend remain mounted for every selection; right-side labels show TPS by default or when bandwidth bytes are unavailable, and switch units with the selected overlay. The extra byte-measurement warning was removed. The TPS axis is exactly 0 to the peak of observed/baseline TPS, without 10% headroom.
+- A Chromium check using 48 mocked buckets, both with and without byte telemetry, confirmed the plot box and TPS SVG path are identical across all four KPI selections, the right-side values remain visible, all selected lines render when available, and no page errors occur. The frontend production build passed.
+- Fractional-TPS correction: removed the 1 TPS minimum from the primary axis when traffic is positive. The axis maximum is the exact observed/baseline peak, and tick formatting gains decimal precision as peaks shrink; the 1 TPS fallback applies only to all-zero series. Browser checks with 0.1, 0.02, 0, and 31 TPS peaks confirmed matching top-axis labels and that positive peak lines reach the top gridline, with no page errors. The frontend production build passed.
+- The shared TPS chart used in the service catalog and service detail now styles its latest-value label with the same font, size, and muted gray as the left-axis labels.
+
+## Service Detail interactive performance chart (2026-09-23)
+
+- Service Detail reuses the User Activity interactive KPI card component, with TPS, Requests, Error rate, P95 latency, and Bandwidth cards above the main chart.
+- The chart keeps observed TPS (and a baseline when the API supplies it) visible. A typed metric configuration maps Requests/minute, Error rate, P95 latency, and measured bandwidth series to the right axis; missing bandwidth series falls back to the TPS scale.
+- The service and user workspaces now share the same selected card treatment. Service bandwidth continues to use its reported five-minute buckets; the chart joins those by timestamp without fabricating per-minute byte values.
+- TypeScript and the frontend production build passed after this update.
+
+## Dashboard Important Changes scroll area (2026-09-23)
+
+- Increased the dashboard-only Total TPS chart from `h-44` to `h-60` and expanded the Important Changes list by the same 64px (284px on smaller screens, 196px at desktop widths) to keep the two panels aligned. Other uses of the shared TPS chart retain their existing height.
+- Replaced the dashboard Needs attention KPI with Bandwidth in the third position. `GET /api/v1/topology/bandwidth` uses byte-aware ClickHouse topology rollups or Elasticsearch aggregations and honors the dashboard's service, operation, account, and time filters. The card formats current, average, and peak rates as B/s, KiB/s, or MiB/s and shows an em dash if the request fails.
+- The Important Changes list remains keyboard-focusable and scrollable, showing all six ranked changes. The frontend production build and focused byte-rollup/API-surface tests passed.
+
+## Worker metric-bucket bandwidth (2026-09-23)
+
+- The existing Elasticsearch metrics stage writes grouped transaction counts, latency summaries, byte totals, and byte sample counts into `metric_buckets` at both 60-second and 300-second grain. It uses the existing `worker_elasticsearch_sync` checkpoint; in agent-only mode it does not copy application traces into ClickHouse.
+- Adding byte columns triggers a one-time rebackfill of the retained Elasticsearch window, even when earlier metric checkpoints were already marked live. No separate bandwidth worker, index, or checkpoint remains.
+- `/api/v1/topology/bandwidth`, Overview, Service, API, and User Activity bandwidth values all read from `metric_buckets`. Missing byte fields remain unavailable and are not inferred from request counts.
+
+## TPS chart render density (2026-09-23)
+
+- Added render-only min/max sampling for TPS charts. The shared TPS chart and User Activity TPS vs Baseline keep up to 450 representative source points; per-group minima/maxima and the first/last points are selected, preserving observed spikes without averaging.
+- The underlying five-minute series remains unchanged for calculations and other UI logic. Hover payloads map sampled chart points back to their original source indices. Line interpolation is linear and animation is disabled.
+
+## Thin time-series lines (2026-09-23)
+
+- All Recharts line and area curves, plus the custom topology-inspector TPS curve, use the shared `--chart-line-width: 1.25px` CSS token to reveal narrow spikes more clearly. Connection edges, grids, and hover dots are unaffected.
+
+## User Activity missing TPS line (2026-09-23)
+
+- Root cause on `/users/billing_reconcile_job/activity`: the performance response included historical anomaly rows with zero requests and rounded its lone surviving one-request bucket to `0.0` RPS. The separate Elasticsearch bandwidth rollup had 1,250 five-minute buckets and 63,152 measured requests, but the frontend previously discarded those buckets whenever any performance row existed.
+- User Activity now computes exact TPS from worker metric-bucket request counts and shows enough decimal places for sparse nonzero TPS. Its current latency values also come from those buckets.
+- The frontend production build passed. Chromium loaded the public page with HTTP 200, rendered a main TPS path with 382 line segments, showed `0.0033` TPS for the latest sparse bucket, and reported zero page errors. No backend restart was required because FastAPI serves the rebuilt `frontend/dist` assets.
+
+## User Activity TPS rollup correction (2026-09-23)
+
+- The worker computes `metric_buckets` from its configured telemetry source. User Activity queries `/api/v1/principals/{principal}/metrics?bucket=300` for transaction counts, latency, and measured bytes. Five-minute buckets are grouped into one-hour points for windows longer than eight days.
+- On the public `billing_reconcile_job` page, the principal metrics API returned 1,741 five-minute buckets totaling 119,605 requests over the selected seven days. The rebuilt frontend passed TypeScript/Vite build; Chromium confirmed HTTP 200 from the metrics API, a main TPS path with 428 segments, and zero page errors.
+
+## Line-chart worker-rollup source audit (2026-09-23)
+
+- User Activity takes TPS, error rate, p50/p95/p99 latency, bandwidth, card sparklines, heatmap, and request outcomes from worker `metric_buckets`. The TPS baseline comes from worker baseline rollups through `/api/v1/dashboard/series`. The Changes tab header TPS also reads principal metric buckets. No User Activity request uses the raw-trace performance API.
+- API/topology detail series and bandwidth values come strictly from `metric_buckets` in both storage modes. The separate Elasticsearch bandwidth index and its reader were removed. User Activity no longer makes a second bandwidth request or falls back to another store for TPS or bytes.
+- Unknown Users' area chart reads anonymous `metric_buckets`; because those buckets contain request/error counts but no status classes, its plotted categories are accurately labeled non-error and failed requests. The page's other summaries and trace evidence remain trace-backed.
+- Agent Fleet time series stays on dedicated `agent_stats_history`; transaction bandwidth lines use worker `metric_buckets`.
+- The User workspace header profile reads `/api/v1/users/{principal}` from derived principal summary and relationship tables; activity charts remain backed by worker `metric_buckets`. This avoids treating an empty selected-window metric series as a missing principal. The HTTP status chart is labeled non-error/failed-request because exact status classes are absent from `metric_buckets`. Access reads worker principal-IP rollups, including in Elasticsearch mode, and can be empty if those rollups have not been materialized.
+- Verification: focused topology/bandwidth tests passed 10/10, frontend TypeScript/Vite build passed, and live health, principal metrics, topology principal metrics, and Unknown Users APIs returned HTTP 200 after the dashboard/worker restart on port 30102.
+
+## No raw trace reads in User Activity (2026-09-23)
+
+- User Activity no longer requests `/api/v1/users/{principal}/performance`; its activity header data, heatmap, and non-error/failed request outcome chart use worker `metric_buckets`. The shared User workspace header reads the identity profile from `/api/v1/users/{principal}`, which uses derived principal summaries. The quick switcher uses the principal inventory endpoint. The Access view reads worker `topology_principal_ip_5m` rollups, including in Elasticsearch mode, and shows no relationships if those rollups are absent.
+- `PrincipalRepository` no longer falls back to `traces` when metric buckets are empty. Missing worker aggregates result in an empty chart or 404 profile instead of a trace-backed reconstruction.
+- In agent-only Elasticsearch mode, the worker now runs bounded server-side transaction aggregations for 60s and 300s `metric_buckets`, refreshes the latest ten minutes, and backfills the Elasticsearch seven-day retention window. It transfers only aggregate dimensions/counts/latency summaries into ClickHouse. Elasticsearch percentile aggregation is approximate; native ClickHouse trace aggregation remains exact.
+- The current worker cycle completed with `elasticsearch_read=0`, `elasticsearch_inserted=0`, and 930 aggregate metric buckets written for its latest six-hour window. The former `billing_reconcile_job` principal currently has no retained metric buckets in the selected window, so that specific chart stays empty. A different retained principal, `svc_checkout_gateway`, rendered six nonempty line curves in Chromium; the Activity view made no `/api/v1/users/{principal}/performance` request and reported zero page errors.
+- Verification: 16 focused backend tests passed, including a guard that a principal with raw traces but no metric buckets is absent from aggregate APIs. The frontend TypeScript/Vite build passed, the live Elasticsearch server-side aggregate query returned HTTP 200, and the active worker completed its metric stage in 10.5 seconds.
+
+## Raw-trace API boundary and service-only topology (2026-09-24)
+
+- User-facing ClickHouse reads were moved from raw `traces` to `metric_buckets`, existing service aggregates, topology relationship rollups, and precomputed change/anomaly data. Worker aggregation, ingestion/deduplication, and internal behavioral/anomaly processing retain their required raw reads. Trace Explorer is the explicit temporary exception: it reads the configured trace store, including ClickHouse `traces` in ClickHouse mode; ELK mode reads Elasticsearch.
+- Added topology rollup support for authentication-failure and service-instance metrics, plus API/worker/owner ClickHouse role selection and deployment wiring. Role-specific usernames/passwords fall back to the existing connection credentials until separately provisioned; this repository does not create ClickHouse users or grants.
+- Topology APIs provide service graph, lazy service API/user lists, searchable user directory, user services/APIs, and paginated IP context using rollups and stable service-edge IDs. Lists are bounded and keyset paginated.
+- The topology canvas renders only service nodes and service edges, with faint blue context edges and centralized yellow selection highlights. Service-first and user-first flows use scrollable DOM panels, lazy requests, and preserve graph coordinates through selection and refresh.
+- Selected services now highlight connected service edges in yellow, with highlighted lines and arrowheads above blue context edges. Clicking outside the scrollable relationship panels dismisses them; each panel has a close button, and the User directory has a reopen button.
+- API/User selections now use scoped connection rollups: selected API calls use `/api/v1/topology/services/{service}/api-connections`, while selected Users and User → Service → API paths use `/api/v1/topology/principals/{principal}/connections` with optional Service/API filters. Yellow edge membership and TPS labels come from the same filtered response.
+- The topology floating UI was compacted: the title/search/mode card uses a 300px footprint with its explanatory text available to screen readers; relationship lists are capped at 240px by 220px; history opens as a small popup; zoom and bottom status controls use less canvas space.
+- Prometheus `/metrics` now reads only the worker snapshot/checkpoint and returns zeroed worker-domain values until a first snapshot exists; it cannot invoke worker aggregation on the scrape path.
+- Added the API raw-query boundary regression tests and `docs/topology-read-model.md`. Focused topology, Prometheus, and boundary tests passed 17/17. The final full backend suite passed 207 tests with one failure: the existing unusual-access reason-priority assertion expected “failure burst” while the detector returned the established-IP new-endpoint reason. Frontend lint/build and Python compilation passed. `git diff --check` reports three trailing-whitespace lines in the pre-existing dirty `generate_30day_demo_dataset.py`; no such issue remains in the implementation files.
+
+## User Intelligence profile missing for selected window (2026-09-24)
+
+- Root cause: `UserLayout` requested `/api/v1/principals/{principal}` for its profile. That endpoint reads 60-second metric buckets inside the selected window and returns 404 when there are no buckets. For `mobile_banking_gateway`, the selected seven-day range started at 2026-09-17 02:16 UTC, while its 300-second metric series ended at 2026-09-17 01:50 UTC; its principal summary still recorded activity through 2026-09-23. The profile endpoint therefore treated an existing user as missing, and the metric-bucket fallback was empty for the selected range.
+- Switched the shared workspace header to `/api/v1/users/{principal}`, which reads derived identity summaries and returned HTTP 200 for the same principal and filters. The activity charts continue to use worker metric buckets and can remain empty when the selected window has no rollups.
+- Verified the live `/api/v1/principals/{principal}` request returned 404 for the selected range, its five-minute metric request returned an empty list, and `/api/v1/users/{principal}` returned HTTP 200 with the same range. Frontend TypeScript/Vite production build passed.
+
+## Live ELK aggregation and Trace Explorer repair (2026-09-24)
+
+- The active worker's Elasticsearch metric query failed with HTTP 400 after commit `2a88bc0` added `topology.metric_operation` normalization. Elasticsearch 7.17 Painless rejected string regex arguments passed to `replaceAll` (`String` cannot cast to `Pattern`). The replacement uses regex literals and replacement lambdas; a live read-only aggregation returned HTTP 200 and seven populated buckets before deployment.
+- Restarted the managed API and worker with `./run_server.sh restart`. The active host worker's `process_elasticsearch` stage completes successfully, with subsequent cycles materializing 222, 756, and more metric buckets. Retained-window backfill continues on the 60-second worker cadence.
+- `run_server.sh` now defaults analytics to `OTEL_STORAGE_BACKEND=clickhouse` and raw trace reads to `OTEL_TRACE_STORAGE_BACKEND=elasticsearch`, because live APM traces are stored in ELK and are not copied into ClickHouse in agent-only mode. The active `/api/v1/health` reports both values. Trace ID `2fed16bb627eb937602ba972d48c456c`, which was previously present only in ELK and returned empty/404 from `:30102`, now returns one list item and a one-span waterfall from the live API. The topology graph remains on its existing ClickHouse read model; a broad ELK backend switch exposed an unrelated SQL 503, so only the raw trace read path was switched.
+- Read-only validation covered the ELK transaction query, worker job status, recent ClickHouse 60-second/300-second buckets, API health, trace list/detail, and `run_server.sh` shell syntax. No `kubectl` command was used.
+- Six focused Elasticsearch trace and metric tests passed. After the final split configuration, `/api/v1/topology/services` returned HTTP 200, and Trace Explorer returned a fresh Sep 24 APM trace from Elasticsearch. An older cluster worker at `10.244.1.196` writes `Name or service not known` failures to the same `jobs` table; the active host worker's successful cycles appear from `10.244.0.1` in ClickHouse query logs. Therefore `/api/v1/ingestion/status.jobs` may alternate between success and failure until the older deployment is updated separately.

@@ -1,7 +1,7 @@
 -- Interactive service -> API -> principal topology rollups.
--- These tables are derived from the active trace backend in bounded five-minute
--- slices. In Elasticsearch mode the query repository uses ES aggregations and
--- these ClickHouse tables are intentionally not populated with application data.
+-- ClickHouse deployments build these from raw spans in bounded worker slices.
+-- Elasticsearch mode reads the equivalent worker metric_buckets projection;
+-- raw application spans remain in Elasticsearch and are never an API query source.
 
 ALTER TABLE traces ADD COLUMN IF NOT EXISTS observed_ip Nullable(String);
 ALTER TABLE traces ADD COLUMN IF NOT EXISTS effective_client_ip Nullable(String);

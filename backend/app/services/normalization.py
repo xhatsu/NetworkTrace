@@ -676,6 +676,14 @@ def normalize_otel_record(raw: dict[str, Any], source_label: str = "import") -> 
         extra["auth_evidence"] = auth_evidence
 
     for key, tgt in [
+        ("request_bytes", "request_bytes"),
+        ("response_bytes", "response_bytes"),
+        ("http.request.bytes", "request_bytes"),
+        ("http.response.bytes", "response_bytes"),
+        ("labels.http_request_body_size", "request_bytes"),
+        ("labels.http_response_body_size", "response_bytes"),
+        ("http.request.body.size", "request_bytes"),
+        ("http.response.body.size", "response_bytes"),
         ("labels.http_request_content_length", "request_bytes"),
         ("labels.http_response_content_length", "response_bytes"),
         ("labels.net_sock_peer_port", "peer_port"),

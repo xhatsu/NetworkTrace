@@ -56,6 +56,7 @@ from backend.app.api.reference_compat import router as reference_compat_router
 from backend.app.api.agent_stats import router as agent_stats_router
 from backend.app.api.internal_storage import router as internal_storage_router
 from backend.app.api.investigations import router as investigations_router
+from backend.app.api.changes import router as changes_router
 from backend.app.services.ingest_writer import ingest_writer
 from backend.app.services.investigation import InvestigationRunner
 from backend.app.services.storage_owner_client import StorageOwnerError, storage_owner_client
@@ -83,6 +84,7 @@ _ANALYTICS_ROUTERS = (
     traces_router,
     blast_radius_router,
     users_router,
+    changes_router,
     reference_compat_router,
 )
 
@@ -206,6 +208,7 @@ def create_app(role: str = ROLE_ALL) -> FastAPI:
             "demo_mode": settings.demo_mode,
             "service_role": role,
             "storage_backend": settings.storage_backend,
+            "trace_storage_backend": settings.trace_storage_backend,
             "elasticsearch_configured": bool(settings.elasticsearch_url),
         }
 
@@ -474,7 +477,7 @@ def _register_ingestion_status_route(app: FastAPI, repo: StorageRepository) -> N
             return await storage_owner_client.ingestion_status()
         with repo.connect() as db:
             count, min_ts, max_ts = db.execute(
-                "SELECT COUNT(*),MIN(timestamp_ms),MAX(timestamp_ms) FROM traces"
+                "SELECT COALESCE(SUM(request_count),0),MIN(bucket_start)*1000,MAX(bucket_start+bucket_size)*1000 FROM metric_buckets FINAL WHERE bucket_size=300"
             ).fetchone()
             jobs = [dict(r) for r in db.execute("SELECT * FROM jobs ORDER BY started_at_ms DESC")]
         return {

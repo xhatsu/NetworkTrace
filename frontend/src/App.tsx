@@ -1,4 +1,5 @@
 import { createContext, useContext, useEffect, useMemo, useState } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import {
   NavLink,
   Navigate,
@@ -21,9 +22,9 @@ import {
   Network,
   Moon,
   Radio,
+  RefreshCw,
   Search,
   SlidersHorizontal,
-  Sparkles,
   Sun,
   Users,
   X,
@@ -33,7 +34,7 @@ import { useI18n, LanguageSwitcher } from "./i18n";
 import { OverviewPage } from "./pages/Overview";
 import { ServicesPage, ServiceDetailPage } from "./pages/Services";
 import { ApiDetailPage } from "./pages/ApiDetail";
-import { AnomaliesPage, AnomalyDetailPage } from "./pages/Anomalies";
+import { ChangesPage, ChangeDetailPage } from "./pages/Changes";
 import { TracesPage, TraceDetailPage } from "./pages/Traces";
 import { AgentStatsPage, AgentNodeDetailPage } from "./pages/AgentStats";
 import { UnknownUsersPage } from "./pages/UnknownUsers";
@@ -42,16 +43,18 @@ import { InteractiveTopologyPage } from "./pages/InteractiveTopology";
 // 6 User-Centric Pages & Components
 import { UserDirectory } from "./pages/user/UserDirectory";
 import { UserLayout } from "./pages/user/UserLayout";
-import { UserOverviewTab } from "./pages/user/UserOverviewTab";
 import { UserActivityWorkspace } from "./pages/user/UserActivityWorkspace";
-import { UserTopologyTab } from "./pages/user/UserTopologyTab";
-import { UserChangesTab } from "./pages/user/UserChangesTab";
-import { UserPatternsTab } from "./pages/user/UserPatternsTab";
-import { UserInvestigationsTab } from "./pages/user/UserInvestigationsTab";
+import { LegacyUserInvestigationRedirect, UserChangeDetailPage, UserChangesTab } from "./pages/user/UserChangesTab";
 
 const now = new Date();
 const defaultEnd = new Date(now.getTime() + 60_000).toISOString();
 const defaultStart = new Date(now.getTime() - 7 * 86400_000).toISOString();
+
+function LegacyAnomalyRedirect() {
+  const location = useLocation();
+  const legacyId = location.pathname.split("/").filter(Boolean).pop() || "";
+  return <Navigate to={`/changes/${encodeURIComponent(legacyId)}${location.search}`} replace />;
+}
 
 const FilterContext = createContext<{
   filters: Filters;
@@ -93,46 +96,59 @@ function SideNav() {
   const location = useLocation();
   const groups = [
     {
-      label: "Overview",
+      label: "Dashboard",
       accent: "blue" as const,
-      headerClass: "text-blue-400 font-bold",
-      dotClass: "bg-blue-400",
-      activeClass: "bg-blue-500/15 border border-blue-400/70 text-white font-bold",
-      pillClass: "bg-blue-400",
-      iconActiveClass: "text-blue-300",
-      focusRing: "focus-visible:ring-blue-400",
-      hoverClass: "hover:bg-blue-500/10 hover:text-white",
+      headerClass: "text-[#5794f2] font-semibold",
+      dotClass: "bg-[#5794f2]",
+      activeClass: "bg-[#5794f2]/15 border border-[#5794f2]/70 text-white font-semibold",
+      pillClass: "bg-[#5794f2]",
+      iconActiveClass: "text-[#5794f2]",
+      focusRing: "focus-visible:ring-[#5794f2]",
+      hoverClass: "hover:bg-[#5794f2]/10 hover:text-white",
       links: [
         [LayoutDashboard, "Dashboard", "/dashboard"],
       ],
     },
     {
-      label: "Monitor",
+      label: "Explore",
       accent: "blue" as const,
-      headerClass: "text-blue-400 font-bold",
-      dotClass: "bg-blue-400",
-      activeClass: "bg-blue-500/15 border border-blue-400/70 text-white font-bold",
-      pillClass: "bg-blue-400",
-      iconActiveClass: "text-blue-300",
-      focusRing: "focus-visible:ring-blue-400",
-      hoverClass: "hover:bg-blue-500/10 hover:text-white",
+      headerClass: "text-[#5794f2] font-semibold",
+      dotClass: "bg-[#5794f2]",
+      activeClass: "bg-[#5794f2]/15 border border-[#5794f2]/70 text-white font-semibold",
+      pillClass: "bg-[#5794f2]",
+      iconActiveClass: "text-[#5794f2]",
+      focusRing: "focus-visible:ring-[#5794f2]",
+      hoverClass: "hover:bg-[#5794f2]/10 hover:text-white",
       links: [
         [Boxes, "Services", "/services"],
         [Users, "Users", "/users"],
         [Network, "Topology", "/topology"],
-        [AlertOctagon, "Changes", "/anomalies"],
+      ],
+    },
+    {
+      label: "Changes",
+      accent: "orange" as const,
+      headerClass: "text-[#ff9830] font-semibold",
+      dotClass: "bg-[#ff9830]",
+      activeClass: "bg-[#ff9830]/15 border border-[#ff9830]/70 text-white font-semibold",
+      pillClass: "bg-[#ff9830]",
+      iconActiveClass: "text-[#ff9830]",
+      focusRing: "focus-visible:ring-[#ff9830]",
+      hoverClass: "hover:bg-[#ff9830]/10 hover:text-white",
+      links: [
+        [AlertOctagon, "Changes", "/changes"],
       ],
     },
     {
       label: "Investigate",
       accent: "blue" as const,
-      headerClass: "text-blue-400 font-bold",
-      dotClass: "bg-blue-400",
-      activeClass: "bg-blue-500/15 border border-blue-400/70 text-white font-bold",
-      pillClass: "bg-blue-400",
-      iconActiveClass: "text-blue-300",
-      focusRing: "focus-visible:ring-blue-400",
-      hoverClass: "hover:bg-blue-500/10 hover:text-white",
+      headerClass: "text-[#5794f2] font-semibold",
+      dotClass: "bg-[#5794f2]",
+      activeClass: "bg-[#5794f2]/15 border border-[#5794f2]/70 text-white font-semibold",
+      pillClass: "bg-[#5794f2]",
+      iconActiveClass: "text-[#5794f2]",
+      focusRing: "focus-visible:ring-[#5794f2]",
+      hoverClass: "hover:bg-[#5794f2]/10 hover:text-white",
       links: [
         [Activity, "Traces", "/traces"],
       ],
@@ -140,13 +156,13 @@ function SideNav() {
     {
       label: "System",
       accent: "amber" as const,
-      headerClass: "text-amber-400 font-bold",
-      dotClass: "bg-amber-400",
-      activeClass: "bg-amber-500/20 border border-amber-400/60 text-white font-bold",
-      pillClass: "bg-amber-400",
-      iconActiveClass: "text-amber-300",
-      focusRing: "focus-visible:ring-amber-400",
-      hoverClass: "hover:bg-amber-500/10 hover:text-white",
+      headerClass: "text-[#ff9830] font-semibold",
+      dotClass: "bg-[#ff9830]",
+      activeClass: "bg-[#ff9830]/20 border border-[#ff9830]/60 text-white font-semibold",
+      pillClass: "bg-[#ff9830]",
+      iconActiveClass: "text-[#ff9830]",
+      focusRing: "focus-visible:ring-[#ff9830]",
+      hoverClass: "hover:bg-[#ff9830]/10 hover:text-white",
       links: [
         [Radio, "Agent Fleet", "/agent-stats"],
       ],
@@ -237,19 +253,101 @@ function FilterBar() {
   const { filters, setFilter } = useFilters();
   const { theme, toggleTheme } = useTheme();
   const { t } = useI18n();
+  const location = useLocation();
+  const queryClient = useQueryClient();
   const [showFilters, setShowFilters] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
+  const [isRefreshing, setIsRefreshing] = useState(false);
   const nav = useNavigate();
+
+  const currentEntity = useMemo(() => {
+    const path = location.pathname;
+    if (path.startsWith("/users/")) {
+      const parts = path.split("/").filter(Boolean);
+      const principal = decodeURIComponent(parts[1] || "");
+      if (principal) return `${t("User")}: ${principal}`;
+      return t("Users");
+    }
+    if (path.startsWith("/services/")) {
+      const parts = path.split("/").filter(Boolean);
+      const svcName = decodeURIComponent(parts[1] || "");
+      if (parts[2] === "apis" && parts[3]) {
+        return `${t("API")}: ${decodeURIComponent(parts[3])} (${svcName})`;
+      }
+      if (svcName) return `${t("Service")}: ${svcName}`;
+      return t("Services");
+    }
+    if (path.startsWith("/traces/")) {
+      const parts = path.split("/").filter(Boolean);
+      const traceId = decodeURIComponent(parts[1] || "");
+      if (traceId) return `${t("Trace")}: ${traceId.slice(0, 8)}…`;
+      return t("Traces");
+    }
+    if (path.startsWith("/changes/")) {
+      const parts = path.split("/").filter(Boolean);
+      const changeId = decodeURIComponent(parts[1] || "");
+      if (changeId) return `${t("Change")}: ${changeId}`;
+      return t("Changes");
+    }
+    if (path.startsWith("/agent-stats/")) {
+      const parts = path.split("/").filter(Boolean);
+      const node = decodeURIComponent(parts[1] || "");
+      if (node) return `${t("Agent")}: ${node}`;
+      return t("Agent Fleet");
+    }
+    if (path === "/agent-stats") return t("Agent Fleet");
+    if (path === "/topology") return t("Topology");
+    if (path === "/services") return t("Services");
+    if (path === "/users") return t("Users");
+    if (path === "/changes") return t("Changes");
+    if (path === "/traces") return t("Traces");
+    if (path === "/dashboard" || path === "/overview" || path === "/") return t("Dashboard");
+    return t("Overview");
+  }, [location.pathname, t]);
 
   const handleGlobalSearch = (e: React.FormEvent) => {
     e.preventDefault();
     const q = searchQuery.trim();
     if (!q) return;
-    if (q.length >= 16 && !q.includes(" ")) {
-      nav(`/traces/${encodeURIComponent(q)}`);
-    } else {
-      nav(`/users/${encodeURIComponent(q)}/overview`);
+
+    if (/^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(q)) {
+      nav(`/users?q=${encodeURIComponent(q)}`);
+      return;
     }
+
+    if (q.includes("/")) {
+      const [svc, ...opParts] = q.split("/").map((p) => p.trim());
+      if (svc && opParts.length > 0) {
+        nav(`/services/${encodeURIComponent(svc)}/apis/${encodeURIComponent(opParts.join("/"))}`);
+        return;
+      }
+    }
+
+    if (/^service:/i.test(q)) {
+      nav(`/services/${encodeURIComponent(q.replace(/^service:/i, "").trim())}`);
+      return;
+    }
+    if (/^user:/i.test(q)) {
+      nav(`/users/${encodeURIComponent(q.replace(/^user:/i, "").trim())}/activity`);
+      return;
+    }
+    if (/^trace:/i.test(q)) {
+      nav(`/traces/${encodeURIComponent(q.replace(/^trace:/i, "").trim())}`);
+      return;
+    }
+
+    if (/^[a-fA-F0-9]{16,64}$/.test(q)) {
+      nav(`/traces/${encodeURIComponent(q)}`);
+      return;
+    }
+
+    nav(`/users/${encodeURIComponent(q)}/activity`);
+  };
+
+  const handleRefresh = () => {
+    setIsRefreshing(true);
+    queryClient.invalidateQueries();
+    setTimeout(() => setIsRefreshing(false), 500);
   };
 
   const activeFilterKeys = (["environment", "group", "module", "service", "operation", "account"] as const).filter(
@@ -259,10 +357,12 @@ function FilterBar() {
   return (
     <div className="toolbar px-3 py-1.5 md:px-4">
       <div className="flex flex-wrap items-center justify-between gap-3">
-        {/* Left: Branding, Status & Global Search */}
+        {/* Left: Branding, Current entity & Global Search */}
         <div className="flex items-center gap-3">
           <div className="flex items-center gap-2">
-            <span className="text-xs font-bold tracking-tight text-[#d8d9da]">TraceScope / {t("Overview")}</span>
+            <span className="text-xs font-bold tracking-tight text-[#d8d9da]">
+              TraceScope / <span className="text-[#5794f2] font-semibold">{currentEntity}</span>
+            </span>
           </div>
 
           {/* Quick Global Search */}
@@ -270,7 +370,7 @@ function FilterBar() {
             <Search className="absolute left-2.5 top-2 text-[#7b7d80]" size={13} />
             <input
               type="text"
-              placeholder={t("Search service, API, user, or trace ID...")}
+              placeholder={t("Search service, API, user, IP, or trace ID...")}
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
               className="toolbar-control h-7 w-64 pl-8 pr-3 text-[11px] placeholder:text-[#7b7d80] focus:border-blue-400 focus:outline-none"
@@ -278,14 +378,25 @@ function FilterBar() {
           </form>
         </div>
 
-        {/* Fixed operational window: current five-minute bucket with seven-day history. */}
-        <div className="flex items-center gap-2 border border-blue-500/35 bg-blue-500/10 px-2.5 py-1 text-[10px] font-semibold text-blue-300">
-          <Clock size={13} />
-          <span>{t("Current: 5m · History: 7d", "Hiện tại: 5 phút · Lịch sử: 7 ngày")}</span>
-        </div>
-
-        {/* Right: Dimension filters & controls */}
+        {/* Middle/Right: Operational window, Refresh, Filters, Language, Theme */}
         <div className="flex flex-wrap items-center gap-2">
+          {/* Fixed operational window: current five-minute bucket with seven-day history. */}
+          <div className="flex items-center gap-2 border border-blue-500/35 bg-blue-500/10 px-2.5 py-1 text-[10px] font-semibold text-blue-300">
+            <Clock size={13} />
+            <span>{t("Current: 5m · History: 7d", "Hiện tại: 5 phút · Lịch sử: 7 ngày")}</span>
+          </div>
+
+          <button
+            type="button"
+            aria-label={t("Refresh", "Làm mới")}
+            title={t("Refresh telemetry data", "Làm mới dữ liệu")}
+            onClick={handleRefresh}
+            className="toolbar-control flex items-center gap-1.5 px-2.5 py-1 text-[11px] font-semibold text-[#d8d9da] transition hover:border-[#5794f2] hover:text-white"
+          >
+            <RefreshCw size={12} className={`text-[#5794f2] ${isRefreshing ? "animate-spin" : ""}`} />
+            <span className="hidden sm:inline">{t("Refresh", "Làm mới")}</span>
+          </button>
+
           <button
             onClick={() => setShowFilters(!showFilters)}
             className={`btn ${showFilters || activeFilterKeys.length > 0 ? "border-cyan-400 bg-cyan-500/25 text-white" : ""}`}
@@ -386,16 +497,18 @@ function Layout() {
             <Route path="/overview" element={<OverviewPage />} />
             <Route path="/dashboard" element={<OverviewPage />} />
 
-            {/* User Directory & 6 User-Centric Sub-Pages */}
+            {/* User Directory & 2 operator-facing workspace views */}
             <Route path="/users" element={<UserDirectory />} />
             <Route path="/users/:principal" element={<UserLayout />}>
-              <Route index element={<Navigate to="overview" replace />} />
-              <Route path="overview" element={<UserOverviewTab />} />
+              <Route index element={<Navigate to="activity" replace />} />
+              <Route path="overview" element={<Navigate to="../activity" replace />} />
               <Route path="activity" element={<UserActivityWorkspace />} />
-              <Route path="topology" element={<UserTopologyTab />} />
               <Route path="changes" element={<UserChangesTab />} />
-              <Route path="patterns" element={<UserPatternsTab />} />
-              <Route path="investigations" element={<UserInvestigationsTab />} />
+              <Route path="changes/:episodeId" element={<UserChangeDetailPage />} />
+              {/* Compatibility aliases for the former six-tab workspace. */}
+              <Route path="topology" element={<Navigate to="../activity" replace />} />
+              <Route path="patterns" element={<Navigate to="../activity" replace />} />
+              <Route path="investigations" element={<LegacyUserInvestigationRedirect />} />
             </Route>
 
             {/* Unattributed Traffic Monitor; kept as a secondary Users-area route */}
@@ -404,8 +517,10 @@ function Layout() {
             <Route path="/users/unknown" element={<Navigate to="/unknown-users" replace />} />
 
             {/* System Observability & Fleet */}
-            <Route path="/anomalies" element={<AnomaliesPage />} />
-            <Route path="/anomalies/:id" element={<AnomalyDetailPage />} />
+            <Route path="/changes" element={<ChangesPage />} />
+            <Route path="/changes/:id" element={<ChangeDetailPage />} />
+            <Route path="/anomalies" element={<Navigate to="/changes" replace />} />
+            <Route path="/anomalies/:id" element={<LegacyAnomalyRedirect />} />
             <Route path="/topology" element={<InteractiveTopologyPage />} />
             <Route path="/services" element={<ServicesPage />} />
             <Route path="/services/:name" element={<ServiceDetailPage />} />
@@ -420,7 +535,7 @@ function Layout() {
             <Route path="/accounts/:username" element={<Navigate to="/users" replace />} />
             <Route path="/principals" element={<Navigate to="/users" replace />} />
             <Route path="/principals/:name" element={<Navigate to="/users" replace />} />
-            <Route path="/user-changes" element={<Navigate to="/users" replace />} />
+            <Route path="/user-changes" element={<Navigate to="/changes" replace />} />
             <Route path="/user-analytics" element={<Navigate to="/users" replace />} />
           </Routes>
         </div>

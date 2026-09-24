@@ -10,8 +10,6 @@ import time
 from contextlib import contextmanager
 from typing import Any, Iterator
 
-import httpx
-
 from backend.config import settings
 from backend.app.models.investigation import EvidenceContext, FindingRef, FindingSnapshot, finding_key
 from backend.app.repositories.db_context import get_connection
@@ -21,7 +19,6 @@ from backend.app.services.investigation_evidence import (
     build_snapshot,
     parse_bounded_json,
 )
-from backend.app.services.normalization import normalize_otel_record
 
 
 QUERY_SETTINGS = {
@@ -182,94 +179,40 @@ class InvestigationEvidenceRepository:
         start, end = self._check_context(context, window, limit, 20)
         if selection not in {"recent", "errors"}:
             raise ValueError("invalid trace selection")
-        if self.backend == "elasticsearch":
-            return self._es_traces(context, start, end, limit, selection)
-        clauses = ["timestamp_ms >= {start:UInt64}", "timestamp_ms < {end:UInt64}"]
-        params: dict[str, Any] = {"start": start, "end": end, "limit": limit}
+        # This API returns bounded relationship summaries. Exact span records
+        # belong to internal processing and are never fetched by the UI request.
+        if context.environment or context.source_ip:
+            return []
+        clauses = ["bucket_size = {bucket_size:UInt32}",
+                   "bucket_start * 1000 >= {start:UInt64}",
+                   "bucket_start * 1000 < {end:UInt64}"]
+        params: dict[str, Any] = {
+            "bucket_size": 300, "start": start, "end": end, "limit": limit,
+        }
         dimensions, dimension_params = self._where_dimensions(context, {
-            "principal_name": "principal_name", "environment": "environment",
-            "caller_service": "caller_service", "target_service": "target_service",
-            "operation": "operation", "source_ip": "caller_ip",
+            "principal_name": "principal_name", "caller_service": "caller_service",
+            "target_service": "target_service", "operation": "operation",
         })
         clauses.extend(dimensions)
         params.update(dimension_params)
         if selection == "errors":
-            clauses.append("(http_status >= 400 OR outcome = 'failure')")
-        sql = """SELECT event_uid,trace_id,span_id,parent_span_id,timestamp_ms,principal_name,environment,
-            caller_service,target_service,operation_key,operation,http_status,outcome,duration_ms,auth_result,
-            auth_evidence,caller_resolution_method,caller_confidence,original_client_ip_trusted
-            FROM traces FINAL WHERE __WHERE__ ORDER BY timestamp_ms DESC LIMIT {limit:UInt8}""".replace("__WHERE__", " AND ".join(clauses))
-        return self._rows(self._query(sql, params, context))
-
-    def _es_traces(self, context: EvidenceContext, start: int, end: int, limit: int, selection: str) -> list[dict[str, Any]]:
-        if not self.settings.elasticsearch_url:
-            return []
-        filters: list[dict[str, Any]] = [{"range": {"@timestamp": {"gte": start, "lt": end}}}]
-        field_map = {
-            "principal_name": ["principal_name", "user.name"], "environment": ["service.environment", "environment"],
-            "caller_service": ["caller_service", "caller"], "target_service": ["target_service", "service.name"],
-            "operation": ["operation", "transaction.name", "name"], "source_ip": ["source_ip", "caller_ip", "client.ip"],
-        }
-        for key, fields in field_map.items():
-            value = getattr(context, key, None)
-            if value:
-                filters.append({"bool": {"should": [{"term": {field: value}} for field in fields], "minimum_should_match": 1}})
-        if selection == "errors":
-            filters.append({"bool": {"should": [{"range": {"http.status_code": {"gte": 400}}}, {"term": {"event.outcome": "failure"}}], "minimum_should_match": 1}})
-        body = {
-            "size": limit, "track_total_hits": False, "timeout": "2s",
-            "_source": ["@timestamp", "timestamp_ms", "trace.id", "trace_id", "span.id", "span_id", "parent.id",
-                        "service.name", "service.environment", "environment", "caller_service", "target_service", "caller",
-                        "user.name", "principal_name", "operation", "transaction.name", "name", "http.status_code",
-                        "event.outcome", "duration_ms", "duration.us", "auth_result", "auth_evidence",
-                        "caller_resolution_method", "caller_confidence", "client.ip", "source_ip"],
-            "query": {"bool": {"filter": filters}},
-        }
-        try:
-            if self.http_client is not None:
-                response = self.http_client.post("/{}/_search".format(self.settings.elasticsearch_index), json=body)
-            else:
-                with httpx.Client(base_url=self.settings.elasticsearch_url, verify=self.settings.elasticsearch_verify_tls,
-                                  timeout=httpx.Timeout(3.0, connect=3.0, read=3.0), follow_redirects=False, trust_env=False) as client:
-                    response = client.post("/{}/_search".format(self.settings.elasticsearch_index), json=body)
-            if response.status_code != 200 or len(response.content) > 128 * 1024:
-                return []
-            payload = response.json()
-            hits = payload.get("hits", {}).get("hits", []) if isinstance(payload, dict) else []
-            result: list[dict[str, Any]] = []
-            for hit in hits[:limit]:
-                if not isinstance(hit, dict) or not isinstance(hit.get("_source"), dict):
-                    continue
-                try:
-                    norm = normalize_otel_record({"_source": hit["_source"], "_id": hit.get("_id")}, "investigation")
-                except Exception:
-                    norm = None
-                if norm is None:
-                    continue
-                row = norm.model_dump()
-                if row.get("timestamp_ms") is None or not start <= int(row["timestamp_ms"]) < end:
-                    continue
-                for key in ("environment", "principal_name", "caller_service", "target_service", "operation", "caller_ip"):
-                    expected = getattr(context, "source_ip" if key == "caller_ip" else key, None)
-                    if expected and row.get(key) != expected:
-                        break
-                else:
-                    result.append({key: row.get(key) for key in (
-                        "event_uid", "trace_id", "span_id", "parent_span_id", "timestamp_ms", "principal_name",
-                        "environment", "caller_service", "target_service", "operation_key", "operation", "http_status",
-                        "outcome", "duration_ms", "auth_result", "auth_evidence", "caller_resolution_method",
-                        "caller_confidence", "original_client_ip_trusted")})
-            return result
-        except Exception:
-            return []
+            clauses.append("error_count > 0")
+        sql = """SELECT bucket_start * 1000 AS timestamp_ms,principal_name,caller_service,
+            target_service,operation,sum(request_count) AS request_count,sum(error_count) AS error_count,
+            max(latency_p95) AS latency_p95_ms,sum(request_bytes) AS request_bytes,
+            sum(response_bytes) AS response_bytes
+            FROM metric_buckets FINAL WHERE __WHERE__
+            GROUP BY bucket_start,principal_name,caller_service,target_service,operation
+            ORDER BY bucket_start DESC LIMIT {limit:UInt8}""".replace("__WHERE__", " AND ".join(clauses))
+        return [{**row, "record_type": "worker_metric_rollup", "trace_id": None,
+                 "evidence_provenance": "metric_buckets"}
+                for row in self._rows(self._query(sql, params, context))]
 
     def window_metrics(self, context: EvidenceContext, window: str = "focus", limit: int = 90,
                        bucket_size: int = 60) -> list[dict[str, Any]]:
         start, end = self._check_context(context, window, limit, 90)
         if bucket_size not in {60, 300}:
             raise ValueError("invalid metric bucket size")
-        if self.backend == "elasticsearch":
-            return []
         clauses = ["bucket_start >= {start:UInt64}", "bucket_start < {end:UInt64}", "bucket_size = {bucket_size:UInt32}"]
         params: dict[str, Any] = {"start": start // 1000, "end": end // 1000, "bucket_size": bucket_size, "limit": limit}
         dimensions, dimension_params = self._where_dimensions(context, {
@@ -297,7 +240,7 @@ class InvestigationEvidenceRepository:
             if metric in facts:
                 values.append({"dimension": "finding", "metric": metric, "value": facts[metric],
                                "provenance": "source_snapshot", "source_version": snapshot.source_version})
-        if self.backend == "clickhouse" and context.target_service and not context.environment:
+        if context.target_service and not context.environment:
             dt_ms = snapshot.observation_window.start_ms if snapshot.observation_window else None
             if dt_ms is not None:
                 import datetime as datetime_module
@@ -334,7 +277,7 @@ class InvestigationEvidenceRepository:
 
     def service_context(self, context: EvidenceContext, limit: int = 10) -> list[dict[str, Any]]:
         self._check_context(context, "surrounding", limit, 10)
-        if self.backend == "elasticsearch" or context.environment:
+        if context.environment:
             return []
         clauses = ["bucket_start >= {start:UInt64}", "bucket_start < {end:UInt64}", "bucket_size = 60"]
         params: dict[str, Any] = {"start": context.start_ms // 1000, "end": context.end_ms // 1000, "limit": limit}

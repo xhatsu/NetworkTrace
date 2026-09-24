@@ -55,6 +55,8 @@ spec:
             - secretRef:
                 name: {{ include "tracescope.secretName" . }}
           env:
+            - name: OTEL_CLICKHOUSE_ROLE
+              value: "owner"
             - name: OTEL_RUN_MIGRATIONS
               value: "true"
           resources:
@@ -86,6 +88,8 @@ spec:
             - secretRef:
                 name: {{ include "tracescope.secretName" . }}
           env:
+            - name: OTEL_CLICKHOUSE_ROLE
+              value: "api"
             - name: OTEL_RUN_MIGRATIONS
               value: "false"
           startupProbe:
@@ -138,6 +142,8 @@ spec:
             - secretRef:
                 name: {{ include "tracescope.secretName" . }}
           env:
+            - name: OTEL_CLICKHOUSE_ROLE
+              value: "worker"
             - name: OTEL_RUN_MIGRATIONS
               value: "false"
           livenessProbe:

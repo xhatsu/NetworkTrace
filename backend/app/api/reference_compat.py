@@ -101,21 +101,18 @@ async def healthz() -> Dict[str, Any]:
 @router.get("/api/otel/status")
 async def api_otel_status() -> Dict[str, Any]:
     with get_connection() as conn:
-        spans_row = conn.execute("SELECT count() FROM traces").fetchone()
-        spans_count = int(spans_row[0]) if (spans_row and spans_row[0] is not None) else 0
-
-        bounds = conn.execute("SELECT MIN(timestamp), MAX(timestamp) FROM traces").fetchone()
+        rollup = conn.execute("""
+            SELECT sum(request_count), min(bucket_start)*1000, max(bucket_start+bucket_size)*1000
+            FROM metric_buckets FINAL WHERE bucket_size=300
+        """).fetchone()
+        spans_count = int(rollup[0] or 0) if rollup else 0
+        bounds = (rollup[1], rollup[2]) if rollup else (None, None)
         first_seen = bounds[0] if bounds else None
         last_seen = bounds[1] if bounds else None
 
         svcs_row = conn.execute("SELECT COUNT(DISTINCT target_service) FROM metric_buckets WHERE bucket_size=300").fetchone()
         services_count = int(svcs_row[0]) if (svcs_row and svcs_row[0] is not None) else 0
-        if services_count == 0:
-            svcs_row = conn.execute("SELECT COUNT(DISTINCT target_service) FROM traces").fetchone()
-            services_count = int(svcs_row[0]) if (svcs_row and svcs_row[0] is not None) else 0
-
-        nodes_row = conn.execute("SELECT COUNT(DISTINCT service_instance) FROM traces WHERE service_instance IS NOT NULL").fetchone()
-        nodes_count = int(nodes_row[0]) if (nodes_row and nodes_row[0] is not None) else 1
+        nodes_count = services_count or 1
 
     return {
         "source": "otel",
@@ -146,12 +143,10 @@ async def api_nodes() -> Dict[str, Any]:
     with get_connection() as conn:
         rows = conn.execute(
             """
-            SELECT COALESCE(NULLIF(service_instance,''), NULLIF(target_ip,''), 'default-node') AS node,
-                   MAX(timestamp) AS last_seen,
-                   COUNT(*) AS n_events
-            FROM traces
-            GROUP BY node
-            ORDER BY node
+            SELECT target_service AS node, max(last_seen_ms) AS last_seen,
+                   sum(request_count) AS n_events
+            FROM topology_service_edges_5m FINAL
+            GROUP BY target_service ORDER BY node
             """
         ).fetchall()
     return {"nodes": [dict(r) for r in rows]}
@@ -162,12 +157,10 @@ async def api_coverage() -> Dict[str, Any]:
     with get_connection() as conn:
         rows = conn.execute(
             """
-            SELECT COALESCE(NULLIF(service_instance,''), NULLIF(target_ip,''), 'default-node') AS host,
-                   target_service AS service_id,
-                   COUNT(*) AS spans,
-                   MAX(timestamp) AS last_seen
-            FROM traces
-            GROUP BY host, service_id
+            SELECT target_service AS host, target_service AS service_id,
+                   sum(request_count) AS spans, max(last_seen_ms) AS last_seen
+            FROM topology_service_edges_5m FINAL
+            GROUP BY target_service
             ORDER BY last_seen DESC
             LIMIT 1000
             """
@@ -180,11 +173,8 @@ async def api_users() -> Dict[str, Any]:
     with get_connection() as conn:
         rows = conn.execute(
             """
-            SELECT COALESCE(NULLIF(principal_name,''), '-anonymous-') AS user,
-                   COUNT(*) AS calls,
-                   MAX(timestamp) AS last_seen
-            FROM traces
-            GROUP BY user
+            SELECT principal_name AS user, total_requests AS calls, last_seen
+            FROM principals FINAL
             ORDER BY calls DESC, user
             """
         ).fetchall()
@@ -202,20 +192,20 @@ async def api_rpm(request: Request) -> Dict[str, Any]:
 
     include_anon = q.get("anon") == "1"
     with get_connection() as conn:
-        max_t_row = conn.execute("SELECT (SELECT MAX(timestamp) FROM traces)").fetchone()
-        now_ts = int(max_t_row[0]) if (max_t_row and max_t_row[0]) else int(time.time())
+        max_t_row = conn.execute("SELECT MAX(bucket_start) FROM metric_buckets FINAL WHERE bucket_size=300").fetchone()
+        now_ts = int(max_t_row[0]) + 300 if (max_t_row and max_t_row[0]) else int(time.time())
         t0 = now_ts - win
 
-        anon_clause = "" if include_anon else " AND principal_name IS NOT NULL AND principal_name != '' AND principal_name != '-anonymous-' AND principal_name != 'unknown'"
+        anon_clause = "" if include_anon else " AND principal_name NOT IN ('', '-anonymous-', 'unknown')"
         rows = conn.execute(
             f"""
             SELECT COALESCE(NULLIF(principal_name,''), '-anonymous-') AS u,
-                   ROUND(COUNT(*) / (? / 60.0), 3) AS rpm,
-                   COUNT(*) AS n,
-                   MIN(timestamp) AS first_ts,
-                   MAX(timestamp) AS last_ts
-            FROM traces
-            WHERE timestamp >= ? {anon_clause}
+                   ROUND(SUM(request_count) / (? / 60.0), 3) AS rpm,
+                   SUM(request_count) AS n,
+                   MIN(bucket_start) AS first_ts,
+                   MAX(bucket_start+bucket_size) AS last_ts
+            FROM metric_buckets FINAL
+            WHERE bucket_size=300 AND bucket_start>=? {anon_clause}
             GROUP BY u
             ORDER BY rpm DESC
             """,
@@ -230,14 +220,12 @@ async def api_callers() -> Dict[str, Any]:
     with get_connection() as conn:
         rows = conn.execute(
             """
-            SELECT COALESCE(NULLIF(caller_ip,''), NULLIF(caller_service,''), '-') AS caller,
-                   COALESCE(NULLIF(principal_name,''), '-anonymous-') AS user,
-                   target_ip AS dst_ip,
-                   target_port AS dst_port,
-                   COUNT(*) AS calls,
-                   MAX(timestamp) AS last_seen
-            FROM traces
-            GROUP BY caller, user, dst_ip, dst_port
+            SELECT COALESCE(NULLIF(caller_service,''), '-') AS caller,
+                   COALESCE(NULLIF(principal,''), '-anonymous-') AS user,
+                   target_service AS dst_ip, 0 AS dst_port,
+                   SUM(request_count) AS calls, MAX(last_seen_ms) AS last_seen
+            FROM topology_principal_edges_5m FINAL
+            GROUP BY caller,user,dst_ip
             """
         ).fetchall()
 
@@ -270,12 +258,8 @@ async def api_callers() -> Dict[str, Any]:
 # =========================================================================
 
 def _trace_to_log_row(t: Dict[str, Any]) -> Dict[str, Any]:
-    target_ip = t.get("target_ip") or ""
-    target_port = t.get("target_port")
-    upstream = f"{target_ip}:{target_port}" if target_port else target_ip
-
-    ts = t.get("timestamp") or 0
-    ts_ms = t.get("timestamp_ms") or (ts * 1000)
+    ts_ms = int(t.get("timestamp_ms") or 0)
+    ts = ts_ms / 1000
     ts_us = ts_ms * 1000
 
     try:
@@ -288,9 +272,9 @@ def _trace_to_log_row(t: Dict[str, Any]) -> Dict[str, Any]:
         principal = "-anonymous-"
 
     return {
-        "client_ip": t.get("caller_ip") or t.get("caller_service"),
-        "origin_client_ip": t.get("caller_ip") or t.get("caller_service"),
-        "immediate_peer": t.get("caller_ip") or t.get("caller_service"),
+        "client_ip": t.get("source_ip") or t.get("caller_service"),
+        "origin_client_ip": t.get("source_ip") or t.get("caller_service"),
+        "immediate_peer": t.get("source_ip") or t.get("caller_service"),
         "@timestamp": timestamp_str,
         "timestamp_us": ts_us,
         "user": principal,
@@ -298,40 +282,44 @@ def _trace_to_log_row(t: Dict[str, Any]) -> Dict[str, Any]:
         "user_department": None,
         "session_id": None,
         "user_agent": None,
-        "method": t.get("http_method") or "POST",
-        "route": t.get("operation") or t.get("http_route") or "/",
-        "http_route": t.get("http_route") or t.get("operation"),
+        "method": None,
+        "route": t.get("operation") or "/",
+        "http_route": t.get("operation"),
         "url_path": t.get("operation"),
-        "status": t.get("http_status") or 200,
-        "duration_ms": t.get("duration_ms") or 0.0,
-        "req_bytes": 0,
-        "resp_bytes": 0,
-        "trace_id": t.get("trace_id"),
-        "upstream": upstream or None,
-        "error": t.get("outcome") if t.get("outcome") != "success" else None,
-        "error_kind": t.get("status_class"),
-        "service_id": t.get("target_service") or t.get("service_name"),
+        "status": None,
+        "request_count": int(t.get("request_count") or 0),
+        "error_count": int(t.get("error_count") or 0),
+        "auth_failure_count": int(t.get("auth_failure_count") or 0),
+        "http_5xx_count": int(t.get("http_5xx_count") or 0),
+        "duration_ms": t.get("p95_latency_ms") or 0.0,
+        "req_bytes": int(t.get("request_bytes") or 0),
+        "resp_bytes": int(t.get("response_bytes") or 0),
+        "trace_id": None,
+        "upstream": t.get("target_service"),
+        "error": "aggregate errors" if t.get("error_count") else None,
+        "error_kind": "5m rollup",
+        "service_id": t.get("target_service"),
         "module_id": t.get("caller_service"),
         "service_group_id": None,
         "service_module_id": None,
-        "environment": t.get("service_environment") or "production",
+        "environment": "production",
         "agent": {"name": "tracescope", "version": "0.2.0"},
     }
 
 
 def _traces_query(q: Dict[str, str]) -> List[Dict[str, Any]]:
-    clauses: List[str] = []
+    clauses: List[str] = ["1=1"]
     params: List[Any] = []
 
     user = q.get("user")
     if user:
         if user in ("-anonymous-", "anonymous", "anon"):
-            clauses.append("(principal_name IS NULL OR principal_name = '' OR principal_name = '-anonymous-' OR principal_name = 'unknown')")
+            clauses.append("principal IN ('', '-anonymous-', 'unknown')")
         elif user.endswith("*"):
-            clauses.append("principal_name LIKE ?")
+            clauses.append("principal LIKE ?")
             params.append(user[:-1] + "%")
         else:
-            clauses.append("principal_name = ?")
+            clauses.append("principal = ?")
             params.append(user)
 
     service = q.get("service") or q.get("service_id")
@@ -341,22 +329,29 @@ def _traces_query(q: Dict[str, str]) -> List[Dict[str, Any]]:
 
     caller = q.get("caller")
     if caller:
-        clauses.append("(caller_service = ? OR caller_ip = ?)")
-        params.extend([caller, caller])
+        clauses.append("caller_service = ?")
+        params.append(caller)
 
     status = q.get("status")
     if status:
         if status.endswith("*"):
-            clauses.append("status_class LIKE ?")
-            params.append(status[:-1] + "%")
+            if status.startswith("4"):
+                clauses.append("http_4xx_count > 0")
+            elif status.startswith("5"):
+                clauses.append("http_5xx_count > 0")
         elif status.isdigit():
-            clauses.append("http_status = ?")
-            params.append(int(status))
+            status_code = int(status)
+            if status_code in (401, 403):
+                clauses.append("auth_failure_count > 0")
+            elif status_code >= 500:
+                clauses.append("http_5xx_count > 0")
+            elif status_code >= 400:
+                clauses.append("http_4xx_count > 0")
 
     since = q.get("since") or q.get("since_ts")
     if since:
         try:
-            clauses.append("timestamp >= ?")
+            clauses.append("bucket_start >= ?")
             params.append(int(float(since)))
         except ValueError:
             pass
@@ -364,7 +359,7 @@ def _traces_query(q: Dict[str, str]) -> List[Dict[str, Any]]:
     to_ts = q.get("to") or q.get("to_ts")
     if to_ts:
         try:
-            clauses.append("timestamp <= ?")
+            clauses.append("bucket_start <= ?")
             params.append(int(float(to_ts)))
         except ValueError:
             pass
@@ -374,8 +369,27 @@ def _traces_query(q: Dict[str, str]) -> List[Dict[str, Any]]:
     except ValueError:
         limit = 200
 
-    where_sql = (" WHERE " + " AND ".join(clauses)) if clauses else ""
-    sql = f"SELECT * FROM traces {where_sql} ORDER BY timestamp_ms DESC LIMIT ?"
+    where_sql = " AND ".join(clauses)
+    sql = f"""
+        SELECT bucket_start*1000 timestamp_ms, caller_service,
+               principal, target_service, target_api operation,
+               sum(request_count) request_count, sum(error_count) error_count,
+               sum(auth_failure_count) auth_failure_count,
+               sum(http_4xx_count) http_4xx_count, sum(http_5xx_count) http_5xx_count,
+               max(p95_latency_ms) p95_latency_ms,
+               sum(request_bytes) request_bytes, sum(response_bytes) response_bytes,
+               source_ip
+        FROM (
+            SELECT bucket_start,caller_service,principal,target_service,target_api,
+                   request_count,error_count,auth_failure_count,http_4xx_count,
+                   http_5xx_count,p95_latency_ms,request_bytes,response_bytes,
+                   '' source_ip
+            FROM topology_principal_edges_5m FINAL
+            WHERE {where_sql}
+        )
+        GROUP BY bucket_start,caller_service,principal,target_service,target_api,source_ip
+        ORDER BY timestamp_ms DESC LIMIT ?
+    """
     params.append(limit)
 
     with get_connection() as conn:
@@ -407,17 +421,9 @@ async def api_export_logs(request: Request) -> PlainTextResponse:
 
 @router.get("/api/violations")
 async def api_violations(request: Request) -> Dict[str, Any]:
-    q = qdict(request)
-    rows = _traces_query(q)
-    violations = []
-    for r in rows:
-        user = r.get("principal_name") or "-anonymous-"
-        target = f"{r.get('target_ip') or '127.0.0.1'}:{r.get('target_port') or 80}"
-        if not is_target_allowed(user, target):
-            log_row = _trace_to_log_row(r)
-            log_row["violation"] = True
-            violations.append(log_row)
-    return {"violations": violations}
+    # Network target IP/port evidence is not part of the read model. Returning
+    # an empty result is safer than rebuilding policy checks from raw spans.
+    return {"violations": [], "detail": "Network target evidence is unavailable in aggregate read models."}
 
 
 # =========================================================================
@@ -467,10 +473,11 @@ async def api_endpoints_slow() -> Dict[str, Any]:
             """
             SELECT target_service AS service,
                    operation,
-                   COUNT(*) AS call_count,
-                   ROUND(AVG(duration_ms), 2) AS avg_duration_ms,
-                   ROUND(MAX(duration_ms), 2) AS max_duration_ms
-            FROM traces
+                   SUM(request_count) AS call_count,
+                   ROUND(SUM(latency_sum) / GREATEST(SUM(request_count),1), 2) AS avg_duration_ms,
+                   ROUND(MAX(latency_p95), 2) AS max_duration_ms
+            FROM metric_buckets FINAL
+            WHERE bucket_size=300
             GROUP BY target_service, operation
             HAVING call_count >= 5
             ORDER BY avg_duration_ms DESC
@@ -485,15 +492,19 @@ async def api_endpoints_errors() -> Dict[str, Any]:
     with get_connection() as conn:
         rows = conn.execute(
             """
-            SELECT target_service AS service,
-                   operation,
-                   COUNT(*) AS call_count,
-                   SUM(CASE WHEN http_status >= 400 THEN 1 ELSE 0 END) AS error_count,
-                   ROUND(SUM(CASE WHEN http_status >= 400 THEN 1 ELSE 0 END) * 100.0 / COUNT(*), 2) AS error_rate
-            FROM traces
-            GROUP BY target_service, operation
-            HAVING error_count > 0
-            ORDER BY error_rate DESC, error_count DESC
+            SELECT service,operation,call_count,agg_errors AS error_count,error_rate
+            FROM (
+                SELECT target_service AS service,
+                       operation,
+                       SUM(request_count) AS call_count,
+                       SUM(error_count) AS agg_errors,
+                       ROUND(SUM(error_count) * 100.0 / GREATEST(SUM(request_count),1), 2) AS error_rate
+                FROM metric_buckets FINAL
+                WHERE bucket_size=300
+                GROUP BY target_service, operation
+            )
+            WHERE agg_errors > 0
+            ORDER BY error_rate DESC, agg_errors DESC
             LIMIT 20
             """
         ).fetchall()
@@ -506,12 +517,12 @@ async def api_endpoints_health() -> Dict[str, Any]:
         rows = conn.execute(
             """
             SELECT target_service AS service,
-                   operation,
-                   COUNT(*) AS total_calls,
-                   ROUND(AVG(duration_ms), 2) AS avg_duration_ms,
-                   ROUND(SUM(CASE WHEN http_status >= 500 THEN 1 ELSE 0 END) * 100.0 / COUNT(*), 2) AS error_rate_5xx,
-                   ROUND(SUM(CASE WHEN http_status >= 400 AND http_status < 500 THEN 1 ELSE 0 END) * 100.0 / COUNT(*), 2) AS error_rate_4xx
-            FROM traces
+                   target_api AS operation,
+                   SUM(request_count) AS total_calls,
+                   ROUND(SUM(latency_sum) / GREATEST(SUM(request_count),1), 2) AS avg_duration_ms,
+                   ROUND(SUM(http_5xx_count) * 100.0 / GREATEST(SUM(request_count),1), 2) AS error_rate_5xx,
+                   ROUND(SUM(http_4xx_count) * 100.0 / GREATEST(SUM(request_count),1), 2) AS error_rate_4xx
+            FROM topology_api_edges_5m FINAL
             GROUP BY target_service, operation
             ORDER BY total_calls DESC
             LIMIT 50
@@ -525,11 +536,12 @@ async def api_traffic_hourly() -> Dict[str, Any]:
     with get_connection() as conn:
         rows = conn.execute(
             """
-            SELECT (timestamp / 3600) * 3600 AS hour_bucket,
-                   COUNT(*) AS total_calls,
-                   SUM(CASE WHEN http_status >= 500 THEN 1 ELSE 0 END) AS errors_5xx,
-                   ROUND(AVG(duration_ms), 2) AS avg_duration_ms
-            FROM traces
+            SELECT intDiv(bucket_start, 3600) * 3600 AS hour_bucket,
+                   SUM(request_count) AS total_calls,
+                   SUM(error_count) AS errors_5xx,
+                   ROUND(SUM(latency_sum) / GREATEST(SUM(request_count),1), 2) AS avg_duration_ms
+            FROM metric_buckets FINAL
+            WHERE bucket_size=300
             GROUP BY hour_bucket
             ORDER BY hour_bucket DESC
             LIMIT 168

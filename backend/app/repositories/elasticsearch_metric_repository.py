@@ -53,6 +53,7 @@ class ElasticsearchMetricRepository:
     @staticmethod
     def _query(start_ms: int, end_ms: int, bucket_size: int, after_key: Optional[Dict[str, Any]]) -> Dict[str, Any]:
         runtime = InteractiveTopologyRepository._es_runtime()
+        # Painless replaceAll requires a regex Pattern and a replacement function.
         runtime["topology.metric_operation"] = {"type": "keyword", "script": {"source": (
             "def s=params['_source']; def target=s['target_service']; "
             "if (target == null) { def svc=s['service']; if (svc instanceof Map) target=svc['name']; } "
@@ -62,8 +63,8 @@ class ElasticsearchMetricRepository:
             "int space=op.indexOf(' '); if (space > 0) { String method=op.substring(0, space).toUpperCase(); "
             "if (method == 'GET' || method == 'POST' || method == 'PUT' || method == 'DELETE' || "
             "method == 'PATCH' || method == 'HEAD' || method == 'OPTIONS') op=op.substring(space + 1).trim(); } "
-            "op=op.replaceAll('/[0-9a-fA-F-]{16,}', '/{id}'); op=op.replaceAll('/[0-9]+', '/{id}'); "
-            "op=op.replaceAll('/+', '/'); while (op.startsWith('/')) op=op.substring(1); "
+            "op=op.replaceAll(/\\/[0-9a-fA-F-]{16,}/, m -> '/{id}'); op=op.replaceAll(/\\/[0-9]+/, m -> '/{id}'); "
+            "op=op.replaceAll(/\\/+/, m -> '/'); while (op.startsWith('/')) op=op.substring(1); "
             "while (op.endsWith('/')) op=op.substring(0, op.length() - 1); if (op.length() > 0) { "
             "int slash=op.indexOf('/'); if (slash >= 0) { int last=op.lastIndexOf('/'); "
             "emit(op.substring(0, slash) + '/' + op.substring(last + 1)); } "

@@ -10,18 +10,18 @@ from backend.app.repositories.trace_repository import TraceRepository
 
 def test_elasticsearch_trace_repo_is_configured():
     with patch("backend.app.repositories.elasticsearch_trace_repository.settings") as mock_settings:
-        mock_settings.storage_backend = "clickhouse"
+        mock_settings.trace_storage_backend = "clickhouse"
         mock_settings.elasticsearch_url = ""
         repo = ElasticsearchTraceRepository()
         assert not repo.is_configured()
 
-        mock_settings.storage_backend = "elasticsearch"
+        mock_settings.trace_storage_backend = "elasticsearch"
         assert repo.is_configured()
 
-        mock_settings.storage_backend = "elk"
+        mock_settings.trace_storage_backend = "elk"
         assert repo.is_configured()
 
-        mock_settings.storage_backend = "clickhouse"
+        mock_settings.trace_storage_backend = "clickhouse"
         mock_settings.elasticsearch_url = "http://elk.internal:9200"
         assert repo.is_configured()
 

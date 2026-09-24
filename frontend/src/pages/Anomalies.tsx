@@ -1160,7 +1160,7 @@ export function AnomalyDetailPage() {
 
   if (q.error) {
     if (changeFallback.data?.principal_name) {
-      return <Navigate to={`/users/${encodeURIComponent(changeFallback.data.principal_name)}/changes?change_id=${encodeURIComponent(String(changeFallback.data.id))}`} replace />;
+      return <Navigate to={`/changes/chg-${encodeURIComponent(String(changeFallback.data.id))}?${detailQuery}`} replace />;
     }
     return (
       <Page eyebrow={t("Incident Investigation")} title={t("Telemetry Unavailable")} description="">

@@ -40,6 +40,8 @@ export type SeriesPoint = {
   success_rate: number;
   failure_rate: number;
   sample_count: number;
+  active_users?: number;
+  active_services?: number;
 };
 export type Edge = {
   source: string;

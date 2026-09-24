@@ -28,7 +28,7 @@ class ElasticsearchTraceRepository:
 
     def is_configured(self) -> bool:
         """Return True if Elasticsearch storage backend is configured."""
-        if settings.storage_backend in ("elasticsearch", "elk"):
+        if settings.trace_storage_backend in ("elasticsearch", "elk"):
             return True
         return bool(self.url or settings.elasticsearch_url)
 

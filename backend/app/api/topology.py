@@ -134,11 +134,17 @@ def interactive_bandwidth(
 def interactive_service_apis(
     service: str,
     window: str = Query("5m"),
+    limit: int = Query(100, ge=1, le=500),
+    search: Optional[str] = Query(None, max_length=200),
+    cursor: Optional[str] = Query(None, max_length=1024),
     from_time: Optional[str] = Query(None, alias="from"),
     to_time: Optional[str] = Query(None, alias="to"),
 ) -> Dict[str, Any]:
     repo, resolved = _interactive_window(window, from_time, to_time)
-    return repo.service_apis(service, resolved)
+    try:
+        return repo.service_apis(service, resolved, limit, search, cursor)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from None
 
 
 @router.get("/topology/services/{service}/api-connections", response_model=ServiceTopologyResponse)
@@ -158,11 +164,17 @@ def interactive_api_principals(
     service: str,
     api: str,
     window: str = Query("5m"),
+    limit: int = Query(100, ge=1, le=500),
+    search: Optional[str] = Query(None, max_length=200),
+    cursor: Optional[str] = Query(None, max_length=1024),
     from_time: Optional[str] = Query(None, alias="from"),
     to_time: Optional[str] = Query(None, alias="to"),
 ) -> Dict[str, Any]:
     repo, resolved = _interactive_window(window, from_time, to_time)
-    return repo.api_principals(service, api, resolved)
+    try:
+        return repo.api_principals(service, api, resolved, limit, search, cursor)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from None
 
 
 @router.get("/topology/services/{service}/metrics", response_model=TopologyDetailResponse)
@@ -199,15 +211,34 @@ def interactive_principal_metrics(
     return repo.principal_metrics(principal, resolved)
 
 
-@router.get("/topology/principals/{principal}/services", response_model=TopologyExpansionResponse)
-def interactive_principal_services(
+@router.get("/topology/principals/{principal}/connections", response_model=ServiceTopologyResponse)
+def interactive_principal_connections(
     principal: str,
+    service: Optional[str] = None,
+    api: Optional[str] = None,
     window: str = Query("5m"),
     from_time: Optional[str] = Query(None, alias="from"),
     to_time: Optional[str] = Query(None, alias="to"),
 ) -> Dict[str, Any]:
     repo, resolved = _interactive_window(window, from_time, to_time)
-    return repo.principal_services(principal, resolved)
+    return repo.principal_connections(principal, resolved, service, api)
+
+
+@router.get("/topology/principals/{principal}/services", response_model=TopologyExpansionResponse)
+def interactive_principal_services(
+    principal: str,
+    window: str = Query("5m"),
+    limit: int = Query(100, ge=1, le=500),
+    search: Optional[str] = Query(None, max_length=200),
+    cursor: Optional[str] = Query(None, max_length=1024),
+    from_time: Optional[str] = Query(None, alias="from"),
+    to_time: Optional[str] = Query(None, alias="to"),
+) -> Dict[str, Any]:
+    repo, resolved = _interactive_window(window, from_time, to_time)
+    try:
+        return repo.principal_services(principal, resolved, limit, search, cursor)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from None
 
 
 @router.get("/topology/principals/{principal}/services/{service}/apis", response_model=TopologyExpansionResponse)
@@ -215,11 +246,87 @@ def interactive_principal_service_apis(
     principal: str,
     service: str,
     window: str = Query("5m"),
+    limit: int = Query(100, ge=1, le=500),
+    search: Optional[str] = Query(None, max_length=200),
+    cursor: Optional[str] = Query(None, max_length=1024),
     from_time: Optional[str] = Query(None, alias="from"),
     to_time: Optional[str] = Query(None, alias="to"),
 ) -> Dict[str, Any]:
     repo, resolved = _interactive_window(window, from_time, to_time)
-    return repo.principal_service_apis(principal, service, resolved)
+    try:
+        return repo.principal_service_apis(principal, service, resolved, limit, search, cursor)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from None
+
+
+@router.get("/topology/users")
+def interactive_user_directory(
+    search: Optional[str] = Query(None, max_length=200),
+    limit: int = Query(100, ge=1, le=500),
+    cursor: Optional[str] = Query(None, max_length=1024),
+    window: str = Query("7d"),
+    from_time: Optional[str] = Query(None, alias="from"),
+    to_time: Optional[str] = Query(None, alias="to"),
+) -> Dict[str, Any]:
+    repo, resolved = _interactive_window(window, from_time, to_time)
+    try:
+        return repo.principal_directory(resolved, limit, search, cursor)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from None
+
+
+@router.get("/topology/users/{principal}/services")
+def interactive_user_services(
+    principal: str,
+    limit: int = Query(100, ge=1, le=500),
+    search: Optional[str] = Query(None, max_length=200),
+    cursor: Optional[str] = Query(None, max_length=1024),
+    window: str = Query("7d"),
+    from_time: Optional[str] = Query(None, alias="from"),
+    to_time: Optional[str] = Query(None, alias="to"),
+) -> Dict[str, Any]:
+    repo, resolved = _interactive_window(window, from_time, to_time)
+    try:
+        return repo.principal_services(principal, resolved, limit, search, cursor)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from None
+
+
+@router.get("/topology/users/{principal}/services/{service}/apis")
+def interactive_user_service_apis(
+    principal: str,
+    service: str,
+    limit: int = Query(100, ge=1, le=500),
+    search: Optional[str] = Query(None, max_length=200),
+    cursor: Optional[str] = Query(None, max_length=1024),
+    window: str = Query("7d"),
+    from_time: Optional[str] = Query(None, alias="from"),
+    to_time: Optional[str] = Query(None, alias="to"),
+) -> Dict[str, Any]:
+    repo, resolved = _interactive_window(window, from_time, to_time)
+    try:
+        return repo.principal_service_apis(principal, service, resolved, limit, search, cursor)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from None
+
+
+@router.get("/topology/users/{principal}/ips")
+def interactive_user_ips(
+    principal: str,
+    service: Optional[str] = Query(None, max_length=200),
+    api: Optional[str] = Query(None, max_length=500),
+    window: str = Query("1h"),
+    page_size: int = Query(50, ge=1, le=500),
+    cursor: Optional[str] = Query(None, max_length=1024),
+    filter_name: str = Query("all", alias="filter"),
+    from_time: Optional[str] = Query(None, alias="from"),
+    to_time: Optional[str] = Query(None, alias="to"),
+) -> Dict[str, Any]:
+    repo, resolved = _interactive_window(window, from_time, to_time)
+    try:
+        return repo.principal_ips(principal, resolved, page_size, cursor, service, api, filter_name)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from None
 
 
 @router.get("/topology/principals/{principal}/ips", response_model=PrincipalIpPageResponse)

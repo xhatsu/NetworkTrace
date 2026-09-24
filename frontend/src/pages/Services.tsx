@@ -11,15 +11,20 @@ import {
   YAxis,
 } from "recharts";
 import {
+  Activity,
+  AlertTriangle,
   ArrowLeft,
+  ArrowRight,
   Box,
+  Clock,
   Search,
 } from "lucide-react";
+import { EpisodeStatusBadge, episodeStatusClass, episodeStatusLabel, type EpisodeResponse } from "../components/EpisodePrimitives";
 import { api, queryString } from "../api";
 import {
   ErrorState,
+  InteractiveMetricCard,
   Loading,
-  MetricCard,
   Page,
   Panel,
   TpsLineChart,
@@ -188,13 +193,71 @@ type Detail = {
   instances: { name: string; operation: string; requests: number; avg_ms: number }[];
   incoming: { name: string; requests: number; evidence: string }[];
   outgoing: { name: string; requests: number; evidence: string }[];
+  bandwidth?: { metrics?: Record<string, number>; series?: unknown[] };
 };
 
-function normalizeServiceSeries(rows: unknown): SeriesPoint[] {
+type ServiceSeriesPoint = SeriesPoint & {
+  requests: number;
+  request_bytes_per_second?: number;
+  response_bytes_per_second?: number;
+  bandwidth_bytes_per_second?: number;
+};
+
+type ServiceChartLine = { dataKey: string; label: string; color: string; width?: number; dashed?: boolean };
+type ServiceChartVariable = { lines: ServiceChartLine[]; formatAxis: (value: number) => string; minimumAxisMax: number; available: boolean };
+type ServiceChartMetric = "tps" | "requests" | "error" | "latency" | "bandwidth";
+
+function serviceNumber(value: unknown) {
+  const parsed = Number(value ?? 0);
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function formatServiceByteRate(value: number) {
+  const units = ["B/s", "KB/s", "MB/s", "GB/s"];
+  let normalized = Math.max(0, Number(value) || 0);
+  let unitIndex = 0;
+  while (normalized >= 1024 && unitIndex < units.length - 1) {
+    normalized /= 1024;
+    unitIndex += 1;
+  }
+  return `${normalized.toFixed(unitIndex === 0 ? 0 : 1)} ${units[unitIndex]}`;
+}
+
+function normalizeServiceBandwidth(rows: unknown) {
+  if (!Array.isArray(rows)) return [];
+  return rows.flatMap((value) => {
+    if (!value || typeof value !== "object") return [];
+    const row = value as Record<string, unknown>;
+    const rawTimestamp = serviceNumber(row.timestamp_ms);
+    const bucketStart = serviceNumber(row.bucket_start);
+    const timestampMs = rawTimestamp > 0 ? rawTimestamp : bucketStart > 0 ? bucketStart * 1000 : 0;
+    if (!timestampMs) return [];
+    return [{
+      timestamp_ms: timestampMs,
+      request_bytes_per_second: serviceNumber(row.request_bytes_per_second),
+      response_bytes_per_second: serviceNumber(row.response_bytes_per_second),
+      bandwidth_bytes_per_second: serviceNumber(row.bandwidth_bytes_per_second),
+      request_bytes_samples: serviceNumber(row.request_bytes_samples),
+      response_bytes_samples: serviceNumber(row.response_bytes_samples),
+      bandwidth_available: row.bandwidth_available === true ? 1 : 0,
+    }];
+  }).sort((a, b) => a.timestamp_ms - b.timestamp_ms);
+}
+
+function mergeServiceBandwidth(series: ServiceSeriesPoint[], bandwidthSeries: ReturnType<typeof normalizeServiceBandwidth>) {
+  const points = new Map<number, Record<string, number>>();
+  series.forEach((point) => points.set(point.timestamp_ms, { ...point, observed_tps: point.tps, baseline_tps: point.baseline_rps }));
+  bandwidthSeries.forEach((point) => {
+    points.set(point.timestamp_ms, { ...(points.get(point.timestamp_ms) || { timestamp_ms: point.timestamp_ms }), ...point });
+  });
+  return [...points.values()].sort((a, b) => a.timestamp_ms - b.timestamp_ms);
+}
+
+function normalizeServiceSeries(rows: unknown): ServiceSeriesPoint[] {
   if (!Array.isArray(rows)) return [];
 
   return rows
-    .map((value): SeriesPoint | null => {
+    .map((value): ServiceSeriesPoint | null => {
       if (!value || typeof value !== "object") return null;
       const row = value as Record<string, unknown>;
       const bucketStart = Number(row.bucket_start ?? 0);
@@ -224,6 +287,7 @@ function normalizeServiceSeries(rows: unknown): SeriesPoint[] {
         timestamp_ms: timestampMs,
         rps: tps,
         tps,
+        requests,
         baseline_rps: Number(row.baseline_rps ?? 0),
         p50_ms: Number(row.p50_ms ?? row.latency_p50 ?? row.latency_avg ?? 0),
         p95_ms: Number(row.p95_ms ?? row.latency_p95 ?? 0),
@@ -235,8 +299,183 @@ function normalizeServiceSeries(rows: unknown): SeriesPoint[] {
         sample_count: Number(row.sample_count ?? requests),
       };
     })
-    .filter((point): point is SeriesPoint => point !== null)
+    .filter((point): point is ServiceSeriesPoint => point !== null)
     .sort((a, b) => a.timestamp_ms - b.timestamp_ms);
+}
+
+function ServicePerformancePanel({
+  series,
+  bandwidthSeries,
+  chartSeries,
+  totalRequests,
+  totalErrors,
+  operationsCount,
+  durationSec,
+  failureRate,
+  worstP95,
+  bandwidthMetrics,
+}: {
+  series: ServiceSeriesPoint[];
+  bandwidthSeries: ReturnType<typeof normalizeServiceBandwidth>;
+  chartSeries: ReturnType<typeof mergeServiceBandwidth>;
+  totalRequests: number;
+  totalErrors: number;
+  operationsCount: number;
+  durationSec: number;
+  failureRate: number;
+  worstP95: number;
+  bandwidthMetrics: Record<string, number>;
+}) {
+  const { t } = useI18n();
+  const [selectedMetric, setSelectedMetric] = useState<ServiceChartMetric>("tps");
+  const latest = series[series.length - 1];
+  const currentTps = serviceNumber(latest?.tps);
+  const averageTps = totalRequests / Math.max(1, durationSec);
+  const peakTps = Math.max(0, ...series.map((point) => serviceNumber(point.tps)));
+  const currentP95 = serviceNumber(latest?.p95_ms) || worstP95;
+  const currentRequestRate = serviceNumber(bandwidthMetrics.request_bytes_per_second);
+  const currentResponseRate = serviceNumber(bandwidthMetrics.response_bytes_per_second);
+  const currentBandwidth = serviceNumber(bandwidthMetrics.bandwidth_bytes_per_second);
+  const hasBandwidth = bandwidthSeries.some((point) => point.bandwidth_available > 0 || point.request_bytes_samples + point.response_bytes_samples > 0);
+  const hasBaselineTps = series.some((point) => serviceNumber(point.baseline_rps) > 0);
+
+  const tpsLines: ServiceChartLine[] = [
+    { dataKey: "observed_tps", label: t("Observed TPS"), color: "#5794f2", width: 2.4 },
+    ...(hasBaselineTps ? [{ dataKey: "baseline_tps", label: t("Baseline TPS"), color: "#7b7d80", dashed: true, width: 1.5 }] : []),
+  ];
+  const seriesMaximum = (lines: ServiceChartLine[]) => chartSeries.reduce(
+    (maximum, point) => lines.reduce((value, line) => Math.max(value, serviceNumber(point[line.dataKey])), maximum), 0,
+  );
+  const tpsPeak = seriesMaximum(tpsLines);
+  const tpsAxisMaximum = tpsPeak > 0 ? tpsPeak : 1;
+  const tpsAxisDigits = tpsAxisMaximum < 1
+    ? Math.min(8, Math.max(2, Math.ceil(-Math.log10(tpsAxisMaximum / 4)) + 1))
+    : 1;
+  const formatTpsAxis = (value: number) => `${n(value, tpsAxisDigits)} TPS`;
+  const chartVariables: Record<ServiceChartMetric, ServiceChartVariable> = {
+    tps: { lines: tpsLines, formatAxis: formatTpsAxis, minimumAxisMax: 0, available: true },
+    requests: {
+      lines: [{ dataKey: "requests", label: t("Requests / minute"), color: "#b877d9", width: 2 }],
+      formatAxis: (value) => `${n(value, 0)}`,
+      minimumAxisMax: 1,
+      available: true,
+    },
+    error: {
+      lines: [{ dataKey: "failure_rate", label: t("Error rate"), color: "#f2495c", width: 2.2 }],
+      formatAxis: (value) => pct(value),
+      minimumAxisMax: 0.01,
+      available: true,
+    },
+    latency: {
+      lines: [{ dataKey: "p95_ms", label: t("P95 Latency"), color: "#ff9830", width: 2.2 }],
+      formatAxis: (value) => `${n(value, 0)} ms`,
+      minimumAxisMax: 1,
+      available: true,
+    },
+    bandwidth: {
+      lines: [
+        { dataKey: "request_bytes_per_second", label: t("Request bytes/s"), color: "#b877d9", width: 2 },
+        { dataKey: "response_bytes_per_second", label: t("Response bytes/s"), color: "#56b9a8", width: 2 },
+      ],
+      formatAxis: formatServiceByteRate,
+      minimumAxisMax: 1,
+      available: hasBandwidth,
+    },
+  };
+  const selectedVariable = chartVariables[selectedMetric];
+  const overlayLines = selectedMetric !== "tps" && selectedVariable.available ? selectedVariable.lines : [];
+  const rightVariable = overlayLines.length ? selectedVariable : chartVariables.tps;
+  const rightPeak = overlayLines.length ? seriesMaximum(rightVariable.lines) : tpsPeak;
+  const rightAxisMaximum = rightPeak > 0 ? rightPeak : rightVariable.minimumAxisMax || 1;
+  const chartLegend = [...tpsLines, ...overlayLines];
+  const spark = (key: keyof ServiceSeriesPoint) => series.map((point) => ({ timestamp_ms: point.timestamp_ms, value: serviceNumber(point[key]) }));
+  const requestSpark = spark("requests");
+  const tpsSpark = spark("tps");
+  const errorSpark = spark("failure_rate");
+  const latencySpark = spark("p95_ms");
+  const bandwidthSpark = bandwidthSeries.map((point) => ({ timestamp_ms: point.timestamp_ms, value: point.bandwidth_bytes_per_second }));
+
+  return (
+    <div className="mt-4 space-y-3">
+      <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 xl:grid-cols-5">
+        <InteractiveMetricCard
+          label="TPS"
+          value={n(currentTps, 2)}
+          detail={`${t("avg")} ${n(averageTps, 2)} · ${t("peak")} ${n(peakTps, 2)}`}
+          subDetail={`${n(totalRequests, 0)} ${t("requests")}`}
+          data={tpsSpark}
+          color="#5794f2"
+          selected={selectedMetric === "tps"}
+          onSelect={() => setSelectedMetric("tps")}
+          valueClass="text-[#5794f2]"
+        />
+        <InteractiveMetricCard
+          label={t("Requests")}
+          value={n(totalRequests, 0)}
+          detail={t("Server transactions")}
+          subDetail={`${n(Math.max(0, ...series.map((point) => point.requests)), 0)}/min peak`}
+          data={requestSpark}
+          color="#b877d9"
+          selected={selectedMetric === "requests"}
+          onSelect={() => setSelectedMetric("requests")}
+        />
+        <InteractiveMetricCard
+          label={t("Error rate")}
+          value={pct(failureRate)}
+          detail={`${n(totalErrors, 0)} ${t("errors")}`}
+          data={errorSpark}
+          color="#f2495c"
+          selected={selectedMetric === "error"}
+          onSelect={() => setSelectedMetric("error")}
+          valueClass={failureRate >= 0.05 ? "text-[#f2495c]" : "text-[#d8d9da]"}
+        />
+        <InteractiveMetricCard
+          label={t("P95 latency")}
+          value={`${n(worstP95, 0)} ms`}
+          detail={`${t("Across")} ${n(operationsCount, 0)} ${t("Operations").toLowerCase()}`}
+          subDetail={`now ${n(currentP95, 0)} ms`}
+          data={latencySpark}
+          color="#ff9830"
+          selected={selectedMetric === "latency"}
+          onSelect={() => setSelectedMetric("latency")}
+        />
+        <InteractiveMetricCard
+          label={t("Bandwidth")}
+          value={formatServiceByteRate(currentBandwidth)}
+          detail={t("Request + response throughput")}
+          subDetail={`↑ ${formatServiceByteRate(currentRequestRate)} · ↓ ${formatServiceByteRate(currentResponseRate)}`}
+          data={bandwidthSpark}
+          color="#56b9a8"
+          selected={selectedMetric === "bandwidth"}
+          onSelect={() => setSelectedMetric("bandwidth")}
+        />
+      </div>
+
+      <Panel title={hasBaselineTps ? t("TPS vs Baseline") : t("TPS")} subtitle={t("TPS on left · selected KPI on right")}>
+        <div className="space-y-0">
+          <div className="flex h-8 min-w-0 items-center gap-4 overflow-x-auto whitespace-nowrap px-3 text-[10px] text-[#a7a9ab]">
+            {chartLegend.map(({ label, color, dashed }) => <span key={label}><span className={`mr-1 inline-block w-3 border-t-2 align-middle ${dashed ? "border-dashed" : ""}`} style={{ borderColor: color }} />{label}</span>)}
+          </div>
+          <div className="relative h-[230px] px-2 pb-1 pt-1">
+            <ResponsiveContainer width="100%" height="100%">
+              <LineChart data={chartSeries} margin={{ top: 6, right: 16, bottom: 0, left: 0 }}>
+                <CartesianGrid stroke="#303236" vertical={false} />
+                <XAxis dataKey="timestamp_ms" type="number" domain={["dataMin", "dataMax"]} minTickGap={52} tick={{ fill: "#7b7d80", fontSize: 10 }} tickFormatter={(value) => new Date(Number(value)).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })} axisLine={{ stroke: "#2a2d30" }} tickLine={false} />
+                <YAxis yAxisId="tps" width={48} domain={[0, tpsAxisMaximum]} ticks={[0, 0.25, 0.5, 0.75, 1].map((fraction) => tpsAxisMaximum * fraction)} allowDataOverflow tick={{ fill: "#7b7d80", fontSize: 10 }} axisLine={false} tickLine={false} tickFormatter={(value) => n(Number(value), tpsAxisDigits)} />
+                <YAxis yAxisId="metric" orientation="right" width={78} domain={[0, rightAxisMaximum]} allowDataOverflow tick={false} axisLine={false} tickLine={false} />
+                <Tooltip {...chartTooltip} labelFormatter={(value) => new Date(Number(value)).toLocaleString()} />
+                {tpsLines.map((line) => <Line key={line.dataKey} yAxisId="tps" type="monotone" dataKey={line.dataKey} name={line.label} stroke={line.color} strokeWidth={line.width} strokeDasharray={line.dashed ? "5 4" : undefined} dot={false} connectNulls isAnimationActive={false} />)}
+                {overlayLines.map((line) => <Line key={line.dataKey} yAxisId="metric" type="monotone" dataKey={line.dataKey} name={line.label} stroke={line.color} strokeWidth={line.width} strokeDasharray={line.dashed ? "5 4" : undefined} dot={false} connectNulls isAnimationActive={false} />)}
+              </LineChart>
+            </ResponsiveContainer>
+            <div data-testid="service-metric-axis" aria-label={t("Selected metric scale")} className="pointer-events-none absolute bottom-[33px] right-[24px] top-[11px] flex w-[70px] flex-col justify-between text-left text-[10px] text-[#7b7d80]">
+              {[1, 0.75, 0.5, 0.25, 0].map((fraction) => <span key={fraction}>{rightVariable.formatAxis(rightAxisMaximum * fraction)}</span>)}
+            </div>
+          </div>
+        </div>
+      </Panel>
+    </div>
+  );
 }
 
 export function ServiceDetailPage() {
@@ -251,9 +490,19 @@ export function ServiceDetailPage() {
     queryFn: () =>
       api<Detail>(`/api/v1/services/${encodeURIComponent(name)}?${qs}`),
   });
+  const serviceChanges = useQuery({
+    queryKey: ["service-changes", name, qs],
+    queryFn: () => api<EpisodeResponse>(`/api/v1/changes?service=${encodeURIComponent(name)}&limit=10&${qs}`),
+  });
+
+  const serviceTraces = useQuery({
+    queryKey: ["service-traces", name, qs],
+    queryFn: () => api<{ items: any[]; count: number }>(`/api/v1/traces?service=${encodeURIComponent(name)}&limit=5&${qs}`),
+  });
+
   const serviceUsers = useQuery({
     queryKey: ["service-users", name, qs],
-    queryFn: () => api<{items: Array<{principal_name:string;requests:number;callers:number;operations:number;first_seen:number;last_seen:number;recent_change:number}>}>(`/api/v1/services/${encodeURIComponent(name)}/users?${qs}`),
+    queryFn: () => api<{ items: any[]; total: number }>(`/api/v1/users?target=${encodeURIComponent(name)}&limit=10&${qs}`),
   });
 
   if (query.isLoading) {
@@ -283,6 +532,7 @@ export function ServiceDetailPage() {
   });
   const operations = d.operations || [];
   const total = operations.reduce((a, b) => a + (b.requests || 0), 0);
+  const totalErrors = operations.reduce((sum, operation) => sum + (operation.failure_rate || 0) * (operation.requests || 0), 0);
   const p95 = operations.length
     ? Math.max(...operations.map((o) => o.p95_ms || 0))
     : 0;
@@ -294,10 +544,9 @@ export function ServiceDetailPage() {
   const accounts = d.accounts || ((d as any).principals || []).map((p: any) => ({ username: p.name, requests: p.requests }));
   const instances = d.instances || [];
   const series = normalizeServiceSeries(d.series);
-  const latestTps = series.length ? series[series.length - 1].tps : 0;
   const bandwidthMetrics = (d as any).bandwidth?.metrics || (d as any).health || {};
-  const bandwidthBytesPerSecond = Number(bandwidthMetrics.bandwidth_bytes_per_second || 0);
-  const formatMiBRate = (value: number) => `${(Math.max(0, Number(value) || 0) / (1024 * 1024)).toFixed(2)} MiB/s`;
+  const bandwidthSeries = normalizeServiceBandwidth(d.bandwidth?.series);
+  const chartSeries = mergeServiceBandwidth(series, bandwidthSeries);
   const attentionOperations = [...operations]
     .sort((a, b) => {
       const failureDelta = (b.failure_rate || 0) - (a.failure_rate || 0);
@@ -312,6 +561,8 @@ export function ServiceDetailPage() {
     1,
     (new Date(filters.end).getTime() - new Date(filters.start).getTime()) / 1000,
   );
+  const changes = serviceChanges.data?.items || [];
+  const traces = serviceTraces.data?.items || [];
 
   return (
     <Page
@@ -328,97 +579,48 @@ export function ServiceDetailPage() {
         </button>
       }
     >
-      <Panel
-        title={t("TPS")}
-        subtitle={t("Observed service throughput over the selected window")}
-        action={<span className="font-mono text-[11px] text-[#5794f2]">{n(latestTps, 2)} TPS</span>}
-      >
-        <TpsLineChart data={series} />
-      </Panel>
+      <ServicePerformancePanel
+        key={name}
+        series={series}
+        bandwidthSeries={bandwidthSeries}
+        chartSeries={chartSeries}
+        totalRequests={total}
+        totalErrors={totalErrors}
+        operationsCount={operations.length}
+        durationSec={durationSec}
+        failureRate={fail}
+        worstP95={p95}
+        bandwidthMetrics={bandwidthMetrics}
+      />
 
-      <div className="grid grid-cols-2 gap-3 sm:grid-cols-5">
-        <MetricCard
-          label={t("Observed Volume")}
-          value={n(total)}
-          detail={t("Server transactions")}
-        />
-        <MetricCard
-          label={t("Request Rate")}
-          value={`${n(total / durationSec, 2)}/s`}
-          detail={t("Observed rate in window")}
-        />
-        <MetricCard
-          label={t("Worst Operation p95")}
-          value={`${n(p95)} ms`}
-          detail={`${t("Across")} ${operations.length} ${t("Operations").toLowerCase()}`}
-          tone={p95 > 500 ? "bad" : "normal"}
-        />
-        <MetricCard
-          label={t("Failure Rate")}
-          value={pct(fail)}
-          detail={`n=${n(total)} ${t("requests")}`}
-          tone={fail > 0.02 ? "bad" : "normal"}
-        />
-        <MetricCard
-          label={t("Bandwidth")}
-          value={formatMiBRate(bandwidthBytesPerSecond)}
-          detail={t("Request + response throughput")}
-          accent="sky"
-        />
-      </div>
-
+      {/* 4. APIs */}
       <Panel
         title={t("Needs attention")}
         subtitle={t("Operations prioritized by failure rate, latency tail, and observed volume")}
         className="mt-4"
       >
         {attentionOperations.length ? (
-          <div className="divide-y divide-[rgba(255,255,255,0.06)]">
+          <div className="divide-y divide-[#2a2d30]">
             {attentionOperations.map((operation) => (
               <button
                 type="button"
                 key={`attention-${operation.name}`}
                 onClick={() => nav(`/services/${encodeURIComponent(name)}/apis/${encodeURIComponent(operation.name)}?${qs}`)}
-                className="flex w-full items-center justify-between gap-4 px-4 py-3 text-left transition hover:bg-white/[0.04]"
+                className="flex w-full items-center justify-between gap-4 px-4 py-3 text-left transition hover:bg-[#181b1f]"
               >
-                <span className="min-w-0 truncate font-medium text-[#f5f3fa]">{operation.name}</span>
+                <span className="min-w-0 truncate font-semibold text-[#d8d9da] hover:text-[#5794f2]">{operation.name}</span>
                 <span className="flex shrink-0 items-center gap-4 font-mono text-[11px] tabular-nums">
-                  <span className={operation.failure_rate > 0.02 ? "text-rose-300" : "text-emerald-300"}>{pct(operation.failure_rate || 0)} {t("error")}</span>
-                  <span className={operation.p95_ms > 500 ? "text-amber-300" : "text-violet-300"}>{n(operation.p95_ms || 0, 1)} ms p95</span>
-                  <span className="text-[#c4bdd9]">{n(operation.requests || 0, 0)} {t("requests")}</span>
+                  <span className={operation.failure_rate > 0.02 ? "text-[#f2495c]" : "text-[#73bf69]"}>{pct(operation.failure_rate || 0)} {t("error")}</span>
+                  <span className={operation.p95_ms > 500 ? "text-[#ff9830]" : "text-[#b877d9]"}>{n(operation.p95_ms || 0, 1)} ms p95</span>
+                  <span className="text-[#a7a9ab]">{n(operation.requests || 0, 0)} {t("requests")}</span>
                 </span>
               </button>
             ))}
           </div>
         ) : (
-          <div className="p-6 text-center text-xs text-[#c4bdd9]">{t("No operations observed in this window")}</div>
+          <div className="p-6 text-center text-xs text-[#7b7d80]">{t("No operations observed in this window")}</div>
         )}
       </Panel>
-
-      <div className="mt-4 grid gap-4 lg:grid-cols-2">
-        <Panel
-          title={t("P95 Latency")}
-          subtitle={t("Service latency over time")}
-        >
-          <ServiceTrendChart
-            data={series}
-            dataKey="p95_ms"
-            color="#f43f5e"
-            unit="ms"
-            label={t("P95 Latency")}
-          />
-        </Panel>
-
-        <Panel
-          title={t("Dependency Relationships")}
-          subtitle={t("Confirmed & inferred directional trace links")}
-        >
-          <div className="p-4 space-y-4">
-            <Relation title={t("Incoming Callers")} items={incoming} />
-            <Relation title={t("Outgoing Dependencies")} items={outgoing} />
-          </div>
-        </Panel>
-      </div>
 
       <Panel
         title={t("Operation Performance Inventory")}
@@ -426,9 +628,9 @@ export function ServiceDetailPage() {
         className="mt-4"
       >
         <div className="overflow-auto scrollbar">
-          <table className="w-full min-w-[850px]">
+          <table className="w-full min-w-[850px] text-left text-xs">
             <thead>
-              <tr className="border-b border-[rgba(255,255,255,0.06)] bg-white/[0.01]">
+              <tr className="border-b border-[#2a2d30]">
                 {[
                   t("Operation"),
                   t("Volume"),
@@ -444,28 +646,59 @@ export function ServiceDetailPage() {
                 ))}
               </tr>
             </thead>
-            <tbody>
+            <tbody className="divide-y divide-[#2a2d30]">
               {operations.map((o) => (
                 <tr
                   key={o.name}
                   onClick={() => nav(`/services/${encodeURIComponent(name)}/apis/${encodeURIComponent(o.name)}?${qs}`)}
-                  className="cursor-pointer border-b border-[rgba(255,255,255,0.04)] transition hover:bg-white/[0.03]"
+                  className="cursor-pointer hover:bg-[#181b1f] transition"
                 >
-                  <td className="px-4 py-3 text-xs font-medium text-cyan-300">{o.name}</td>
-                  <td className="px-4 font-mono text-xs tabular-nums text-[#c9d1d9]">{n(o.requests)}</td>
-                  <td className="px-4 font-mono text-xs tabular-nums text-[#8b949e]">{n(o.p50_ms || 0)} ms</td>
-                  <td className="px-4 font-mono text-xs tabular-nums text-[#818cf8]">{n(o.p95_ms || 0)} ms</td>
-                  <td className="px-4 font-mono text-xs tabular-nums text-[#f43f5e]">{n(o.p99_ms || 0)} ms</td>
-                  <td className="px-4 font-mono text-xs tabular-nums text-[#8b949e]">{pct(o.slow_rate || 0)}</td>
-                  <td className="px-4 font-mono text-xs tabular-nums">
-                    <span className="text-emerald-400">{n(o.status_2xx || 0)}</span>
-                    <span className="text-[#6e7681]"> / </span>
-                    <span className="text-amber-400">{n(o.status_4xx || 0)}</span>
-                    <span className="text-[#6e7681]"> / </span>
-                    <span className="text-rose-400">{n(o.status_5xx || 0)}</span>
+                  <td className="px-4 py-2.5 font-medium text-[#5794f2]">{o.name}</td>
+                  <td className="px-4 font-mono tabular-nums text-[#d8d9da]">{n(o.requests)}</td>
+                  <td className="px-4 font-mono tabular-nums text-[#7b7d80]">{n(o.p50_ms || 0)} ms</td>
+                  <td className="px-4 font-mono tabular-nums text-[#b877d9]">{n(o.p95_ms || 0)} ms</td>
+                  <td className="px-4 font-mono tabular-nums text-[#f2495c]">{n(o.p99_ms || 0)} ms</td>
+                  <td className="px-4 font-mono tabular-nums text-[#7b7d80]">{pct(o.slow_rate || 0)}</td>
+                  <td className="px-4 font-mono tabular-nums">
+                    <span className="text-[#73bf69]">{n(o.status_2xx || 0)}</span>
+                    <span className="text-[#7b7d80]"> / </span>
+                    <span className="text-[#ff9830]">{n(o.status_4xx || 0)}</span>
+                    <span className="text-[#7b7d80]"> / </span>
+                    <span className="text-[#f2495c]">{n(o.status_5xx || 0)}</span>
                   </td>
                 </tr>
               ))}
+            </tbody>
+          </table>
+        </div>
+      </Panel>
+
+      {/* 5. Users */}
+      <Panel title={t("Users")} subtitle={t("Principals observed using this service · click to open User Workspace")} className="mt-4">
+        <div className="overflow-auto">
+          <table className="w-full text-left text-xs">
+            <thead>
+              <tr className="border-b border-[#2a2d30]">
+                {[t("Principal Identity"), t("Volume"), t("Callers"), t("Operations"), t("First seen"), t("Last seen"), t("Recent change")].map((h) => (
+                  <th className="table-head px-3 py-2" key={h}>{h}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-[#2a2d30]">
+              {(serviceUsers.data?.items || []).map((u: any) => (
+                <tr key={u.principal_name} onClick={() => nav(`/users/${encodeURIComponent(u.principal_name)}/activity?${qs}`)} className="cursor-pointer hover:bg-[#181b1f] transition">
+                  <td className="px-3 py-2 font-mono text-[#5794f2]">{u.principal_name}</td>
+                  <td className="px-3 font-mono tabular-nums text-[#d8d9da]">{n(u.total_requests || u.requests || 0, 0)}</td>
+                  <td className="px-3 font-mono tabular-nums text-[#a7a9ab]">{u.unique_callers ?? u.callers ?? "—"}</td>
+                  <td className="px-3 font-mono tabular-nums text-[#a7a9ab]">{u.unique_operations ?? u.operations ?? "—"}</td>
+                  <td className="px-3 text-[#7b7d80]">{u.first_seen ? new Date(u.first_seen).toLocaleString() : "—"}</td>
+                  <td className="px-3 text-[#7b7d80]">{u.last_seen ? new Date(u.last_seen).toLocaleString() : "—"}</td>
+                  <td className="px-3">{u.recent_changes || u.recent_change ? <span className="rounded-[2px] bg-[#ff9830]/10 border border-[#ff9830]/40 px-1.5 py-0.5 text-[10px] text-[#ff9830]">{t("Changed")}</span> : "—"}</td>
+                </tr>
+              ))}
+              {!(serviceUsers.data?.items || []).length && (
+                <tr><td colSpan={7} className="px-3 py-8 text-center text-xs text-[#7b7d80]">{t("No users recorded for this service in this window.")}</td></tr>
+              )}
             </tbody>
           </table>
         </div>
@@ -491,31 +724,110 @@ export function ServiceDetailPage() {
           <SimpleTable rows={instances} />
         </Panel>
       </div>
-      <Panel title={t("Users")} subtitle={t("Principals observed using this service · click to open User Intelligence")} className="mt-4">
-        <div className="overflow-auto">
-          <table className="w-full text-xs">
-            <thead>
-              <tr>
-                {[t("Principal Identity"), t("Volume"), t("Callers"), t("Operations"), t("First seen"), t("Last seen"), t("Recent change")].map((h) => (
-                  <th className="table-head px-3 py-2" key={h}>{h}</th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {(serviceUsers.data?.items || []).map((u) => (
-                <tr key={u.principal_name} onClick={() => nav(`/users/${encodeURIComponent(u.principal_name)}?${qs}`)} className="cursor-pointer border-t border-white/[.05] hover:bg-white/[.03]">
-                  <td className="px-3 py-2 font-mono text-indigo-300">{u.principal_name}</td>
-                  <td className="px-3 font-mono">{n(u.requests, 0)}</td>
-                  <td className="px-3 font-mono">{u.callers}</td>
-                  <td className="px-3 font-mono">{u.operations}</td>
-                  <td className="px-3 text-[#8b949e]">{new Date(u.first_seen).toLocaleString()}</td>
-                  <td className="px-3 text-[#8b949e]">{new Date(u.last_seen).toLocaleString()}</td>
-                  <td className="px-3">{u.recent_change ? <span className="rounded bg-amber-500/10 px-2 py-1 text-amber-400">{t("Changed")}</span> : "—"}</td>
+
+      {/* 6. Latency and errors */}
+      <div className="mt-4 grid gap-4 lg:grid-cols-2">
+        <Panel
+          title={t("P95 Latency")}
+          subtitle={t("Service latency over time")}
+        >
+          <ServiceTrendChart
+            data={series}
+            dataKey="p95_ms"
+            color="#f2495c"
+            unit="ms"
+            label={t("P95 Latency")}
+          />
+        </Panel>
+
+        {/* 7. Dependencies */}
+        <Panel
+          title={t("Dependency Relationships")}
+          subtitle={t("Confirmed & inferred directional trace links")}
+        >
+          <div className="p-4 space-y-4">
+            <Relation title={t("Incoming Callers")} items={incoming} />
+            <Relation title={t("Outgoing Dependencies")} items={outgoing} />
+          </div>
+        </Panel>
+      </div>
+
+      {/* 8. Changes */}
+      <Panel
+        title={t("Recent Changes")}
+        subtitle={t("Evaluated behavior changes for this service")}
+        className="mt-4"
+        action={<button onClick={() => nav(`/changes?service=${encodeURIComponent(name)}`)} className="text-[11px] font-semibold text-[#5794f2] hover:text-white">{t("View all")} <ArrowRight size={12} className="inline" /></button>}
+      >
+        {serviceChanges.isLoading ? (
+          <Loading />
+        ) : changes.length ? (
+          <div className="divide-y divide-[#2a2d30]">
+            {changes.slice(0, 5).map((change) => (
+              <button
+                key={change.id}
+                onClick={() => nav(`/changes/${encodeURIComponent(change.id)}?${qs}`)}
+                className="flex w-full items-start gap-2.5 px-3 py-2.5 text-left transition hover:bg-[#181b1f]"
+              >
+                <EpisodeStatusBadge episode={change} />
+                <span className="min-w-0 flex-1">
+                  <span className="block truncate text-xs font-semibold text-[#d8d9da]">{change.summary}</span>
+                  <span className="mt-0.5 block truncate text-[10px] text-[#7b7d80]">{change.context.operation || change.context.target || change.subject.name}</span>
+                </span>
+                <span className="shrink-0 font-mono text-[10px] text-[#7b7d80]">{change.last_seen_at ? new Date(change.last_seen_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : "—"}</span>
+              </button>
+            ))}
+          </div>
+        ) : (
+          <div className="p-6 text-center text-xs text-[#7b7d80]">{t("No behavior changes for this service in the current window.")}</div>
+        )}
+      </Panel>
+
+      {/* 9. Representative Traces */}
+      <Panel
+        title={t("Representative Traces")}
+        subtitle={t("Recent distributed traces for this service")}
+        className="mt-4"
+        action={<button onClick={() => nav(`/traces?service=${encodeURIComponent(name)}`)} className="text-[11px] font-semibold text-[#5794f2] hover:text-white">{t("Open in Traces")} <ArrowRight size={12} className="inline" /></button>}
+      >
+        {serviceTraces.isLoading ? (
+          <Loading />
+        ) : traces.length ? (
+          <div className="overflow-auto">
+            <table className="w-full text-left text-xs">
+              <thead>
+                <tr className="border-b border-[#2a2d30]">
+                  <th className="table-head px-3 py-2">{t("Trace ID")}</th>
+                  <th className="table-head px-3 py-2">{t("Operation")}</th>
+                  <th className="table-head px-3 py-2">{t("Principal")}</th>
+                  <th className="table-head px-3 py-2 text-right">{t("Duration")}</th>
+                  <th className="table-head px-3 py-2 text-right">{t("Status")}</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+              </thead>
+              <tbody className="divide-y divide-[#2a2d30]">
+                {traces.map((tr: any) => (
+                  <tr
+                    key={tr.trace_id || tr.id}
+                    onClick={() => nav(`/traces/${encodeURIComponent(tr.trace_id || tr.id)}`)}
+                    className="cursor-pointer hover:bg-[#181b1f] transition"
+                  >
+                    <td className="px-3 py-2 font-mono text-[#5794f2]">{(tr.trace_id || tr.id || "").slice(0, 16)}…</td>
+                    <td className="px-3 text-[#d8d9da]">{tr.operation || tr.name || "—"}</td>
+                    <td className="px-3 font-mono text-[#a7a9ab]">{tr.principal_name || tr.user || "—"}</td>
+                    <td className="px-3 text-right font-mono tabular-nums text-[#d8d9da]">{tr.duration_ms != null ? `${Number(tr.duration_ms).toFixed(1)} ms` : "—"}</td>
+                    <td className="px-3 text-right font-mono">
+                      <span className={`rounded-[2px] px-1.5 py-0.5 text-[10px] uppercase font-semibold ${String(tr.status_code || tr.http_status || tr.status).startsWith("5") ? "text-[#f2495c] bg-[#f2495c]/10" : "text-[#73bf69] bg-[#73bf69]/10"}`}>
+                        {tr.status_code || tr.http_status || tr.status || "OK"}
+                      </span>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        ) : (
+          <div className="p-6 text-center text-xs text-[#7b7d80]">{t("No recent traces recorded for this service.")}</div>
+        )}
       </Panel>
     </Page>
   );

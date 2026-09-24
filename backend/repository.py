@@ -105,7 +105,7 @@ class StorageRepository:
                 ).fetchone()
                 active_anomalies = int(anom_row[0]) if anom_row else 0
 
-                latest_row = db.execute("SELECT MAX(created_at) FROM traces").fetchone()
+                latest_row = db.execute("SELECT MAX(bucket_start+bucket_size)*1000 FROM metric_buckets WHERE bucket_size=300").fetchone()
                 latest = int(latest_row[0]) if (latest_row and latest_row[0]) else None
 
                 try:
@@ -216,6 +216,8 @@ class StorageRepository:
                             ROUND(MAX(latency_p99), 1) AS p99_ms,
                             ROUND(CASE WHEN SUM(request_count) > 0 THEN SUM(error_count) * 1.0 / SUM(request_count) ELSE 0 END, 4) AS http_5xx_rate,
                             SUM(request_count) AS sample_count,
+                            COUNT(DISTINCT principal_name) AS active_users,
+                            COUNT(DISTINCT target_service) AS active_services,
                             bucket_start
                         FROM metric_buckets
                         WHERE {where}
@@ -233,6 +235,8 @@ class StorageRepository:
                             ROUND(MAX(latency_p99), 1) AS p99_ms,
                             ROUND(CASE WHEN SUM(request_count) > 0 THEN SUM(error_count) * 1.0 / SUM(request_count) ELSE 0 END, 4) AS http_5xx_rate,
                             SUM(request_count) AS sample_count,
+                            COUNT(DISTINCT principal_name) AS active_users,
+                            COUNT(DISTINCT target_service) AS active_services,
                             (intDiv(bucket_start, {grain_sec}) * {grain_sec}) AS bucket_start
                         FROM metric_buckets
                         WHERE {where}
@@ -311,6 +315,8 @@ class StorageRepository:
                         "success_rate": round(1.0 - float(r["http_5xx_rate"]), 4),
                         "failure_rate": float(r["http_5xx_rate"]),
                         "sample_count": int(r["sample_count"]),
+                        "active_users": int(r.get("active_users", 0)),
+                        "active_services": int(r.get("active_services", 0)),
                     })
                 return output
 
@@ -329,7 +335,8 @@ class StorageRepository:
             for value in grouped.values():
                 output.append({"timestamp_ms": value["timestamp_ms"], "rps": value["http"] / 60, "tps": value["server"] / 60,
                     "baseline_rps": baseline, "p50_ms": value["hist"].percentile(.5), "p95_ms": value["hist"].percentile(.95),
-                    "p99_ms": value["hist"].percentile(.99), "http_4xx_rate": value["4xx"] / max(1, value["http"]), "http_5xx_rate": value["5xx"] / max(1, value["http"]), "success_rate": value["success"] / max(1,value["server"]), "failure_rate": value["failure"] / max(1,value["server"]), "sample_count": value["server"]})
+                    "p99_ms": value["hist"].percentile(.99), "http_4xx_rate": value["4xx"] / max(1, value["http"]), "http_5xx_rate": value["5xx"] / max(1, value["http"]), "success_rate": value["success"] / max(1,value["server"]), "failure_rate": value["failure"] / max(1,value["server"]), "sample_count": value["server"],
+                    "active_users": 0, "active_services": 0})
             return output
 
     @staticmethod

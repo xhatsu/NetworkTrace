@@ -1,13 +1,12 @@
-"""Bounded query and materialization layer for the interactive topology.
+"""Bounded query and materialization layer for interactive topology.
 
-ClickHouse deployments read the five-minute/current relationship tables written
-by the analytics worker. Elasticsearch deployments use server-side composite
-aggregations over the configured APM index and never copy application traces
-into ClickHouse for this feature.
+Interactive reads use worker-owned relationship tables or metric buckets.
+Only ``materialize_slice`` reads raw spans, and it is called by the worker.
 """
 from __future__ import annotations
 
 import base64
+import hashlib
 import json
 import logging
 import math
@@ -56,6 +55,12 @@ def canonical_api(value: Any, service: str = "") -> str:
     text = re.sub(r"/[0-9a-fA-F-]{16,}(?=/|$)", "/{id}", text)
     text = re.sub(r"/\d+(?=/|$)", "/{id}", text)
     return text[:500]
+
+
+def service_edge_id(source: Any, target: Any) -> str:
+    """Return one stable, separator-safe ID for a service relationship."""
+    pair = f"{canonical_service(source)}\x1f{canonical_service(target)}"
+    return f"service-edge:{hashlib.sha256(pair.encode('utf-8')).hexdigest()[:24]}"
 
 
 def evidence_for(method: Any, confidence: Any = 0.0) -> Tuple[str, str, float]:
@@ -248,10 +253,12 @@ class InteractiveTopologyRepository:
             greatest(0.0, least(1.0, toFloat64(caller_confidence))) AS confidence,
             if(effective_client_ip IS NULL OR effective_client_ip IN ('', 'unavailable', 'unknown'),
                ifNull(observed_ip, ''), effective_client_ip) AS source_ip
+            ,coalesce(nullIf(trim(service_instance), ''), 'unknown') AS service_instance
         """
         measures = """
             count() request_count,
             countIf(http_status >= 400 OR outcome = 'failure') error_count,
+            countIf(http_status IN (401, 403)) auth_failure_count,
             countIf(http_status >= 400 AND http_status < 500) http_4xx_count,
             countIf(http_status >= 500) http_5xx_count,
             countIf(outcome = 'timeout' OR http_status = 504) timeout_count,
@@ -284,7 +291,8 @@ class InteractiveTopologyRepository:
                 _safe_int(row.get("bucket_start")), canonical_service(row.get("caller_service")),
                 canonical_service(row.get("target_service")), canonical_api(row.get("raw_api"), row.get("target_service")),
                 canonical_principal(row.get("principal")), _safe_int(row.get("request_count")),
-                _safe_int(row.get("error_count")), _safe_int(row.get("http_4xx_count")),
+                _safe_int(row.get("error_count")), _safe_int(row.get("auth_failure_count")),
+                _safe_int(row.get("http_4xx_count")),
                 _safe_int(row.get("http_5xx_count")), _safe_int(row.get("timeout_count")),
                 _safe_int(row.get("tcp_reset_count")), _safe_int(row.get("incomplete_count")),
                 _safe_float(row.get("latency_sum")), _safe_float(quantiles[0]), _safe_float(quantiles[1]),
@@ -295,7 +303,7 @@ class InteractiveTopologyRepository:
                 str(row.get("evidence_detail") or ""), _safe_float(row.get("confidence")),
             ]
 
-        all_group_fields = "bucket_start, caller_service, target_service, raw_api, principal, evidence_type, evidence_detail, confidence, source_ip"
+        all_group_fields = "bucket_start, caller_service, target_service, raw_api, principal, evidence_type, evidence_detail, confidence, source_ip, service_instance"
         base_rows = query(all_group_fields)
         service_rows = list(base_rows)
         # The service query should not be principal/API/IP-specific; collapse the
@@ -305,16 +313,25 @@ class InteractiveTopologyRepository:
         api_rows = self._collapse_rows(api_rows, ["bucket_start", "caller_service", "target_service", "raw_api", "evidence_type", "evidence_detail", "confidence"])
         principal_rows = list(base_rows)
         principal_rows = self._collapse_rows(principal_rows, ["bucket_start", "caller_service", "target_service", "raw_api", "principal", "evidence_type", "evidence_detail", "confidence"])
-        ip_rows = list(base_rows)
+        ip_rows = self._collapse_rows(base_rows, ["bucket_start", "caller_service", "target_service", "raw_api", "principal", "source_ip"])
+        instance_rows = self._collapse_rows(base_rows, ["bucket_start", "target_service", "service_instance"])
+        instance_values = [[
+            _safe_int(row.get("bucket_start")), canonical_service(row.get("target_service")),
+            str(row.get("service_instance") or "unknown"), _safe_int(row.get("request_count")),
+            _safe_int(row.get("error_count")), _safe_float(row.get("latency_sum")),
+            _safe_float((row.get("latency_quantiles") or (0.0, 0.0, 0.0))[1]),
+            _safe_int(row.get("first_seen_ms")), _safe_int(row.get("last_seen_ms")), int(time.time() * 1000),
+        ] for row in instance_rows]
         return [
-            ("topology_service_edges_5m", ["bucket_start", "caller_service", "target_service", "request_count", "error_count", "http_4xx_count", "http_5xx_count", "timeout_count", "tcp_reset_count", "incomplete_count", "latency_sum", "p50_latency_ms", "p95_latency_ms", "p99_latency_ms", "request_bytes", "response_bytes", "unique_principals", "unique_source_ips", "anonymous_requests", "first_seen_ms", "last_seen_ms", "evidence_type", "evidence_detail", "confidence", "updated_at_ms"], [self._service_row(row) for row in service_rows]),
-            ("topology_api_edges_5m", ["bucket_start", "caller_service", "caller_api", "target_service", "target_api", "request_count", "error_count", "http_4xx_count", "http_5xx_count", "timeout_count", "tcp_reset_count", "incomplete_count", "latency_sum", "p50_latency_ms", "p95_latency_ms", "p99_latency_ms", "request_bytes", "response_bytes", "unique_principals", "unique_source_ips", "anonymous_requests", "first_seen_ms", "last_seen_ms", "evidence_type", "evidence_detail", "confidence", "updated_at_ms"], [self._api_row(row) for row in api_rows]),
-            ("topology_principal_edges_5m", ["bucket_start", "principal", "caller_service", "caller_api", "target_service", "target_api", "request_count", "error_count", "http_4xx_count", "http_5xx_count", "timeout_count", "tcp_reset_count", "incomplete_count", "latency_sum", "p50_latency_ms", "p95_latency_ms", "p99_latency_ms", "request_bytes", "response_bytes", "unique_principals", "unique_source_ips", "anonymous_requests", "first_seen_ms", "last_seen_ms", "evidence_type", "evidence_detail", "confidence", "updated_at_ms"], [self._principal_row(row) for row in principal_rows]),
-            ("topology_principal_ip_5m", ["bucket_start", "principal", "source_ip", "service", "api", "caller_service", "request_count", "error_count", "http_4xx_count", "http_5xx_count", "timeout_count", "p95_latency_ms", "request_bytes", "response_bytes", "first_seen_ms", "last_seen_ms", "is_load_balancer", "source_ip_role", "role_label", "attribution_confidence", "is_new_ip", "updated_at_ms"], [self._ip_row(row, start_ms, prior_ips) for row in ip_rows]),
-            ("topology_service_current", ["bucket_start", "caller_service", "target_service", "request_count", "error_count", "http_4xx_count", "http_5xx_count", "timeout_count", "tcp_reset_count", "incomplete_count", "latency_sum", "p50_latency_ms", "p95_latency_ms", "p99_latency_ms", "request_bytes", "response_bytes", "unique_principals", "unique_source_ips", "anonymous_requests", "first_seen_ms", "last_seen_ms", "evidence_type", "evidence_detail", "confidence", "updated_at_ms"], [self._service_row(row) for row in service_rows]),
-            ("topology_api_current", ["bucket_start", "caller_service", "caller_api", "target_service", "target_api", "request_count", "error_count", "http_4xx_count", "http_5xx_count", "timeout_count", "tcp_reset_count", "incomplete_count", "latency_sum", "p50_latency_ms", "p95_latency_ms", "p99_latency_ms", "request_bytes", "response_bytes", "unique_principals", "unique_source_ips", "anonymous_requests", "first_seen_ms", "last_seen_ms", "evidence_type", "evidence_detail", "confidence", "updated_at_ms"], [self._api_row(row) for row in api_rows]),
-            ("topology_principal_current", ["bucket_start", "principal", "caller_service", "caller_api", "target_service", "target_api", "request_count", "error_count", "http_4xx_count", "http_5xx_count", "timeout_count", "tcp_reset_count", "incomplete_count", "latency_sum", "p50_latency_ms", "p95_latency_ms", "p99_latency_ms", "request_bytes", "response_bytes", "unique_principals", "unique_source_ips", "anonymous_requests", "first_seen_ms", "last_seen_ms", "evidence_type", "evidence_detail", "confidence", "updated_at_ms"], [self._principal_row(row) for row in principal_rows]),
-            ("topology_principal_ip_current", ["bucket_start", "principal", "source_ip", "service", "api", "caller_service", "request_count", "error_count", "http_4xx_count", "http_5xx_count", "timeout_count", "p95_latency_ms", "request_bytes", "response_bytes", "first_seen_ms", "last_seen_ms", "is_load_balancer", "source_ip_role", "role_label", "attribution_confidence", "is_new_ip", "updated_at_ms"], [self._ip_row(row, start_ms, prior_ips) for row in ip_rows]),
+            ("service_instance_edges_5m", ["bucket_start", "target_service", "service_instance", "request_count", "error_count", "latency_sum", "p95_latency_ms", "first_seen_ms", "last_seen_ms", "updated_at_ms"], instance_values),
+            ("topology_service_edges_5m", ["bucket_start", "caller_service", "target_service", "request_count", "error_count", "auth_failure_count", "http_4xx_count", "http_5xx_count", "timeout_count", "tcp_reset_count", "incomplete_count", "latency_sum", "p50_latency_ms", "p95_latency_ms", "p99_latency_ms", "request_bytes", "response_bytes", "unique_principals", "unique_source_ips", "anonymous_requests", "first_seen_ms", "last_seen_ms", "evidence_type", "evidence_detail", "confidence", "updated_at_ms"], [self._service_row(row) for row in service_rows]),
+            ("topology_api_edges_5m", ["bucket_start", "caller_service", "caller_api", "target_service", "target_api", "request_count", "error_count", "auth_failure_count", "http_4xx_count", "http_5xx_count", "timeout_count", "tcp_reset_count", "incomplete_count", "latency_sum", "p50_latency_ms", "p95_latency_ms", "p99_latency_ms", "request_bytes", "response_bytes", "unique_principals", "unique_source_ips", "anonymous_requests", "first_seen_ms", "last_seen_ms", "evidence_type", "evidence_detail", "confidence", "updated_at_ms"], [self._api_row(row) for row in api_rows]),
+            ("topology_principal_edges_5m", ["bucket_start", "principal", "caller_service", "caller_api", "target_service", "target_api", "request_count", "error_count", "auth_failure_count", "http_4xx_count", "http_5xx_count", "timeout_count", "tcp_reset_count", "incomplete_count", "latency_sum", "p50_latency_ms", "p95_latency_ms", "p99_latency_ms", "request_bytes", "response_bytes", "unique_principals", "unique_source_ips", "anonymous_requests", "first_seen_ms", "last_seen_ms", "evidence_type", "evidence_detail", "confidence", "updated_at_ms"], [self._principal_row(row) for row in principal_rows]),
+            ("topology_principal_ip_5m", ["bucket_start", "principal", "source_ip", "service", "api", "caller_service", "request_count", "error_count", "auth_failure_count", "http_4xx_count", "http_5xx_count", "timeout_count", "p95_latency_ms", "request_bytes", "response_bytes", "first_seen_ms", "last_seen_ms", "is_load_balancer", "source_ip_role", "role_label", "attribution_confidence", "is_new_ip", "updated_at_ms"], [self._ip_row(row, start_ms, prior_ips) for row in ip_rows]),
+            ("topology_service_current", ["bucket_start", "caller_service", "target_service", "request_count", "error_count", "auth_failure_count", "http_4xx_count", "http_5xx_count", "timeout_count", "tcp_reset_count", "incomplete_count", "latency_sum", "p50_latency_ms", "p95_latency_ms", "p99_latency_ms", "request_bytes", "response_bytes", "unique_principals", "unique_source_ips", "anonymous_requests", "first_seen_ms", "last_seen_ms", "evidence_type", "evidence_detail", "confidence", "updated_at_ms"], [self._service_row(row) for row in service_rows]),
+            ("topology_api_current", ["bucket_start", "caller_service", "caller_api", "target_service", "target_api", "request_count", "error_count", "auth_failure_count", "http_4xx_count", "http_5xx_count", "timeout_count", "tcp_reset_count", "incomplete_count", "latency_sum", "p50_latency_ms", "p95_latency_ms", "p99_latency_ms", "request_bytes", "response_bytes", "unique_principals", "unique_source_ips", "anonymous_requests", "first_seen_ms", "last_seen_ms", "evidence_type", "evidence_detail", "confidence", "updated_at_ms"], [self._api_row(row) for row in api_rows]),
+            ("topology_principal_current", ["bucket_start", "principal", "caller_service", "caller_api", "target_service", "target_api", "request_count", "error_count", "auth_failure_count", "http_4xx_count", "http_5xx_count", "timeout_count", "tcp_reset_count", "incomplete_count", "latency_sum", "p50_latency_ms", "p95_latency_ms", "p99_latency_ms", "request_bytes", "response_bytes", "unique_principals", "unique_source_ips", "anonymous_requests", "first_seen_ms", "last_seen_ms", "evidence_type", "evidence_detail", "confidence", "updated_at_ms"], [self._principal_row(row) for row in principal_rows]),
+            ("topology_principal_ip_current", ["bucket_start", "principal", "source_ip", "service", "api", "caller_service", "request_count", "error_count", "auth_failure_count", "http_4xx_count", "http_5xx_count", "timeout_count", "p95_latency_ms", "request_bytes", "response_bytes", "first_seen_ms", "last_seen_ms", "is_load_balancer", "source_ip_role", "role_label", "attribution_confidence", "is_new_ip", "updated_at_ms"], [self._ip_row(row, start_ms, prior_ips) for row in ip_rows]),
         ]
 
     @staticmethod
@@ -328,7 +345,7 @@ class InteractiveTopologyRepository:
                 existing["latency_quantiles"] = list(row.get("latency_quantiles") or (0.0, 0.0, 0.0))
                 result[key] = existing
                 continue
-            for field in ("request_count", "error_count", "http_4xx_count", "http_5xx_count", "timeout_count", "tcp_reset_count", "incomplete_count", "latency_sum", "request_bytes", "response_bytes", "anonymous_requests"):
+            for field in ("request_count", "error_count", "auth_failure_count", "http_4xx_count", "http_5xx_count", "timeout_count", "tcp_reset_count", "incomplete_count", "latency_sum", "request_bytes", "response_bytes", "anonymous_requests"):
                 existing[field] = _safe_float(existing.get(field)) + _safe_float(row.get(field))
             existing["unique_principals"] = max(_safe_int(existing.get("unique_principals")), _safe_int(row.get("unique_principals")))
             existing["unique_source_ips"] = max(_safe_int(existing.get("unique_source_ips")), _safe_int(row.get("unique_source_ips")))
@@ -344,7 +361,7 @@ class InteractiveTopologyRepository:
         q = row.get("latency_quantiles") or (0.0, 0.0, 0.0)
         caller = str(row.get("caller_service") or "").strip()[:200]
         target = canonical_service(row.get("target_service"))
-        return [_safe_int(row.get("bucket_start")), caller, target, _safe_int(row.get("request_count")), _safe_int(row.get("error_count")), _safe_int(row.get("http_4xx_count")), _safe_int(row.get("http_5xx_count")), _safe_int(row.get("timeout_count")), _safe_int(row.get("tcp_reset_count")), _safe_int(row.get("incomplete_count")), _safe_float(row.get("latency_sum")), _safe_float(q[0]), _safe_float(q[1]), _safe_float(q[2]), _safe_int(row.get("request_bytes")), _safe_int(row.get("response_bytes")), _safe_int(row.get("unique_principals")), _safe_int(row.get("unique_source_ips")), _safe_int(row.get("anonymous_requests")), _safe_int(row.get("first_seen_ms")), _safe_int(row.get("last_seen_ms")), str(row.get("evidence_type") or "IP_SERVICE_INFERRED"), str(row.get("evidence_detail") or ""), _safe_float(row.get("confidence"))]
+        return [_safe_int(row.get("bucket_start")), caller, target, _safe_int(row.get("request_count")), _safe_int(row.get("error_count")), _safe_int(row.get("auth_failure_count")), _safe_int(row.get("http_4xx_count")), _safe_int(row.get("http_5xx_count")), _safe_int(row.get("timeout_count")), _safe_int(row.get("tcp_reset_count")), _safe_int(row.get("incomplete_count")), _safe_float(row.get("latency_sum")), _safe_float(q[0]), _safe_float(q[1]), _safe_float(q[2]), _safe_int(row.get("request_bytes")), _safe_int(row.get("response_bytes")), _safe_int(row.get("unique_principals")), _safe_int(row.get("unique_source_ips")), _safe_int(row.get("anonymous_requests")), _safe_int(row.get("first_seen_ms")), _safe_int(row.get("last_seen_ms")), str(row.get("evidence_type") or "IP_SERVICE_INFERRED"), str(row.get("evidence_detail") or ""), _safe_float(row.get("confidence"))]
 
     @staticmethod
     def _api_row(row: Dict[str, Any]) -> List[Any]:
@@ -354,13 +371,13 @@ class InteractiveTopologyRepository:
     @staticmethod
     def _principal_row(row: Dict[str, Any]) -> List[Any]:
         q = row.get("latency_quantiles") or (0.0, 0.0, 0.0)
-        return [_safe_int(row.get("bucket_start")), canonical_principal(row.get("principal")), str(row.get("caller_service") or "").strip()[:200], "", canonical_service(row.get("target_service")), canonical_api(row.get("raw_api"), row.get("target_service")), _safe_int(row.get("request_count")), _safe_int(row.get("error_count")), _safe_int(row.get("http_4xx_count")), _safe_int(row.get("http_5xx_count")), _safe_int(row.get("timeout_count")), _safe_int(row.get("tcp_reset_count")), _safe_int(row.get("incomplete_count")), _safe_float(row.get("latency_sum")), _safe_float(q[0]), _safe_float(q[1]), _safe_float(q[2]), _safe_int(row.get("request_bytes")), _safe_int(row.get("response_bytes")), 1, _safe_int(row.get("unique_source_ips")), _safe_int(row.get("anonymous_requests")), _safe_int(row.get("first_seen_ms")), _safe_int(row.get("last_seen_ms")), str(row.get("evidence_type") or "IP_SERVICE_INFERRED"), str(row.get("evidence_detail") or ""), _safe_float(row.get("confidence"))]
+        return [_safe_int(row.get("bucket_start")), canonical_principal(row.get("principal")), str(row.get("caller_service") or "").strip()[:200], "", canonical_service(row.get("target_service")), canonical_api(row.get("raw_api"), row.get("target_service")), _safe_int(row.get("request_count")), _safe_int(row.get("error_count")), _safe_int(row.get("auth_failure_count")), _safe_int(row.get("http_4xx_count")), _safe_int(row.get("http_5xx_count")), _safe_int(row.get("timeout_count")), _safe_int(row.get("tcp_reset_count")), _safe_int(row.get("incomplete_count")), _safe_float(row.get("latency_sum")), _safe_float(q[0]), _safe_float(q[1]), _safe_float(q[2]), _safe_int(row.get("request_bytes")), _safe_int(row.get("response_bytes")), 1, _safe_int(row.get("unique_source_ips")), _safe_int(row.get("anonymous_requests")), _safe_int(row.get("first_seen_ms")), _safe_int(row.get("last_seen_ms")), str(row.get("evidence_type") or "IP_SERVICE_INFERRED"), str(row.get("evidence_detail") or ""), _safe_float(row.get("confidence"))]
 
     def _ip_row(self, row: Dict[str, Any], start_ms: int, prior_ips: set[Tuple[str, str]]) -> List[Any]:
         ip = str(row.get("source_ip") or "unknown")
         principal = canonical_principal(row.get("principal"))
         role, label, confidence = classify_source_ip_role(ip)
-        return [_safe_int(row.get("bucket_start")), principal, ip[:100], canonical_service(row.get("target_service")), canonical_api(row.get("raw_api"), row.get("target_service")), str(row.get("caller_service") or "").strip()[:200], _safe_int(row.get("request_count")), _safe_int(row.get("error_count")), _safe_int(row.get("http_4xx_count")), _safe_int(row.get("http_5xx_count")), _safe_int(row.get("timeout_count")), _safe_float((row.get("latency_quantiles") or (0.0, 0.0, 0.0))[1]), _safe_int(row.get("request_bytes")), _safe_int(row.get("response_bytes")), _safe_int(row.get("first_seen_ms")), _safe_int(row.get("last_seen_ms")), 1 if role in ("load_balancer", "reverse_proxy", "nat_gateway") else 0, role, label, confidence, 0 if (principal, ip) in prior_ips else 1]
+        return [_safe_int(row.get("bucket_start")), principal, ip[:100], canonical_service(row.get("target_service")), canonical_api(row.get("raw_api"), row.get("target_service")), str(row.get("caller_service") or "").strip()[:200], _safe_int(row.get("request_count")), _safe_int(row.get("error_count")), _safe_int(row.get("auth_failure_count")), _safe_int(row.get("http_4xx_count")), _safe_int(row.get("http_5xx_count")), _safe_int(row.get("timeout_count")), _safe_float((row.get("latency_quantiles") or (0.0, 0.0, 0.0))[1]), _safe_int(row.get("request_bytes")), _safe_int(row.get("response_bytes")), _safe_int(row.get("first_seen_ms")), _safe_int(row.get("last_seen_ms")), 1 if role in ("load_balancer", "reverse_proxy", "nat_gateway") else 0, role, label, confidence, 0 if (principal, ip) in prior_ips else 1]
 
     # ------------------------------------------------------------------
     # ClickHouse query helpers and response shaping
@@ -381,6 +398,7 @@ class InteractiveTopologyRepository:
         sql = f"""
             SELECT {selected}
               sum(request_count) request_count, sum(error_count) error_count,
+              sum(auth_failure_count) auth_failure_count,
               sum(http_4xx_count) http_4xx_count, sum(http_5xx_count) http_5xx_count,
               sum(timeout_count) timeout_count, sum(tcp_reset_count) tcp_reset_count,
               sum(incomplete_count) incomplete_count, sum(latency_sum) latency_sum,
@@ -397,10 +415,183 @@ class InteractiveTopologyRepository:
         with get_connection(self.db_path) as db:
             return [dict(row) for row in db.execute(sql, args)]
 
+    def _query_records_page(
+        self, table: str, dimensions: Sequence[str], start_ms: int, end_ms: int,
+        filters: Optional[Dict[str, Any]], sort_dimension: str, page_size: int,
+        search: Optional[str] = None, cursor: Optional[str] = None,
+    ) -> Tuple[List[Dict[str, Any]], Optional[str]]:
+        """Read a bounded aggregate page using request count and name as keyset."""
+        allowed_tables = {
+            "topology_api_edges_5m", "topology_principal_edges_5m",
+            "topology_service_edges_5m",
+        }
+        allowed_dimensions = {
+            "caller_service", "target_service", "target_api", "principal",
+        }
+        if table not in allowed_tables or sort_dimension not in allowed_dimensions:
+            raise ValueError("invalid topology page dimensions")
+        filters = filters or {}
+        clauses = ["bucket_start >= ?", "bucket_start < ?"]
+        args: List[Any] = [start_ms // 1000, (end_ms + 999) // 1000]
+        for field in ("caller_service", "target_service", "target_api", "principal"):
+            if filters.get(field) is not None:
+                clauses.append(f"{field} = ?")
+                args.append(filters[field])
+        if filters.get("principal") in ANONYMOUS:
+            clauses.append("principal IN ('unknown', '-anonymous-', '')")
+
+        having: List[str] = []
+        having_args: List[Any] = []
+        if search:
+            having.append(f"positionCaseInsensitive(toString({sort_dimension}), ?) > 0")
+            having_args.append(search[:200])
+        decoded = decode_cursor(cursor)
+        if decoded:
+            try:
+                previous_count = int(decoded[0])
+            except (TypeError, ValueError):
+                raise ValueError("cursor is invalid") from None
+            previous_name = decoded[1]
+            having.append(f"(sum({table}.request_count) < ? OR (sum({table}.request_count) = ? AND toString({sort_dimension}) > ?))")
+            having_args.extend([previous_count, previous_count, previous_name])
+
+        group = ", ".join(dimensions)
+        selected = f"{group}," if group else ""
+        count_dimensions = (
+            "uniqExact(target_service) service_count, 0 api_count"
+            if table == "topology_service_edges_5m"
+            else "uniqExact(target_service) service_count, uniqExact(target_api) api_count"
+        )
+        sql = f"""
+            SELECT {selected}
+              sum(request_count) request_count, sum(error_count) error_count,
+              sum(auth_failure_count) auth_failure_count,
+              sum(http_4xx_count) http_4xx_count, sum(http_5xx_count) http_5xx_count,
+              sum(timeout_count) timeout_count, sum(tcp_reset_count) tcp_reset_count,
+              sum(incomplete_count) incomplete_count, sum(latency_sum) latency_sum,
+              max(p50_latency_ms) p50_latency_ms, max(p95_latency_ms) p95_latency_ms,
+              max(p99_latency_ms) p99_latency_ms, sum(request_bytes) request_bytes,
+              sum(response_bytes) response_bytes, sum(unique_principals) unique_principals,
+              sum(unique_source_ips) unique_source_ips, sum(anonymous_requests) anonymous_requests,
+              min(first_seen_ms) first_seen_ms, max(last_seen_ms) last_seen_ms,
+              groupUniqArray(evidence_type) evidence_types, max(confidence) confidence,
+              groupUniqArrayIf(caller_service, caller_service != '') caller_services,
+              {count_dimensions}
+            FROM {table} FINAL WHERE {' AND '.join(clauses)}
+            {f'GROUP BY {group}' if group else ''}
+            {f"HAVING {' AND '.join(having)}" if having else ''}
+            ORDER BY request_count DESC, {sort_dimension} ASC
+            LIMIT ?
+        """
+        args.extend(having_args)
+        args.append(max(1, min(MAX_LIMIT, page_size)) + 1)
+        with get_connection(self.db_path) as db:
+            rows = [dict(row) for row in db.execute(sql, args)]
+        has_more = len(rows) > page_size
+        rows = rows[:page_size]
+        next_cursor = None
+        if has_more and rows:
+            last = rows[-1]
+            next_cursor = encode_cursor([
+                str(_safe_int(last.get("request_count"))),
+                str(last.get(sort_dimension) or ""), "", "",
+            ])
+        return rows, next_cursor
+
+    def _metric_records_page(
+        self, dimensions: Sequence[str], start_ms: int, end_ms: int,
+        filters: Optional[Dict[str, Any]], sort_dimension: str, page_size: int,
+        search: Optional[str] = None, cursor: Optional[str] = None,
+    ) -> Tuple[List[Dict[str, Any]], Optional[str]]:
+        """Page topology projections from worker-owned five-minute metric buckets."""
+        columns = {
+            "caller_service": "caller_service", "target_service": "target_service",
+            "target_api": "operation", "principal": "principal_name",
+        }
+        if sort_dimension not in columns or any(dimension not in columns for dimension in dimensions):
+            raise ValueError("invalid metric page dimensions")
+        filters = filters or {}
+        clauses = ["bucket_size=300", "bucket_start>=?", "bucket_start<?"]
+        args: List[Any] = [start_ms // 1000, (end_ms + 999) // 1000]
+        for key, column in columns.items():
+            if filters.get(key) is not None:
+                clauses.append(f"{column}=?")
+                args.append(filters[key])
+        if filters.get("principal") in ANONYMOUS:
+            clauses.append("principal_name IN ('unknown','-anonymous-','')")
+        having: List[str] = []
+        having_args: List[Any] = []
+        sort_column = columns[sort_dimension]
+        if search:
+            having.append(f"positionCaseInsensitive(toString({sort_column}), ?) > 0")
+            having_args.append(search[:200])
+        decoded = decode_cursor(cursor)
+        if decoded:
+            try:
+                previous_count = int(decoded[0])
+            except (TypeError, ValueError):
+                raise ValueError("cursor is invalid") from None
+            having.append(f"(sum(metric_buckets.request_count) < ? OR (sum(metric_buckets.request_count) = ? AND toString({sort_column}) > ?))")
+            having_args.extend([previous_count, previous_count, decoded[1]])
+        selected = ",".join(f"{columns[dimension]} AS {dimension}" for dimension in dimensions)
+        select_dimensions = selected + "," if selected else ""
+        group = ",".join(columns[dimension] for dimension in dimensions)
+        sql = f"""
+            SELECT {select_dimensions}
+              sum(request_count) request_count, sum(error_count) error_count,
+              0 auth_failure_count, 0 http_4xx_count, 0 http_5xx_count,
+              0 timeout_count, 0 tcp_reset_count, 0 incomplete_count,
+              sum(latency_sum) latency_sum, max(latency_p50) p50_latency_ms,
+              max(latency_p95) p95_latency_ms, max(latency_p99) p99_latency_ms,
+              sum(request_bytes) request_bytes, sum(response_bytes) response_bytes,
+              count(DISTINCT principal_name) unique_principals, 0 unique_source_ips,
+              sum(if(principal_name IN ('unknown','-anonymous-',''),request_count,0)) anonymous_requests,
+              min(bucket_start)*1000 first_seen_ms, max(bucket_start+bucket_size)*1000 last_seen_ms,
+              [] evidence_types, 0 confidence,
+              groupUniqArrayIf(caller_service, caller_service != '') caller_services,
+              uniqExact(target_service) service_count, uniqExact(operation) api_count,
+              sum(request_bytes_samples) request_bytes_samples,
+              sum(response_bytes_samples) response_bytes_samples
+            FROM metric_buckets FINAL WHERE {' AND '.join(clauses)}
+            {f'GROUP BY {group}' if group else ''}
+            {f"HAVING {' AND '.join(having)}" if having else ''}
+            ORDER BY request_count DESC, {sort_column} ASC LIMIT ?
+        """
+        args.extend(having_args)
+        args.append(max(1, min(MAX_LIMIT, page_size)) + 1)
+        with get_connection(self.db_path) as db:
+            rows = [dict(row) for row in db.execute(sql, args)]
+        has_more = len(rows) > page_size
+        rows = rows[:page_size]
+        next_cursor = None
+        if has_more and rows:
+            last = rows[-1]
+            next_cursor = encode_cursor([
+                str(_safe_int(last.get("request_count"))),
+                str(last.get(sort_dimension) or ""), "", "",
+            ])
+        return rows, next_cursor
+
+    def _relationship_page(
+        self, table: str, dimensions: Sequence[str], window: Dict[str, Any],
+        filters: Optional[Dict[str, Any]], sort_dimension: str, page_size: int,
+        search: Optional[str] = None, cursor: Optional[str] = None,
+    ) -> Tuple[List[Dict[str, Any]], Optional[str]]:
+        if self.backend == "elasticsearch":
+            return self._metric_records_page(
+                dimensions, window["start_ms"], window["end_ms"], filters,
+                sort_dimension, page_size, search, cursor,
+            )
+        return self._query_records_page(
+            table, dimensions, window["start_ms"], window["end_ms"], filters,
+            sort_dimension, page_size, search, cursor,
+        )
+
     def _metrics(self, row: Optional[Dict[str, Any]], duration_seconds: int) -> Dict[str, Any]:
         row = row or {}
         requests = _safe_int(row.get("request_count"))
         errors = _safe_int(row.get("error_count"))
+        auth_failures = _safe_int(row.get("auth_failure_count"))
         four = _safe_int(row.get("http_4xx_count"))
         five = _safe_int(row.get("http_5xx_count"))
         req_bytes = _safe_int(row.get("request_bytes"))
@@ -417,6 +608,8 @@ class InteractiveTopologyRepository:
             "p95_latency_ms": round(_safe_float(row.get("p95_latency_ms")), 2),
             "p99_latency_ms": round(_safe_float(row.get("p99_latency_ms")), 2),
             "error_rate": round(errors / max(1, requests), 4),
+            "auth_failure_count": auth_failures,
+            "auth_failure_rate": round(auth_failures / max(1, requests), 4),
             "http_4xx_rate": round(four / max(1, requests), 4),
             "http_5xx_rate": round(five / max(1, requests), 4),
             "timeout_count": _safe_int(row.get("timeout_count")),
@@ -467,10 +660,15 @@ class InteractiveTopologyRepository:
         }
 
     def _records_with_changes(self, table: str, dimensions: Sequence[str], filters: Optional[Dict[str, Any]], window: Dict[str, Any]) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]], bool]:
-        current_rows = self._query_records(table, dimensions, window["start_ms"], window["end_ms"], filters)
         duration = window["end_ms"] - window["start_ms"]
-        previous_rows = self._query_records(table, dimensions, window["start_ms"] - duration, window["start_ms"], filters)
-        previous_available = bool(previous_rows) or self._has_history_before(table, window["start_ms"])
+        if self.backend == "elasticsearch":
+            current_rows = self._es_rows(dimensions, window, filters)
+            previous_rows = self._es_rows(dimensions, {**window, "start_ms": window["start_ms"] - duration, "end_ms": window["start_ms"]}, filters)
+            previous_available = bool(previous_rows)
+        else:
+            current_rows = self._query_records(table, dimensions, window["start_ms"], window["end_ms"], filters)
+            previous_rows = self._query_records(table, dimensions, window["start_ms"] - duration, window["start_ms"], filters)
+            previous_available = bool(previous_rows) or self._has_history_before(table, window["start_ms"])
         key = lambda row: tuple(str(row.get(d, "")) for d in dimensions)
         previous_by_key = {key(row): self._metrics(row, window["duration_seconds"]) for row in previous_rows}
         result = []
@@ -493,6 +691,40 @@ class InteractiveTopologyRepository:
         with get_connection(self.db_path) as db:
             row = db.execute(f"SELECT 1 FROM {table} WHERE bucket_start < ? LIMIT 1", (before_ms // 1000,)).fetchone()
         return bool(row)
+
+    def _es_request(self, body: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+        """Worker-only helper used to build metric buckets from Elasticsearch."""
+        if not self._es_repo.url:
+            return None
+        try:
+            with httpx.Client(
+                base_url=self._es_repo.url,
+                verify=self._es_repo.verify_tls,
+                timeout=self._es_repo.timeout,
+                headers=self._es_repo._get_headers(),
+                auth=self._es_repo._get_auth(),
+            ) as client:
+                response = client.post(f"/{self._es_repo.index}/_search", json=body)
+                if response.status_code != 200:
+                    log.warning("Elasticsearch topology aggregation returned HTTP %d", response.status_code)
+                    return None
+                return response.json()
+        except Exception as exc:
+            log.warning("Elasticsearch topology aggregation failed: %s", exc)
+            return None
+
+    @staticmethod
+    def _es_runtime() -> Dict[str, Any]:
+        """Shared worker runtime fields for bounded Elasticsearch rollups."""
+        return {
+            "topology.caller": {"type": "keyword", "script": {"source": "def v=params['_source']['caller_service']; if (v == null) { v=params['_source']['peer.service']; } if (v != null) emit(v.toString());"}},
+            "topology.target": {"type": "keyword", "script": {"source": "def v=params['_source']['target_service']; if (v == null) { def s=params['_source']['service']; if (s instanceof Map) { v=s['name']; } } if (v != null) emit(v.toString());"}},
+            "topology.api": {"type": "keyword", "script": {"source": "def v=params['_source']['operation_key']; if (v == null) { def t=params['_source']['transaction']; if (t instanceof Map) { v=t['name']; } } if (v == null) { v=params['_source']['name']; } if (v != null) emit(v.toString());"}},
+            "topology.principal": {"type": "keyword", "script": {"source": "def s=params['_source']; def v=s['principal_name']; if (v == null) v=s['enduser.id']; if (v == null) v=s['user.id']; if (v == null) v=s['labels.enduser.id']; if (v == null) { def u=s['enduser']; if (u instanceof Map) v=u['id']; } if (v == null) { def u=s['user']; if (u instanceof Map) { v=u['id']; if (v == null) v=u['name']; } } if (v == null) { def l=s['labels']; if (l instanceof Map) { v=l['enduser.id']; if (v == null) v=l['enduser_id']; } } if (v == null || v.toString().length() == 0) { emit('-anonymous-'); } else { emit(v.toString()); }"}},
+            "topology.duration_ms": {"type": "double", "script": {"source": "def v=params['_source']['duration_ms']; if (v == null) { def t=params['_source']['transaction']; if (t instanceof Map && t['duration'] instanceof Map) { v=t['duration']['us']; if (v != null) v=Double.parseDouble(v.toString())/1000.0; } } if (v != null) emit(Double.parseDouble(v.toString()));"}},
+            "topology.request_bytes": {"type": "long", "script": {"source": "def s=params['_source']; def v=s['request_bytes']; if (v == null) v=s['labels.http_request_content_length']; if (v == null) v=s['http.request.body.size']; if (v == null) { def l=s['labels']; if (l instanceof Map) { v=l['http_request_content_length']; if (v == null) v=l['http.request.body.size']; } } if (v == null) { def h=s['http']; if (h instanceof Map) { def r=h['request']; if (r instanceof Map) { v=r['bytes']; if (v == null && r['body'] instanceof Map) v=r['body']['size']; } } } if (v != null) { try { emit((long)Double.parseDouble(v.toString())); } catch (Exception ignored) {} }"}},
+            "topology.response_bytes": {"type": "long", "script": {"source": "def s=params['_source']; def v=s['response_bytes']; if (v == null) v=s['labels.http_response_content_length']; if (v == null) v=s['http.response.body.size']; if (v == null) { def l=s['labels']; if (l instanceof Map) { v=l['http_response_content_length']; if (v == null) v=l['http.response.body.size']; } } if (v == null) { def h=s['http']; if (h instanceof Map) { def r=h['response']; if (r instanceof Map) { v=r['bytes']; if (v == null && r['body'] instanceof Map) v=r['body']['size']; } } } if (v != null) { try { emit((long)Double.parseDouble(v.toString())); } catch (Exception ignored) {} }"}},
+        }
 
     def _anonymous_summary(self, window: Dict[str, Any]) -> Dict[str, Any]:
         total_rows = self._query_records("topology_api_edges_5m", [], window["start_ms"], window["end_ms"])
@@ -532,7 +764,9 @@ class InteractiveTopologyRepository:
             t = canonical_service(record["dimensions"].get("target_service"))
             if c not in nodes_by_name:
                 nodes_by_name[c] = {"id": f"service:{c}", "name": c, "type": "service", "service": c, "metrics": record["metrics"]}
-            edges.append({"id": f"service-edge:{c}->{t}", "source": f"service:{c}", "target": f"service:{t}", "source_name": c, "target_name": t, "metrics": record["metrics"], "evidence_type": record["metrics"]["evidence_type"], "direct": record["metrics"]["evidence_type"] == "direct", "inferred": record["metrics"]["evidence_type"] == "inferred"})
+            if t not in nodes_by_name:
+                nodes_by_name[t] = {"id": f"service:{t}", "name": t, "type": "service", "service": t, "metrics": record["metrics"]}
+            edges.append({"id": service_edge_id(c, t), "source": f"service:{c}", "target": f"service:{t}", "source_name": c, "target_name": t, "metrics": record["metrics"], "evidence_type": record["metrics"]["evidence_type"], "direct": record["metrics"]["evidence_type"] == "direct", "inferred": record["metrics"]["evidence_type"] == "inferred"})
         return {"window": window, "nodes": sorted(nodes_by_name.values(), key=lambda x: x["name"]), "edges": edges, "changes": {"new_edges": [x for x in edges if x["metrics"]["change"].get("status") == "new"], "disappeared_edges": disappeared, "baseline": "previous_window" if history else "insufficient_history"}, "anonymous": self._anonymous_summary(window), "backend": self.backend}
 
     def search_entities(self, query: str, window: Dict[str, Any], limit: int = 20) -> Dict[str, Any]:
@@ -541,16 +775,22 @@ class InteractiveTopologyRepository:
         if len(needle) < 2:
             return {"query": query, "items": [], "window": window, "backend": self.backend}
 
-        if self.backend == "elasticsearch":
-            target_services = self._es_rows(["target_service"], window)
-            caller_services = self._es_rows(["caller_service"], window)
-            api_rows = self._es_rows(["target_service", "target_api"], window)
-            principal_rows = self._es_rows(["principal", "target_service", "target_api"], window)
-        else:
-            target_services = self._query_records("topology_api_edges_5m", ["target_service"], window["start_ms"], window["end_ms"])
-            caller_services = self._query_records("topology_service_edges_5m", ["caller_service"], window["start_ms"], window["end_ms"])
-            api_rows = self._query_records("topology_api_edges_5m", ["target_service", "target_api"], window["start_ms"], window["end_ms"])
-            principal_rows = self._query_records("topology_principal_edges_5m", ["principal", "target_service", "target_api"], window["start_ms"], window["end_ms"])
+        target_services, _ = self._relationship_page(
+            "topology_api_edges_5m", ["target_service"], window, None,
+            "target_service", 50, needle,
+        )
+        caller_services, _ = self._relationship_page(
+            "topology_service_edges_5m", ["caller_service"], window, None,
+            "caller_service", 50, needle,
+        )
+        api_rows, _ = self._relationship_page(
+            "topology_api_edges_5m", ["target_service", "target_api"], window,
+            None, "target_api", 50, needle,
+        )
+        principal_rows, _ = self._relationship_page(
+            "topology_principal_edges_5m", ["principal", "target_service", "target_api"], window,
+            None, "principal", 50, needle,
+        )
 
         candidates: Dict[str, Dict[str, Any]] = {}
 
@@ -584,38 +824,56 @@ class InteractiveTopologyRepository:
         ))[:max(1, min(limit, 50))]
         return {"query": query, "items": items, "window": window, "backend": self.backend}
 
-    def service_apis(self, service: str, window: Dict[str, Any]) -> Dict[str, Any]:
+    def service_apis(
+        self, service: str, window: Dict[str, Any], limit: int = 100,
+        search: Optional[str] = None, cursor: Optional[str] = None,
+    ) -> Dict[str, Any]:
         service = canonical_service(service)
-        if self.backend == "elasticsearch":
-            return self._es_expansion("api", service, "", window)
-        records, disappeared, history = self._records_with_changes("topology_api_edges_5m", ["target_api"], {"target_service": service}, window)
-        nodes = [{"id": f"api:{service}:{record['dimensions'].get('target_api')}", "name": record["dimensions"].get("target_api") or "unknown", "type": "api", "service": service, "api": record["dimensions"].get("target_api"), "metrics": record["metrics"]} for record in records]
-        return {"window": window, "parent": {"id": f"service:{service}", "name": service, "type": "service"}, "nodes": sorted(nodes, key=lambda x: (-x["metrics"]["request_count"], x["name"])), "edges": [], "changes": {"new_nodes": [n for n in nodes if n["metrics"]["change"].get("status") == "new"], "disappeared_nodes": disappeared, "baseline": "previous_window" if history else "insufficient_history"}, "anonymous": self._anonymous_summary(window), "backend": self.backend}
+        raw_rows, next_cursor = self._relationship_page(
+            "topology_api_edges_5m", ["target_api"], window,
+            {"target_service": service}, "target_api", limit, search, cursor,
+        )
+        nodes = []
+        for row in raw_rows:
+            api = canonical_api(row.get("target_api"), service)
+            caller_services = row.get("caller_services") or []
+            nodes.append({
+                "id": f"api:{service}:{api}", "name": api, "type": "api",
+                "service": service, "api": api,
+                "edge_ids": sorted({service_edge_id(caller, service) for caller in caller_services if caller}),
+                "metrics": self._metrics(row, window["duration_seconds"]),
+            })
+        return {"window": window, "parent": {"id": f"service:{service}", "name": service, "type": "service"}, "nodes": nodes, "edges": [], "next_cursor": next_cursor, "page_size": max(1, min(MAX_LIMIT, limit)), "changes": {"new_nodes": [], "disappeared_nodes": [], "baseline": "precomputed_rollup"}, "anonymous": {}, "backend": self.backend}
 
     def api_connections(self, service: str, api: str, window: Dict[str, Any]) -> Dict[str, Any]:
         """Return only observed caller-service connections for one selected API."""
         service, api = canonical_service(service), canonical_api(api, service)
-        filters = {"target_service": service, "target_api": api}
-        if self.backend == "elasticsearch":
-            rows = self._es_rows(["caller_service", "target_service"], window, filters)
-            records = [{
-                "dimensions": {"caller_service": row.get("caller_service"), "target_service": row.get("target_service")},
-                "metrics": self._metrics(row, window["duration_seconds"]),
-            } for row in rows]
-            disappeared: List[Dict[str, Any]] = []
-            history = False
-        else:
-            records, disappeared, history = self._records_with_changes(
-                "topology_api_edges_5m",
-                ["caller_service", "target_service"],
-                filters,
-                window,
-            )
+        return self._focused_connections("topology_api_edges_5m", {"target_service": service, "target_api": api}, window)
+
+    def principal_connections(
+        self, principal: str, window: Dict[str, Any], service: Optional[str] = None,
+        api: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Return only service connections observed for the selected principal and scope."""
+        filters = {"principal": canonical_principal(principal)}
+        if service:
+            filters["target_service"] = canonical_service(service)
+        if api:
+            filters["target_api"] = canonical_api(api, filters.get("target_service") or "")
+        return self._focused_connections("topology_principal_edges_5m", filters, window)
+
+    def _focused_connections(
+        self, table: str, filters: Dict[str, str], window: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        records, disappeared, history = self._records_with_changes(
+            table, ["caller_service", "target_service"], filters, window,
+        )
 
         nodes_by_name: Dict[str, Dict[str, Any]] = {}
         edges = []
         for record in records:
             caller = canonical_service(record["dimensions"].get("caller_service"))
+            service = canonical_service(record["dimensions"].get("target_service"))
             metrics = record["metrics"]
             nodes_by_name.setdefault(caller, {
                 "id": f"service:{caller}",
@@ -625,11 +883,11 @@ class InteractiveTopologyRepository:
                 "metrics": metrics,
             })
             edges.append({
-                "id": f"api-service-edge:{caller}->{service}:{api}",
+                "id": service_edge_id(caller, service),
                 "source": f"service:{caller}",
-                "target": f"api:{service}:{api}",
+                "target": f"service:{service}",
                 "source_name": caller,
-                "target_name": api,
+                "target_name": service,
                 "metrics": metrics,
                 "evidence_type": metrics["evidence_type"],
                 "direct": metrics["evidence_type"] == "direct",
@@ -648,79 +906,110 @@ class InteractiveTopologyRepository:
             "backend": self.backend,
         }
 
-    def api_principals(self, service: str, api: str, window: Dict[str, Any]) -> Dict[str, Any]:
+    def api_principals(
+        self, service: str, api: str, window: Dict[str, Any], limit: int = 100,
+        search: Optional[str] = None, cursor: Optional[str] = None,
+    ) -> Dict[str, Any]:
         service, api = canonical_service(service), canonical_api(api, service)
-        if self.backend == "elasticsearch":
-            return self._es_expansion("principal", service, api, window)
-        records, disappeared, history = self._records_with_changes("topology_principal_edges_5m", ["principal"], {"target_service": service, "target_api": api}, window)
-        nodes = [{"id": f"principal:{record['dimensions'].get('principal')}", "name": record["dimensions"].get("principal") or "-anonymous-", "type": "principal", "principal": record["dimensions"].get("principal"), "service": service, "api": api, "metrics": record["metrics"]} for record in records]
-        return {"window": window, "parent": {"id": f"api:{service}:{api}", "name": api, "type": "api", "service": service, "api": api}, "nodes": sorted(nodes, key=lambda x: (-x["metrics"]["request_count"], x["name"])), "edges": [], "changes": {"new_nodes": [n for n in nodes if n["metrics"]["change"].get("status") == "new"], "disappeared_nodes": disappeared, "baseline": "previous_window" if history else "insufficient_history"}, "anonymous": self._anonymous_summary(window), "backend": self.backend}
+        rows, next_cursor = self._relationship_page(
+            "topology_principal_edges_5m", ["principal"], window,
+            {"target_service": service, "target_api": api},
+            "principal", limit, search, cursor,
+        )
+        nodes = []
+        for row in rows:
+            principal = canonical_principal(row.get("principal"))
+            callers = row.get("caller_services") or []
+            nodes.append({
+                "id": f"principal:{principal}", "name": principal,
+                "type": "principal", "principal": principal,
+                "service": service, "api": api,
+                "edge_ids": sorted({service_edge_id(caller, service) for caller in callers if caller}),
+                "metrics": self._metrics(row, window["duration_seconds"]),
+            })
+        return {"window": window, "parent": {"id": f"api:{service}:{api}", "name": api, "type": "api", "service": service, "api": api}, "nodes": nodes, "edges": [], "next_cursor": next_cursor, "page_size": max(1, min(MAX_LIMIT, limit)), "changes": {"new_nodes": [], "disappeared_nodes": [], "baseline": "precomputed_rollup"}, "anonymous": {}, "backend": self.backend}
 
-    def principal_services(self, principal: str, window: Dict[str, Any]) -> Dict[str, Any]:
+    def principal_directory(
+        self, window: Dict[str, Any], limit: int = 100,
+        search: Optional[str] = None, cursor: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Return a bounded, searchable principal list from topology rollups."""
+        rows, next_cursor = self._relationship_page(
+            "topology_principal_edges_5m", ["principal"], window,
+            None, "principal", limit, search, cursor,
+        )
+        items = []
+        for row in rows:
+            principal = canonical_principal(row.get("principal"))
+            metrics = self._metrics(row, window["duration_seconds"])
+            items.append({
+                "id": f"principal:{principal}", "name": principal,
+                "type": "principal", "principal": principal,
+                "service_count": _safe_int(row.get("service_count")),
+                "api_count": _safe_int(row.get("api_count")),
+                "metrics": metrics,
+            })
+        return {
+            "items": items, "next_cursor": next_cursor,
+            "page_size": max(1, min(MAX_LIMIT, limit)),
+            "window": window, "backend": self.backend,
+        }
+
+    def principal_services(
+        self, principal: str, window: Dict[str, Any], limit: int = 100,
+        search: Optional[str] = None, cursor: Optional[str] = None,
+    ) -> Dict[str, Any]:
         """Inverse projection for the User -> Service investigation path."""
         principal = canonical_principal(principal)
-        if self.backend == "elasticsearch":
-            rows = self._es_rows(["target_service"], window, {"principal": principal})
-            records = [{
-                "dimensions": {"target_service": row.get("target_service")},
-                "metrics": self._metrics(row, window["duration_seconds"]),
-            } for row in rows]
-            disappeared: List[Dict[str, Any]] = []
-            history = False
-        else:
-            records, disappeared, history = self._records_with_changes(
-                "topology_principal_edges_5m",
-                ["target_service"],
-                {"principal": principal},
-                window,
-            )
+        rows, next_cursor = self._relationship_page(
+            "topology_principal_edges_5m", ["target_service"], window,
+            {"principal": principal}, "target_service", limit, search, cursor,
+        )
         nodes = []
-        for record in records:
-            service = canonical_service(record["dimensions"].get("target_service"))
+        for row in rows:
+            service = canonical_service(row.get("target_service"))
+            callers = row.get("caller_services") or []
+            metrics = self._metrics(row, window["duration_seconds"])
+            metrics["api_count"] = _safe_int(row.get("api_count"))
             nodes.append({
                 "id": f"service:{service}",
                 "name": service,
                 "type": "service",
                 "service": service,
                 "principal": principal,
-                "metrics": record["metrics"],
+                "edge_ids": sorted({service_edge_id(caller, service) for caller in callers if caller}),
+                "metrics": metrics,
             })
         return {
             "window": window,
             "parent": {"id": f"principal:{principal}", "name": principal, "type": "principal", "principal": principal},
             "nodes": sorted(nodes, key=lambda node: (-node["metrics"]["request_count"], node["name"])),
+            "next_cursor": next_cursor,
+            "page_size": max(1, min(MAX_LIMIT, limit)),
             "edges": [],
             "changes": {
-                "new_nodes": [node for node in nodes if node["metrics"].get("change", {}).get("status") == "new"],
-                "disappeared_nodes": disappeared,
-                "baseline": "previous_window" if history else "insufficient_history",
+                "new_nodes": [], "disappeared_nodes": [],
+                "baseline": "precomputed_rollup",
             },
             "anonymous": self._anonymous_summary(window) if self.backend != "elasticsearch" else {},
             "backend": self.backend,
         }
 
-    def principal_service_apis(self, principal: str, service: str, window: Dict[str, Any]) -> Dict[str, Any]:
+    def principal_service_apis(
+        self, principal: str, service: str, window: Dict[str, Any], limit: int = 100,
+        search: Optional[str] = None, cursor: Optional[str] = None,
+    ) -> Dict[str, Any]:
         """Continue the inverse projection from one user service into its APIs."""
         principal, service = canonical_principal(principal), canonical_service(service)
         filters = {"principal": principal, "target_service": service}
-        if self.backend == "elasticsearch":
-            rows = self._es_rows(["target_api"], window, filters)
-            records = [{
-                "dimensions": {"target_api": row.get("target_api")},
-                "metrics": self._metrics(row, window["duration_seconds"]),
-            } for row in rows]
-            disappeared: List[Dict[str, Any]] = []
-            history = False
-        else:
-            records, disappeared, history = self._records_with_changes(
-                "topology_principal_edges_5m",
-                ["target_api"],
-                filters,
-                window,
-            )
+        rows, next_cursor = self._relationship_page(
+            "topology_principal_edges_5m", ["target_api"], window,
+            filters, "target_api", limit, search, cursor,
+        )
         nodes = []
-        for record in records:
-            api = canonical_api(record["dimensions"].get("target_api"), service)
+        for row in rows:
+            api = canonical_api(row.get("target_api"), service)
+            callers = row.get("caller_services") or []
             nodes.append({
                 "id": f"api:{service}:{api}",
                 "name": api,
@@ -728,17 +1017,19 @@ class InteractiveTopologyRepository:
                 "service": service,
                 "api": api,
                 "principal": principal,
-                "metrics": record["metrics"],
+                "edge_ids": sorted({service_edge_id(caller, service) for caller in callers if caller}),
+                "metrics": self._metrics(row, window["duration_seconds"]),
             })
         return {
             "window": window,
             "parent": {"id": f"service:{service}", "name": service, "type": "service", "service": service, "principal": principal},
             "nodes": sorted(nodes, key=lambda node: (-node["metrics"]["request_count"], node["name"])),
+            "next_cursor": next_cursor,
+            "page_size": max(1, min(MAX_LIMIT, limit)),
             "edges": [],
             "changes": {
-                "new_nodes": [node for node in nodes if node["metrics"].get("change", {}).get("status") == "new"],
-                "disappeared_nodes": disappeared,
-                "baseline": "previous_window" if history else "insufficient_history",
+                "new_nodes": [], "disappeared_nodes": [],
+                "baseline": "precomputed_rollup",
             },
             "anonymous": self._anonymous_summary(window) if self.backend != "elasticsearch" else {},
             "backend": self.backend,
@@ -746,8 +1037,6 @@ class InteractiveTopologyRepository:
 
     def service_metrics(self, service: str, window: Dict[str, Any]) -> Dict[str, Any]:
         service = canonical_service(service)
-        if self.backend == "elasticsearch":
-            return self._es_detail("service", service, "", window)
         rows = self._query_records("topology_api_edges_5m", ["target_service"], window["start_ms"], window["end_ms"], {"target_service": service})
         previous = self._query_records("topology_api_edges_5m", ["target_service"], window["start_ms"] - (window["end_ms"] - window["start_ms"]), window["start_ms"], {"target_service": service})
         metrics = self._metrics(rows[0] if rows else None, window["duration_seconds"])
@@ -782,8 +1071,6 @@ class InteractiveTopologyRepository:
         filters = {"target_api": api}
         if service:
             filters["target_service"] = canonical_service(service)
-        if self.backend == "elasticsearch":
-            return self._es_detail("api", service or "", api, window)
         rows = self._query_records("topology_principal_edges_5m", ["target_service", "target_api"], window["start_ms"], window["end_ms"], filters)
         metrics = self._metrics(rows[0] if rows else None, window["duration_seconds"])
         series = self._series("topology_principal_edges_5m", filters, window)
@@ -793,8 +1080,6 @@ class InteractiveTopologyRepository:
 
     def principal_metrics(self, principal: str, window: Dict[str, Any]) -> Dict[str, Any]:
         principal = canonical_principal(principal)
-        if self.backend == "elasticsearch":
-            return self._es_detail("principal", principal, "", window)
         rows = self._query_records("topology_principal_edges_5m", ["principal"], window["start_ms"], window["end_ms"], {"principal": principal})
         metrics = self._metrics(rows[0] if rows else None, window["duration_seconds"])
         series = self._series("topology_principal_edges_5m", {"principal": principal}, window)
@@ -933,64 +1218,44 @@ class InteractiveTopologyRepository:
     # ------------------------------------------------------------------
     # Elasticsearch server-side aggregation path
     # ------------------------------------------------------------------
-    def _es_bounds_ms(self) -> Tuple[Optional[int], Optional[int]]:
-        if not self._es_repo.url:
-            return None, None
-        body = {"size": 0, "aggs": {"bounds": {"stats": {"field": "@timestamp"}}}}
-        result = self._es_request(body)
-        bounds = ((result or {}).get("aggregations") or {}).get("bounds") or {}
-        return _safe_int(bounds.get("min")), _safe_int(bounds.get("max"))
-
-    def _es_request(self, body: Dict[str, Any]) -> Optional[Dict[str, Any]]:
-        if not self._es_repo.url:
-            return None
-        try:
-            with httpx.Client(base_url=self._es_repo.url, verify=self._es_repo.verify_tls, timeout=self._es_repo.timeout, headers=self._es_repo._get_headers(), auth=self._es_repo._get_auth()) as client:
-                response = client.post(f"/{self._es_repo.index}/_search", json=body)
-                if response.status_code != 200:
-                    log.warning("Elasticsearch topology aggregation returned HTTP %d", response.status_code)
-                    return None
-                return response.json()
-        except Exception as exc:
-            log.warning("Elasticsearch topology aggregation failed: %s", exc)
-            return None
-
-    @staticmethod
-    def _es_runtime() -> Dict[str, Any]:
-        return {
-            "topology.caller": {"type": "keyword", "script": {"source": "def v=params['_source']['caller_service']; if (v == null) { v=params['_source']['peer.service']; } if (v != null) emit(v.toString());"}},
-            "topology.target": {"type": "keyword", "script": {"source": "def v=params['_source']['target_service']; if (v == null) { def s=params['_source']['service']; if (s instanceof Map) { v=s['name']; } } if (v != null) emit(v.toString());"}},
-            "topology.api": {"type": "keyword", "script": {"source": "def v=params['_source']['operation_key']; if (v == null) { def t=params['_source']['transaction']; if (t instanceof Map) { v=t['name']; } } if (v == null) { v=params['_source']['name']; } if (v != null) emit(v.toString());"}},
-            "topology.principal": {"type": "keyword", "script": {"source": "def s=params['_source']; def v=s['principal_name']; if (v == null) v=s['enduser.id']; if (v == null) v=s['user.id']; if (v == null) v=s['labels.enduser.id']; if (v == null) { def u=s['enduser']; if (u instanceof Map) v=u['id']; } if (v == null) { def u=s['user']; if (u instanceof Map) { v=u['id']; if (v == null) v=u['name']; } } if (v == null) { def l=s['labels']; if (l instanceof Map) { v=l['enduser.id']; if (v == null) v=l['enduser_id']; } } if (v == null || v.toString().length() == 0) { emit('-anonymous-'); } else { emit(v.toString()); }"}},
-            "topology.duration_ms": {"type": "double", "script": {"source": "def v=params['_source']['duration_ms']; if (v == null) { def t=params['_source']['transaction']; if (t instanceof Map && t['duration'] instanceof Map) { v=t['duration']['us']; if (v != null) v=Double.parseDouble(v.toString())/1000.0; } } if (v != null) emit(Double.parseDouble(v.toString()));"}},
-            "topology.request_bytes": {"type": "long", "script": {"source": "def s=params['_source']; def v=s['request_bytes']; if (v == null) v=s['labels.http_request_content_length']; if (v == null) v=s['http.request.body.size']; if (v == null) { def l=s['labels']; if (l instanceof Map) { v=l['http_request_content_length']; if (v == null) v=l['http.request.body.size']; } } if (v == null) { def h=s['http']; if (h instanceof Map) { def r=h['request']; if (r instanceof Map) { v=r['bytes']; if (v == null && r['body'] instanceof Map) v=r['body']['size']; } } } if (v != null) { try { emit((long)Double.parseDouble(v.toString())); } catch (Exception ignored) {} }"}},
-            "topology.response_bytes": {"type": "long", "script": {"source": "def s=params['_source']; def v=s['response_bytes']; if (v == null) v=s['labels.http_response_content_length']; if (v == null) v=s['http.response.body.size']; if (v == null) { def l=s['labels']; if (l instanceof Map) { v=l['http_response_content_length']; if (v == null) v=l['http.response.body.size']; } } if (v == null) { def h=s['http']; if (h instanceof Map) { def r=h['response']; if (r instanceof Map) { v=r['bytes']; if (v == null && r['body'] instanceof Map) v=r['body']['size']; } } } if (v != null) { try { emit((long)Double.parseDouble(v.toString())); } catch (Exception ignored) {} }"}},
-        }
-
-    def _es_base_query(self, window: Dict[str, Any], filters: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
-        clauses: List[Dict[str, Any]] = [{"range": {"@timestamp": {"gte": window["start_ms"], "lt": window["end_ms"]}}}]
-        filters = filters or {}
-        mapping = {"target_service": "topology.target", "target_api": "topology.api", "principal": "topology.principal"}
-        for key, field in mapping.items():
-            if filters.get(key):
-                value = filters[key]
-                if key == "principal" and value in ANONYMOUS:
-                    value = "-anonymous-"
-                clauses.append({"term": {field: value}})
-        return {"bool": {"filter": clauses}}
-
     def _es_rows(self, dimensions: Sequence[str], window: Dict[str, Any], filters: Optional[Dict[str, Any]] = None) -> List[Dict[str, Any]]:
-        fields = {"caller_service": "topology.caller", "target_service": "topology.target", "target_api": "topology.api", "principal": "topology.principal"}
-        sources = [{dimension: {"terms": {"field": fields[dimension]}}} for dimension in dimensions]
-        body = {"size": 0, "runtime_mappings": self._es_runtime(), "query": self._es_base_query(window, filters), "aggs": {"relationships": {"composite": {"size": 500, "sources": sources}, "aggs": {"latency": {"percentiles": {"field": "topology.duration_ms", "percents": [50, 95, 99]}}, "request_bytes": {"sum": {"field": "topology.request_bytes"}}, "response_bytes": {"sum": {"field": "topology.response_bytes"}}, "first_seen": {"min": {"field": "@timestamp"}}, "last_seen": {"max": {"field": "@timestamp"}}, "errors": {"filter": {"bool": {"should": [{"range": {"http.response.status_code": {"gte": 400}}}, {"range": {"http_status": {"gte": 400}}}, {"term": {"event.outcome": "failure"}}], "minimum_should_match": 1}}}}}}}
-        result = self._es_request(body) or {}
-        buckets = (((result.get("aggregations") or {}).get("relationships") or {}).get("buckets") or [])
-        rows = []
-        for bucket in buckets:
-            key = bucket.get("key") or {}
-            percentiles = ((bucket.get("latency") or {}).get("values") or {})
-            rows.append({**{d: key.get(d, "") for d in dimensions}, "request_count": bucket.get("doc_count", 0), "error_count": (bucket.get("errors") or {}).get("doc_count", 0), "p50_latency_ms": percentiles.get("50.0", 0.0), "p95_latency_ms": percentiles.get("95.0", 0.0), "p99_latency_ms": percentiles.get("99.0", 0.0), "request_bytes": (bucket.get("request_bytes") or {}).get("value", 0), "response_bytes": (bucket.get("response_bytes") or {}).get("value", 0), "first_seen_ms": (bucket.get("first_seen") or {}).get("value"), "last_seen_ms": (bucket.get("last_seen") or {}).get("value"), "evidence_types": ["OTEL_PARENT_CHILD"], "confidence": 1.0})
-        return rows
+        """Project topology dimensions from worker metric buckets only."""
+        filters = filters or {}
+        column_map = {
+            "caller_service": "caller_service", "target_service": "target_service",
+            "target_api": "operation", "principal": "principal_name",
+        }
+        selected = [f"{column_map[dimension]} AS {dimension}" for dimension in dimensions]
+        clauses = ["bucket_size=300", "bucket_start*1000>=?", "bucket_start*1000<?"]
+        args: List[Any] = [window["start_ms"], window["end_ms"]]
+        for key, column in column_map.items():
+            if filters.get(key) is not None:
+                clauses.append(f"{column}=?")
+                args.append(filters[key])
+        if filters.get("principal") in ANONYMOUS:
+            clauses.append("principal_name IN ('unknown','-anonymous-','')")
+        dimensions_sql = ",".join(selected)
+        group_sql = ",".join(column_map[dimension] for dimension in dimensions)
+        select_sql = f"{dimensions_sql}," if dimensions_sql else ""
+        sql = f"""
+            SELECT {select_sql}sum(request_count) request_count,sum(error_count) error_count,
+                   max(latency_p50) p50_latency_ms,max(latency_p95) p95_latency_ms,
+                   max(latency_p99) p99_latency_ms,sum(request_bytes) request_bytes,
+                   sum(response_bytes) response_bytes,
+                   count(DISTINCT principal_name) unique_principals,
+                   sum(if(principal_name IN ('unknown','-anonymous-',''),request_count,0)) anonymous_requests,
+                   min(bucket_start)*1000 first_seen_ms,max(bucket_start+bucket_size)*1000 last_seen_ms,
+                   [] evidence_types,0 confidence,
+                   groupUniqArrayIf(caller_service,caller_service!='') caller_services,
+                   uniqExact(target_service) service_count,uniqExact(operation) api_count,
+                   sum(request_bytes_samples) request_bytes_samples,
+                   sum(response_bytes_samples) response_bytes_samples
+            FROM metric_buckets FINAL WHERE {' AND '.join(clauses)}
+            {f'GROUP BY {group_sql}' if group_sql else ''}
+            ORDER BY request_count DESC LIMIT 500
+        """
+        with get_connection(self.db_path) as db:
+            return [dict(row) for row in db.execute(sql, args)]
 
     def _es_graph(self, window: Dict[str, Any]) -> Dict[str, Any]:
         rows = self._es_rows(["caller_service", "target_service"], window)
@@ -1001,7 +1266,7 @@ class InteractiveTopologyRepository:
             metrics = self._metrics(row, window["duration_seconds"])
             for name in (c, t):
                 nodes.setdefault(name, {"id": f"service:{name}", "name": name, "type": "service", "service": name, "metrics": metrics})
-            edges.append({"id": f"service-edge:{c}->{t}", "source": f"service:{c}", "target": f"service:{t}", "source_name": c, "target_name": t, "metrics": metrics, "evidence_type": "direct", "direct": True, "inferred": False})
+            edges.append({"id": service_edge_id(c, t), "source": f"service:{c}", "target": f"service:{t}", "source_name": c, "target_name": t, "metrics": metrics, "evidence_type": "direct", "direct": True, "inferred": False})
         return {"window": window, "nodes": list(nodes.values()), "edges": edges, "changes": {"baseline": "insufficient_history", "new_edges": [], "disappeared_edges": []}, "anonymous": {"total_requests": sum(_safe_int(r.get("request_count")) for r in rows), "identified_requests": 0, "anonymous_requests": 0, "identified_request_percentage": 0.0, "anonymous_request_percentage": 0.0, "anonymous_tps": 0.0, "top_services": [], "top_apis": []}, "backend": self.backend}
 
     def _es_expansion(self, kind: str, service: str, api: str, window: Dict[str, Any]) -> Dict[str, Any]:
@@ -1041,28 +1306,3 @@ class InteractiveTopologyRepository:
         }
         metrics = self._metrics(summary, window["duration_seconds"])
         return {"entity": {"name": value if kind != "api" else api, "type": kind, "service": value if kind in ("service", "api") else None, "api": api if kind == "api" else None, "principal": value if kind == "principal" else None}, "metrics": metrics, "series": series, "changes": {"baseline": "insufficient_history"}, "anonymous": {}, "backend": self.backend}
-
-    def _es_ips(self, principal: str, window: Dict[str, Any], page_size: int, cursor: Optional[List[str]], service: Optional[str], api: Optional[str], filter_name: str) -> Dict[str, Any]:
-        # Runtime composite IP aggregation is intentionally bounded. It uses
-        # ES's `after` key as the cursor and never emits source IPs as graph nodes.
-        filters = {"principal": principal}
-        if service:
-            filters["target_service"] = service
-        if api:
-            filters["target_api"] = api
-        body = {"size": 0, "runtime_mappings": self._es_runtime(), "query": self._es_base_query(window, filters), "aggs": {"ips": {"composite": {"size": page_size, "sources": [{"source_ip": {"terms": {"field": "client.ip.keyword"}}}], **({"after": {"source_ip": cursor[0]}} if cursor else {})}, "aggs": {"request_bytes": {"sum": {"field": "topology.request_bytes"}}, "response_bytes": {"sum": {"field": "topology.response_bytes"}}}}}}
-        result = self._es_request(body) or {}
-        buckets = (((result.get("aggregations") or {}).get("ips") or {}).get("buckets") or [])
-        items = []
-        for bucket in buckets:
-            ip = str((bucket.get("key") or {}).get("source_ip") or "unknown")
-            role, label, confidence = classify_source_ip_role(ip)
-            item = {"source_ip": ip, "request_count": bucket.get("doc_count", 0), "tps": round(_safe_int(bucket.get("doc_count")) / max(1, window["duration_seconds"]), 3), **bandwidth_fields((bucket.get("request_bytes") or {}).get("value", 0), (bucket.get("response_bytes") or {}).get("value", 0), window["duration_seconds"]), "is_load_balancer": role in ("load_balancer", "reverse_proxy", "nat_gateway"), "source_ip_role": role, "role_label": label, "attribution_confidence": confidence, "is_new_ip": False}
-            if filter_name == "lb" and not item["is_load_balancer"]:
-                continue
-            if filter_name == "direct" and item["is_load_balancer"]:
-                continue
-            items.append(item)
-        after = ((result.get("aggregations") or {}).get("ips") or {}).get("after_key")
-        next_cursor = encode_cursor([str(after.get("source_ip")), "", "", ""]) if after else None
-        return {"principal": principal, "items": items, "next_cursor": next_cursor, "page_size": page_size, "window": window, "filters": {"service": service, "api": api, "filter": filter_name}, "backend": self.backend}
