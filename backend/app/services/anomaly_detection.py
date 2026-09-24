@@ -235,7 +235,7 @@ def detect_anomalies(
     for r in current_rows:
         p_name = r.get("principal_name")
         tgt_svc = r.get("target_service")
-        if not p_name or not tgt_svc:
+        if not p_name or str(p_name).strip().lower() in {"unknown", "-anonymous-", "anonymous"} or not tgt_svc:
             continue
         pk = (p_name, tgt_svc)
         if pk not in principal_aggregates:
