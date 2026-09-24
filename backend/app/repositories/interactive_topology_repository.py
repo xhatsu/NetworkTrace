@@ -741,7 +741,23 @@ class InteractiveTopologyRepository:
     def _es_runtime() -> Dict[str, Any]:
         """Shared worker runtime fields for bounded Elasticsearch rollups."""
         return {
-            "topology.caller": {"type": "keyword", "script": {"source": "def v=params['_source']['caller_service']; if (v == null) { v=params['_source']['peer.service']; } if (v != null) emit(v.toString());"}},
+            "topology.caller": {"type": "keyword", "script": {"source": (
+                "def s=params['_source']; def v=s['caller_service']; "
+                "if (v == null) v=s['caller.service']; "
+                "if (v == null) { def c=s['caller']; if (c instanceof Map) { def svc=c['service']; "
+                "if (svc instanceof Map) v=svc['name']; else v=svc; } } "
+                "if (v == null) v=s['parent.service.name']; "
+                "if (v == null) { def p=s['parent']; if (p instanceof Map) { def svc=p['service']; "
+                "if (svc instanceof Map) v=svc['name']; } } "
+                "if (v == null) v=s['peer.service.name']; "
+                "if (v == null) v=s['peer.service']; "
+                "if (v == null) { def p=s['peer']; if (p instanceof Map) { def svc=p['service']; "
+                "if (svc instanceof Map) v=svc['name']; else v=svc; } } "
+                "if (v == null) { def l=s['labels']; if (l instanceof Map) { v=l['caller_service']; "
+                "if (v == null) v=l['caller.service']; if (v == null) v=l['net_peer_service']; } } "
+                "if (v instanceof Map) v=v['name']; "
+                "if (v != null) { String caller=v.toString().trim(); if (caller.length() > 0) emit(caller); }"
+            )}},
             "topology.target": {"type": "keyword", "script": {"source": "def v=params['_source']['target_service']; if (v == null) { def s=params['_source']['service']; if (s instanceof Map) { v=s['name']; } } if (v != null) emit(v.toString());"}},
             "topology.api": {"type": "keyword", "script": {"source": "def v=params['_source']['operation_key']; if (v == null) { def t=params['_source']['transaction']; if (t instanceof Map) { v=t['name']; } } if (v == null) { v=params['_source']['name']; } if (v != null) emit(v.toString());"}},
             "topology.principal": {"type": "keyword", "script": {"source": "def s=params['_source']; def v=s['principal_name']; if (v == null) v=s['enduser.id']; if (v == null) v=s['user.id']; if (v == null) v=s['labels.enduser.id']; if (v == null) { def u=s['enduser']; if (u instanceof Map) v=u['id']; } if (v == null) { def u=s['user']; if (u instanceof Map) { v=u['id']; if (v == null) v=u['name']; } } if (v == null) { def l=s['labels']; if (l instanceof Map) { v=l['enduser.id']; if (v == null) v=l['enduser_id']; } } if (v == null || v.toString().length() == 0) { emit('-anonymous-'); } else { emit(v.toString()); }"}},
@@ -1336,17 +1352,17 @@ class InteractiveTopologyRepository:
     ) -> List[Dict[str, Any]]:
         """Merge worker metrics with observed, time-scoped relationship rollups.
 
-        Elasticsearch transactions may not identify a caller, while the topology
-        edge tables still contain observed parent-child relationships. Prefer
-        those rows when both stores describe the same relationship.
+        Worker metric buckets are the primary source of caller attribution.
+        Older materialized edges fill gaps where Elasticsearch transactions did
+        not carry an explicit caller in the selected window.
         """
         metric_rows = self._es_rows(dimensions, window, filters)
         materialized_rows = self._query_records(
             table, dimensions, window["start_ms"], window["end_ms"], filters,
         )
         key = lambda row: tuple(str(row.get(dimension) or "") for dimension in dimensions)
-        merged = {key(row): row for row in metric_rows}
-        merged.update({key(row): row for row in materialized_rows})
+        merged = {key(row): row for row in materialized_rows}
+        merged.update({key(row): row for row in metric_rows})
         return list(merged.values())
 
     def _es_graph(self, window: Dict[str, Any]) -> Dict[str, Any]:

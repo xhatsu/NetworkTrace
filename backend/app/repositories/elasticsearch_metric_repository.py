@@ -129,11 +129,15 @@ class ElasticsearchMetricRepository:
         stats = source.get("latency") or {}
         percentile = (source.get("latency_percentiles") or {}).get("values") or {}
         requests = int(source.get("doc_count") or 0)
+        target = str(key.get("service") or "unknown").strip()[:200] or "unknown"
+        caller = str(key.get("caller") or "").strip()[:200]
+        if caller.lower() in ("unknown", "-anonymous-") or caller == target:
+            caller = ""
         return MetricBucket(
             bucket_start=int(key.get("bucket_start_ms") or 0) // 1000,
             bucket_size=bucket_size,
-            caller_service=str(key.get("caller") or "")[:200],
-            target_service=str(key.get("service") or "unknown")[:200],
+            caller_service=caller,
+            target_service=target,
             principal_name=str(key.get("principal") or "-anonymous-")[:200],
             operation=str(key.get("operation") or "unknown")[:500],
             request_count=requests,
