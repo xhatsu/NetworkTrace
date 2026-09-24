@@ -3,11 +3,6 @@ export type Position = {
   y: number;
 };
 
-export function serviceNodeWouldOverlap(position: Position, other: Position): boolean {
-  return Math.abs(position.x - other.x) < SERVICE_NODE_WIDTH + SERVICE_NODE_CLEARANCE
-    && Math.abs(position.y - other.y) < SERVICE_NODE_HEIGHT + SERVICE_NODE_CLEARANCE;
-}
-
 export type LayoutNode = {
   id: string;
 };
@@ -29,6 +24,18 @@ const CROSSING_SWEEPS = 8;
 export const SERVICE_NODE_WIDTH = 156;
 export const SERVICE_NODE_HEIGHT = 66;
 export const SERVICE_NODE_CLEARANCE = 24;
+
+export function serviceNodeWouldOverlap(
+  position: Position,
+  other: Position,
+  canvasWidth: number,
+  canvasHeight: number,
+): boolean {
+  const horizontalThreshold = (SERVICE_NODE_WIDTH + SERVICE_NODE_CLEARANCE) * 1000 / canvasWidth;
+  const verticalThreshold = (SERVICE_NODE_HEIGHT + SERVICE_NODE_CLEARANCE) * 620 / canvasHeight;
+  return Math.abs(position.x - other.x) < horizontalThreshold
+    && Math.abs(position.y - other.y) < verticalThreshold;
+}
 
 const SERVICE_CARD_HALF_WIDTH = SERVICE_NODE_WIDTH / 2;
 const SERVICE_CARD_HALF_HEIGHT = SERVICE_NODE_HEIGHT / 2;

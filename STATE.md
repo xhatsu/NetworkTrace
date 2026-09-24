@@ -1548,4 +1548,4 @@ Exposes standard Prometheus 0.0.4 text exposition format at `GET /metrics` on po
 ## Topology service node spacing (2026-09-24)
 
 - Increased separation between service groups, SCC grid members, and disconnected components in the topology auto-layout.
-- Dragging a service node now checks its destination against other service cards and holds its last clear position when the proposed location would overlap a neighbor.
+- Fixed service dragging from card content: selection buttons may begin a drag, while links and the expand control remain excluded. The overlap guard converts card dimensions into graph coordinates using the actual canvas size, so it no longer blocks safe movement differently across viewport sizes.

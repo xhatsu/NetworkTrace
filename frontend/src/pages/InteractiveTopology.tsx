@@ -656,13 +656,13 @@ function GraphSurface({
             className={`absolute ${node.type === "service" ? "" : "w-44"} -translate-x-1/2 -translate-y-1/2 cursor-move`}
             style={{ left: `${pos.x / 10}%`, top: `${pos.y / 6.2}%`, width: node.type === "service" ? SERVICE_NODE_WIDTH : undefined, zIndex: isSelected ? 30 : 10 }}
             onPointerDown={(event) => {
-              if (event.button !== 0 || (event.target as Element).closest("a, button, [data-node-drag-ignore='true']")) return;
+              if (event.button !== 0 || (event.target as Element).closest("a, [data-node-drag-ignore='true']")) return;
               nodeDrag.current = { nodeId: node.id, startX: event.clientX, startY: event.clientY, origin: pos, moved: false };
             }}
             onPointerMove={(event) => {
               if (!nodeDrag.current || nodeDrag.current.nodeId !== node.id) return;
               const bounds = event.currentTarget.parentElement?.parentElement?.getBoundingClientRect();
-              if (!bounds) return;
+              if (!bounds || bounds.width <= 0 || bounds.height <= 0) return;
               const dx = event.clientX - nodeDrag.current.startX;
               const dy = event.clientY - nodeDrag.current.startY;
               if (Math.abs(dx) + Math.abs(dy) > 3 && !nodeDrag.current.moved) {
@@ -674,17 +674,22 @@ function GraphSurface({
                 y: nodeDrag.current.origin.y + (dy / zoom) * (620 / bounds.height),
               };
               const collides = Object.entries(positions).some(([otherId, otherPosition]) =>
-                otherId !== node.id && serviceNodeWouldOverlap(nextPosition, otherPosition)
+                otherId !== node.id && serviceNodeWouldOverlap(nextPosition, otherPosition, bounds.width, bounds.height)
               );
               if (!collides) onMoveNode(node.id, nextPosition);
             }}
             onPointerUp={(event) => {
               if (!nodeDrag.current || nodeDrag.current.nodeId !== node.id) return;
+              const moved = nodeDrag.current.moved;
               const captured = event.currentTarget.hasPointerCapture(event.pointerId);
               nodeDrag.current = null;
+              if (moved) {
+                suppressCanvasClick.current = true;
+                window.setTimeout(() => { suppressCanvasClick.current = false; }, 0);
+              }
               if (captured) event.currentTarget.releasePointerCapture(event.pointerId);
             }}
-            onPointerCancel={() => { nodeDrag.current = null; }}
+            onPointerCancel={() => { nodeDrag.current = null; suppressCanvasClick.current = false; }}
             onLostPointerCapture={() => { nodeDrag.current = null; }}
           >
             {node.type === "service" ? (
