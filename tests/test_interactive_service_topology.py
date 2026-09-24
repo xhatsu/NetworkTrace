@@ -260,6 +260,57 @@ def test_split_trace_storage_topology_reads_worker_metric_buckets(tmp_path, monk
     assert api_response.json()["nodes"][0]["name"] == "navidrome/SELECT artwork_queue"
 
 
+def test_split_trace_storage_retains_observed_service_connections(tmp_path, monkeypatch):
+    from types import SimpleNamespace
+
+    from backend.app.models.aggregate import MetricBucket
+    from backend.app.repositories.aggregate_repository import AggregateRepository
+    from backend.app.repositories.db_context import get_connection
+    import backend.app.repositories.interactive_topology_repository as topology_repository
+    from backend.config import settings
+
+    db_path = tmp_path / "split-topology-relationships.db"
+    StorageRepository(db_path).migrate()
+    bucket_start = int(time.time() // 300) * 300
+    AggregateRepository(str(db_path)).save_buckets([MetricBucket(
+        bucket_start=bucket_start, bucket_size=300, caller_service="",
+        target_service="payments", principal_name="alice", operation="POST /pay",
+        request_count=10,
+    )])
+    with get_connection(str(db_path)) as db:
+        db.executemany(
+            "INSERT INTO topology_service_edges_5m (bucket_start,caller_service,target_service,request_count,evidence_type,updated_at_ms) VALUES (?,?,?,?,?,?)",
+            [(bucket_start, "checkout", "payments", 7, "OTEL_PARENT_CHILD", bucket_start * 1000),
+             (bucket_start, "batch", "payments", 3, "OTEL_PARENT_CHILD", bucket_start * 1000)],
+        )
+        db.executemany(
+            "INSERT INTO topology_api_edges_5m (bucket_start,caller_service,target_service,target_api,request_count,evidence_type,updated_at_ms) VALUES (?,?,?,?,?,?,?)",
+            [(bucket_start, "checkout", "payments", "POST /pay", 7, "OTEL_PARENT_CHILD", bucket_start * 1000),
+             (bucket_start, "batch", "payments", "GET /status", 3, "OTEL_PARENT_CHILD", bucket_start * 1000)],
+        )
+        db.executemany(
+            "INSERT INTO topology_principal_edges_5m (bucket_start,principal,caller_service,target_service,target_api,request_count,evidence_type,updated_at_ms) VALUES (?,?,?,?,?,?,?,?)",
+            [(bucket_start, "alice", "checkout", "payments", "POST /pay", 7, "OTEL_PARENT_CHILD", bucket_start * 1000),
+             (bucket_start, "bob", "batch", "payments", "GET /status", 3, "OTEL_PARENT_CHILD", bucket_start * 1000)],
+        )
+    monkeypatch.setattr(topology_repository, "settings", SimpleNamespace(
+        storage_backend="clickhouse", trace_storage_backend="elasticsearch",
+        max_range_days=settings.max_range_days,
+    ))
+    repo = InteractiveTopologyRepository(str(db_path))
+    window = {"start_ms": bucket_start * 1000, "end_ms": (bucket_start + 300) * 1000,
+              "duration_seconds": 300, "label": "5m", "baseline": "previous_window"}
+
+    graph = repo.service_graph(window)
+    assert {(edge["source_name"], edge["target_name"]) for edge in graph["edges"]} == {
+        ("checkout", "payments"), ("batch", "payments"),
+    }
+    assert all(edge["direct"] for edge in graph["edges"])
+    assert next(node for node in graph["nodes"] if node["name"] == "payments")["metrics"]["request_count"] == 10
+    assert [edge["source_name"] for edge in repo.api_connections("payments", "POST /pay", window)["edges"]] == ["checkout"]
+    assert [edge["source_name"] for edge in repo.principal_connections("alice", window)["edges"]] == ["checkout"]
+
+
 def test_topology_api_rejects_invalid_window_without_store_access():
     async def request():
         transport = httpx.ASGITransport(app=app)

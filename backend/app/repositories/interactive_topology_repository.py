@@ -677,8 +677,12 @@ class InteractiveTopologyRepository:
     def _records_with_changes(self, table: str, dimensions: Sequence[str], filters: Optional[Dict[str, Any]], window: Dict[str, Any]) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]], bool]:
         duration = window["end_ms"] - window["start_ms"]
         if self.uses_worker_metric_buckets:
-            current_rows = self._es_rows(dimensions, window, filters)
-            previous_rows = self._es_rows(dimensions, {**window, "start_ms": window["start_ms"] - duration, "end_ms": window["start_ms"]}, filters)
+            current_rows = self._split_relationship_rows(table, dimensions, window, filters)
+            previous_rows = self._split_relationship_rows(
+                table, dimensions,
+                {**window, "start_ms": window["start_ms"] - duration, "end_ms": window["start_ms"]},
+                filters,
+            )
             previous_available = bool(previous_rows)
         else:
             current_rows = self._query_records(table, dimensions, window["start_ms"], window["end_ms"], filters)
@@ -1326,8 +1330,29 @@ class InteractiveTopologyRepository:
             row["request_count"] = row.pop("total_request_count", 0)
         return rows
 
+    def _split_relationship_rows(
+        self, table: str, dimensions: Sequence[str], window: Dict[str, Any],
+        filters: Optional[Dict[str, Any]] = None,
+    ) -> List[Dict[str, Any]]:
+        """Merge worker metrics with observed, time-scoped relationship rollups.
+
+        Elasticsearch transactions may not identify a caller, while the topology
+        edge tables still contain observed parent-child relationships. Prefer
+        those rows when both stores describe the same relationship.
+        """
+        metric_rows = self._es_rows(dimensions, window, filters)
+        materialized_rows = self._query_records(
+            table, dimensions, window["start_ms"], window["end_ms"], filters,
+        )
+        key = lambda row: tuple(str(row.get(dimension) or "") for dimension in dimensions)
+        merged = {key(row): row for row in metric_rows}
+        merged.update({key(row): row for row in materialized_rows})
+        return list(merged.values())
+
     def _es_graph(self, window: Dict[str, Any]) -> Dict[str, Any]:
-        rows = self._es_rows(["caller_service", "target_service"], window)
+        rows = self._split_relationship_rows(
+            "topology_service_edges_5m", ["caller_service", "target_service"], window,
+        )
         target_rows = self._es_rows(["target_service"], window)
         nodes: Dict[str, Any] = {}
         edges = []
@@ -1345,8 +1370,9 @@ class InteractiveTopologyRepository:
             metrics = self._metrics(row, window["duration_seconds"])
             nodes.setdefault(c, {"id": f"service:{c}", "name": c, "type": "service", "service": c, "metrics": metrics})
             nodes.setdefault(t, {"id": f"service:{t}", "name": t, "type": "service", "service": t, "metrics": metrics})
-            edges.append({"id": service_edge_id(c, t), "source": f"service:{c}", "target": f"service:{t}", "source_name": c, "target_name": t, "metrics": metrics, "evidence_type": "direct", "direct": True, "inferred": False})
-        return {"window": window, "nodes": list(nodes.values()), "edges": edges, "changes": {"baseline": "insufficient_history", "new_edges": [], "disappeared_edges": []}, "anonymous": self._anonymous_summary(window), "backend": self.backend}
+            direct = metrics["evidence_type"] == "direct"
+            edges.append({"id": service_edge_id(c, t), "source": f"service:{c}", "target": f"service:{t}", "source_name": c, "target_name": t, "metrics": metrics, "evidence_type": metrics["evidence_type"], "direct": direct, "inferred": not direct})
+        return {"window": window, "nodes": sorted(nodes.values(), key=lambda node: node["name"]), "edges": edges, "changes": {"baseline": "insufficient_history", "new_edges": [], "disappeared_edges": []}, "anonymous": self._anonymous_summary(window), "backend": self.backend}
 
     def _es_expansion(self, kind: str, service: str, api: str, window: Dict[str, Any]) -> Dict[str, Any]:
         filters = {"target_service": service}

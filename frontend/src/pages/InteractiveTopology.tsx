@@ -404,14 +404,16 @@ function ServiceNodeCard({
     >
       <div className="flex h-full flex-col px-2 py-1.5">
         <div className="flex min-w-0 items-center gap-1.5 leading-4">
-          <EntityLink
-            entity={{ kind: "service", name: node.name }}
+          <button
+            type="button"
+            onClick={(event) => { event.stopPropagation(); onSelect(); }}
             className="flex min-w-0 flex-1 items-center gap-1.5 text-left focus-visible:ring-1 focus-visible:ring-sky-300"
             title={node.name}
+            aria-label={`Inspect service ${node.name}`}
           >
             <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${healthDotClass(health)}`} title={health} />
             <span className="min-w-0 flex-1 truncate text-[11px] font-semibold leading-4 text-slate-100">{node.name}</span>
-          </EntityLink>
+          </button>
           {canExpand && (
             <button
               type="button"
@@ -692,17 +694,9 @@ function GraphSurface({
             ) : (
               <>
                 <div className={`group w-full rounded-lg border border-l-4 bg-[#171a28] px-3 py-2 text-left transition hover:border-white/70 ${tone.border} ${isSelected ? "border-white ring-1 ring-white/70" : node.metrics.change?.status === "new" ? "border-cyan-400/70" : node.metrics.change?.status === "changed" ? "border-amber-400/70" : "border-[#303449]"}`}>
-                  {node.type === "principal" ? (
-                    <EntityLink entity={{ kind: "user", principal: node.principal || node.name }} className={`flex items-center gap-2 text-xs font-semibold ${tone.text} hover:underline`}>
-                      <NodeIcon type={node.type} /><span className="truncate">{node.name}</span>
-                    </EntityLink>
-                  ) : node.service ? (
-                    <EntityLink entity={{ kind: "api", service: node.service, operation: node.api || node.name }} className={`flex items-center gap-2 text-xs font-semibold ${tone.text} hover:underline`}>
-                      <NodeIcon type={node.type} /><span className="truncate">{node.name}</span>
-                    </EntityLink>
-                  ) : (
-                    <span className={`flex items-center gap-2 text-xs font-semibold ${tone.text}`}><NodeIcon type={node.type} /><span className="truncate">{node.name}</span></span>
-                  )}
+                  <button type="button" className={`flex items-center gap-2 text-xs font-semibold focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-cyan-400 ${tone.text}`} onClick={(event) => { event.stopPropagation(); onSelect({ kind: "node", node }); }} aria-label={`Inspect ${node.type} ${node.name}`}>
+                    <NodeIcon type={node.type} /><span className="truncate">{node.name}</span>
+                  </button>
                   <span className={`mt-0.5 block text-[9px] uppercase tracking-wider ${tone.text}`}>{node.type === "principal" ? t("User") : t("API")}</span>
                   <button type="button" className="mt-1 block w-full text-left focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-cyan-400" onClick={(event) => { event.stopPropagation(); onSelect({ kind: "node", node }); }} aria-label={`Inspect ${node.type} ${node.name}`}>
                     <MetricStrip metrics={node.metrics} vertical />
@@ -824,23 +818,13 @@ function RelationshipListPanel({
         {loading && <p className="px-2 py-3 text-xs text-[#94a3b8]">{t("Loading...")}</p>}
         {error && <p className="px-2 py-3 text-xs text-rose-300">{t("This list could not be loaded.")}</p>}
         {!loading && !error && items.length === 0 && <p className="px-2 py-3 text-xs text-[#94a3b8]">{t("No matching items in this time window.")}</p>}
-        {items.map((item) => {
-          const itemEntity: EntityRef | undefined = item.type === "service"
-            ? { kind: "service", name: item.name }
-            : item.type === "principal"
-              ? { kind: "user", principal: item.principal || item.name }
-              : item.service ? { kind: "api", service: item.service, operation: item.api || item.name } : undefined;
-          return (
-            <div key={item.id} data-testid="topology-drilldown-item" className={`mb-0.5 flex w-full items-center gap-1.5 rounded px-1.5 py-1 transition ${selectedId === item.id ? "bg-[#2a2a25] ring-1 ring-yellow-400/70" : "hover:bg-[#202333]"}`}>
-              <span className={`grid h-6 w-6 shrink-0 place-items-center rounded border border-[#303449] ${entityTone(item.type).soft} ${entityTone(item.type).text}`}><NodeIcon type={item.type} /></span>
-              <span className="min-w-0 flex-1">
-                {itemEntity ? <EntityLink entity={itemEntity} className={`block truncate text-[11px] font-medium hover:underline ${entityTone(item.type).text}`}>{item.name}</EntityLink> : <span className={`block truncate text-[11px] font-medium ${entityTone(item.type).text}`}>{item.name}</span>}
-                <button type="button" onClick={() => onSelect(item)} aria-label={`${t("Select relationship")} ${item.name}`} className="block truncate text-left font-mono text-[9px] text-[#64748b] hover:text-[#cbd5e1]">{n(item.metrics.request_count, 0)} {t("requests")} · {n(item.metrics.tps, 2)} TPS</button>
-              </span>
-              {item.type === "service" && item.metrics.api_count !== undefined && <span className="shrink-0 text-[10px] text-[#94a3b8]">{item.metrics.api_count} APIs</span>}
-            </div>
-          );
-        })}
+        {items.map((item) => (
+          <button key={item.id} type="button" data-testid="topology-drilldown-item" onClick={() => onSelect(item)} className={`mb-0.5 flex w-full items-center gap-1.5 rounded px-1.5 py-1 text-left transition focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-yellow-400 ${selectedId === item.id ? "bg-[#2a2a25] ring-1 ring-yellow-400/70" : "hover:bg-[#202333]"}`}>
+            <span className={`grid h-6 w-6 shrink-0 place-items-center rounded border border-[#303449] ${entityTone(item.type).soft} ${entityTone(item.type).text}`}><NodeIcon type={item.type} /></span>
+            <span className="min-w-0 flex-1"><span className={`block truncate text-[11px] font-medium ${entityTone(item.type).text}`}>{item.name}</span><span className="block truncate font-mono text-[9px] text-[#64748b]">{n(item.metrics.request_count, 0)} {t("requests")} · {n(item.metrics.tps, 2)} TPS</span></span>
+            {item.type === "service" && item.metrics.api_count !== undefined && <span className="shrink-0 text-[10px] text-[#94a3b8]">{item.metrics.api_count} APIs</span>}
+          </button>
+        ))}
         {hasMore && <button type="button" className="btn mt-1 w-full justify-center" onClick={onLoadMore}>{t("Load more")}</button>}
       </div>
     </section>
