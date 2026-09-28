@@ -188,6 +188,14 @@ class Settings:
     llm_allow_loopback_http: bool = os.getenv("OTEL_LLM_ALLOW_LOOPBACK_HTTP", "false").lower() in ("true", "1", "yes")
     llm_context_tokens: int = int(os.getenv("OTEL_LLM_CONTEXT_TOKENS", "32768"))
 
+    # L4 semantic assessment has a separate provider contract from deep investigations.
+    semantic_assessment_enabled: bool = os.getenv("OTEL_SEMANTIC_ASSESSMENT_ENABLED", "false").lower() in ("true", "1", "yes")
+    semantic_provider: str = os.getenv("OTEL_SEMANTIC_PROVIDER", "openrouter").strip().lower()
+    semantic_base_url: str = os.getenv("OTEL_SEMANTIC_BASE_URL", "https://openrouter.ai").rstrip("/")
+    semantic_api_key: str = field(default=os.getenv("OTEL_SEMANTIC_API_KEY", ""), repr=False)
+    semantic_model: str = os.getenv("OTEL_SEMANTIC_MODEL", "typesafe/jev-1.13")
+    semantic_timeout_seconds: int = int(os.getenv("OTEL_SEMANTIC_TIMEOUT_SECONDS", "30"))
+
     @property
     def worker_start_time_ms(self) -> int | None:
         ts = _parse_timestamp_setting(self.worker_start_time)

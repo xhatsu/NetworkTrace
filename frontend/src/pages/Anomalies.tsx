@@ -573,12 +573,12 @@ function LegacyAnomaliesPage() {
                           {/* Anomaly Detector */}
                           <td className="px-4">
                             <div className="flex flex-wrap items-center gap-1.5">
-                              <span className={`inline-block rounded border px-2 py-0.5 text-[9px] font-medium uppercase tracking-wide ${detectorBadgeColor}`}>
+                              <span className={`inline-block rounded border px-2 py-0.5 text-[10px] font-medium uppercase tracking-wide ${detectorBadgeColor}`}>
                                 {t(a.anomaly_type || "", (a.anomaly_type || "").replaceAll("_", " "))}
                               </span>
                               {grp.occurrences > 1 && (
                                 <span
-                                  className="inline-flex items-center gap-1 rounded-md border border-cyan-500/40 bg-cyan-500/20 px-1.5 py-0.5 text-[9px] font-bold text-cyan-200 font-mono"
+                                  className="inline-flex items-center gap-1 rounded-md border border-cyan-500/40 bg-cyan-500/20 px-1.5 py-0.5 text-[10px] font-bold text-cyan-200 font-mono"
                                   title={t("Recurring continuous anomaly across multiple time windows")}
                                 >
                                   <Repeat size={9} />
@@ -595,17 +595,17 @@ function LegacyAnomaliesPage() {
                                 <span className="font-semibold text-[#f5f3fa]">
                                   {dStart.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })} – {dEnd.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                                 </span>
-                                <span className="block text-[9px] font-mono text-cyan-300 font-bold">
+                                <span className="block text-[10px] font-mono text-cyan-300 font-bold">
                                   {durationMins >= 60 ? `${(durationMins / 60).toFixed(1)}h` : `${durationMins}m`} {t("continuous")}
                                 </span>
-                                <span className="block text-[9px] text-[#9e96b8]">
+                                <span className="block text-[10px] text-[#9e96b8]">
                                   {dEnd.toLocaleDateString()}
                                 </span>
                               </div>
                             ) : (
                               <div>
                                 <span>{dEnd.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
-                                <span className="block text-[9px] text-[#9e96b8]">
+                                <span className="block text-[10px] text-[#9e96b8]">
                                   {dEnd.toLocaleDateString()}
                                 </span>
                               </div>
@@ -617,7 +617,7 @@ function LegacyAnomaliesPage() {
                             <div>
                               <span>{n(grp.latestValue || 0)} {a.unit || ""}</span>
                               {grp.peakValue > grp.latestValue && (
-                                <span className="block text-[9px] text-[#9e96b8] font-normal">
+                                <span className="block text-[10px] text-[#9e96b8] font-normal">
                                   peak {n(grp.peakValue)} {a.unit || ""}
                                 </span>
                               )}
@@ -856,7 +856,7 @@ function LegacyAnomaliesPage() {
 
                         {/* Anomaly Detector */}
                         <td className="px-4">
-                          <span className={`inline-block rounded border px-2 py-0.5 text-[9px] font-medium uppercase tracking-wide ${detectorBadgeColor}`}>
+                          <span className={`inline-block rounded border px-2 py-0.5 text-[10px] font-medium uppercase tracking-wide ${detectorBadgeColor}`}>
                             {t(a.anomaly_type || "", (a.anomaly_type || "").replaceAll("_", " "))}
                           </span>
                         </td>
@@ -864,7 +864,7 @@ function LegacyAnomaliesPage() {
                         {/* Window Timing */}
                         <td className="px-4 font-mono text-[10px] text-[#c4bdd9]">
                           {new Date(a.last_detected_ms || a.detected_at || Date.now()).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                          <span className="block text-[9px] text-[#9e96b8]">
+                          <span className="block text-[10px] text-[#9e96b8]">
                             {new Date(a.last_detected_ms || a.detected_at || Date.now()).toLocaleDateString()}
                           </span>
                         </td>
@@ -1592,7 +1592,7 @@ export function AnomalyDetailPage() {
                         user.changes.map((c) => (
                           <span
                             key={c.id}
-                            className={`rounded px-1.5 py-0.2 text-[9px] font-medium uppercase tracking-wide ${
+                            className={`rounded px-1.5 py-0.2 text-[10px] font-medium uppercase tracking-wide ${
                               c.severity === "critical"
                                 ? "border border-rose-500/40 bg-rose-500/20 text-rose-300"
                                 : c.severity === "high"

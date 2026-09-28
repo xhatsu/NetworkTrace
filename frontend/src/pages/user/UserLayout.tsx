@@ -88,7 +88,7 @@ export function UserLayout() {
     enabled: !!principal,
     refetchInterval: 60_000,
   });
-  const episodeRank: Record<Episode["state"], number> = { expected: 0, changed: 1, needs_attention: 2, critical: 3 };
+  const episodeRank: Record<Episode["state"], number> = { expected: 0, changed: 1, watch: 2, needs_attention: 3, critical: 4 };
   const activeEpisodes = (episodeData?.items || []).filter((episode) => episode.status !== "resolved");
   const behaviorState: Episode["state"] = activeEpisodes.reduce<Episode["state"]>((current, episode) => episodeRank[episode.state] > episodeRank[current] ? episode.state : current, "expected");
 
@@ -185,7 +185,7 @@ export function UserLayout() {
             </div>
 
             {/* Badges: Active, Baseline, Behavior State */}
-            <div className="flex flex-wrap items-center gap-1.5 text-[9.5px]">
+            <div className="flex flex-wrap items-center gap-1.5 text-[10px]">
               <span
                 className={`inline-flex items-center gap-1 border px-1.5 py-0.5 font-semibold ${
                   profile?.status === "Active"
@@ -326,7 +326,7 @@ export function UserLayout() {
                   <Icon size={12} className={isActive ? "text-[#5794f2]" : "text-[#7b7d80]"} />
                   <span>{tab.label}</span>
                   {tab.badge !== undefined && tab.badge > 0 && (
-                    <span className="rounded-[2px] bg-[#5794f2]/20 border border-[#5794f2]/40 px-1 py-0 text-[9px] font-mono text-[#5794f2]">
+                    <span className="rounded-[2px] bg-[#5794f2]/20 border border-[#5794f2]/40 px-1 py-0 text-[10px] font-mono text-[#5794f2]">
                       {tab.badge}
                     </span>
                   )}

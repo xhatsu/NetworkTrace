@@ -1,4 +1,4 @@
-from backend.app.api.changes import _evaluate_episode
+from backend.app.services.change_episodes import evaluate_episode
 
 
 def _signal(
@@ -23,21 +23,21 @@ def _signal(
 
 
 def test_expected_review_is_not_presented_as_abnormal():
-    result = _evaluate_episode([_signal("NEW_TARGET", status="expected")])
+    result = evaluate_episode([_signal("NEW_TARGET", status="expected")])
 
     assert result["state"] == "expected"
     assert result["is_abnormal"] is False
 
 
 def test_suppression_is_not_presented_as_expected_behavior():
-    result = _evaluate_episode([_signal("NEW_TARGET", status="suppressed")])
+    result = evaluate_episode([_signal("NEW_TARGET", status="suppressed")])
 
     assert result["state"] != "expected"
     assert result["is_abnormal"] is False
 
 
 def test_known_load_balancer_ip_remains_a_change_only():
-    result = _evaluate_episode([
+    result = evaluate_episode([
         _signal(
             "NEW_SOURCE_IP",
             severity="high",
@@ -54,24 +54,24 @@ def test_known_load_balancer_ip_remains_a_change_only():
     assert result["infrastructure_only"] is True
 
 
-def test_correlated_access_and_rate_changes_need_attention():
-    result = _evaluate_episode([
+def test_correlated_access_and_rate_without_impact_remain_watch():
+    result = evaluate_episode([
         _signal("NEW_TARGET"),
         _signal("NEW_OPERATION"),
         _signal("PRINCIPAL_RATE_SURGE", delta=324),
     ])
 
-    assert result["state"] == "needs_attention"
-    assert result["is_abnormal"] is True
+    assert result["state"] == "watch"
+    assert result["is_abnormal"] is False
     assert result["correlated"] is True
     assert result["domains"] == ["access", "traffic"]
 
 
-def test_critical_error_evidence_promotes_correlated_episode():
-    result = _evaluate_episode([
+def test_source_critical_without_impact_is_not_enough():
+    result = evaluate_episode([
         _signal("ERROR_RATE", source="anomaly", severity="critical", delta=500),
         _signal("NEW_OPERATION"),
     ])
 
-    assert result["state"] == "critical"
-    assert result["is_abnormal"] is True
+    assert result["state"] == "watch"
+    assert result["is_abnormal"] is False

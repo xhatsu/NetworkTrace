@@ -540,6 +540,7 @@ def emit_behavioral_change(
     representative_traces: Optional[List[str]] = None,
     custom_summary: Optional[str] = None,
     category_override: Optional[str] = None,
+    impact_evidence: Optional[dict[str, Any]] = None,
     _incident_cache: Optional[Dict[Tuple[str, str, str], dict[str, Any]]] = None,
     _event_rows: Optional[List[tuple]] = None,
     _override_cache: Optional[Dict[str, bool]] = None,
@@ -600,6 +601,9 @@ def emit_behavioral_change(
         },
         "what_happened_afterward": "Under active investigation; evaluating operational context.",
     }
+
+    if impact_evidence:
+        explanation["impact_evidence"] = impact_evidence
 
     # Bounded Incident linking
     incident = get_or_create_incident(
@@ -1028,7 +1032,8 @@ def detect_explicit_auth_anomalies(
                 SELECT COUNT(*) FROM traces
                 WHERE principal_id = ? AND auth_result = 'success'
                   AND timestamp_ms > ? AND timestamp_ms < ?
-            """, (principal_id, last_ts, window_end_ms)).fetchone()[0]
+                  AND caller_service = ? AND caller_ip = ? AND target_service = ?
+            """, (principal_id, last_ts, window_end_ms, caller, ip, target)).fetchone()[0]
 
             if success_after > 0:
                 ev_id = emit_behavioral_change(
@@ -1041,6 +1046,7 @@ def detect_explicit_auth_anomalies(
                     target_service=target,
                     old_value=f"{cnt} explicit failures ({evidence})",
                     new_value=f"subsequent explicit success ({success_after} requests)",
+                    impact_evidence={"explicit_auth_failures": cnt, "same_scope_successes": success_after},
                     expected_range="normal authorized access without prior bursts",
                     attribution_method="explicit_security_event",
                     representative_traces=traces,
@@ -1059,6 +1065,7 @@ def detect_explicit_auth_anomalies(
                     target_service=target,
                     old_value="0 authentication failures",
                     new_value=f"{cnt} explicit authentication failures ({evidence})",
+                    impact_evidence={"explicit_auth_failures": cnt},
                     expected_range="0 failures",
                     attribution_method="explicit_security_event",
                     representative_traces=traces,

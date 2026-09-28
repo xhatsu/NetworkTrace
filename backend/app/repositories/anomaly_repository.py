@@ -94,8 +94,17 @@ class AnomalyRepository:
                     meta = json.loads(existing[9]) if existing[9] else {}
                 except Exception:
                     meta = {}
+                previous_buckets = meta.get("abnormal_bucket_starts_ms", [])
                 if anomaly.metadata:
                     meta.update(anomaly.metadata)
+                # Retry-safe, bounded distinct observation windows, not insert counts.
+                incoming_buckets = meta.get("abnormal_bucket_starts_ms", [])
+                meta["abnormal_bucket_starts_ms"] = sorted({
+                    value for value in (
+                        (previous_buckets if isinstance(previous_buckets, list) else [])
+                        + (incoming_buckets if isinstance(incoming_buckets, list) else [])
+                    ) if isinstance(value, int) and not isinstance(value, bool)
+                })[-3:]
                 meta["occurrences"] = int(meta.get("occurrences", 1)) + 1
                 meta["episode_first_seen"] = anomaly.first_seen
                 meta["duration_mins"] = round((anomaly.last_seen - anomaly.first_seen) / 60000, 1)

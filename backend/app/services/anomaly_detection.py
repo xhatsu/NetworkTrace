@@ -124,6 +124,12 @@ def detect_anomalies(
         base_rps = base["rps_median"]
         base_p95 = base["latency_p95_median"]
         base_err = base["error_rate_median"]
+        impact_evidence = {
+            "total_requests": data["reqs"], "total_errors": data["errors"],
+            "baseline_sample_count": base["sample_count"],
+            "observation_bucket_start_ms": window_start_sec * 1000,
+            "abnormal_bucket_starts_ms": [window_start_sec * 1000],
+        }
 
         # Detector 1: Traffic Spike
         # Current RPS significantly exceeds baseline median + 3*MAD
@@ -149,7 +155,7 @@ def detect_anomalies(
                     current=current_rps,
                     text=f"Traffic jumped from {round(base_rps, 2)} RPS to {current_rps} RPS (+{delta_pct}%)"
                 )],
-                metadata={"callers": list(data["callers"]), "principals": list(data["principals"])}
+                metadata={**impact_evidence, "callers": list(data["callers"]), "principals": list(data["principals"])}
             ))
 
         # Detector 2: Traffic Drop
@@ -174,7 +180,7 @@ def detect_anomalies(
                     current=current_rps,
                     text=f"Traffic dropped from {round(base_rps, 2)} RPS to {current_rps} RPS ({delta_pct}%)"
                 )],
-                metadata={"callers": list(data["callers"])}
+                metadata={**impact_evidence, "callers": list(data["callers"])}
             ))
 
         # Detector 3: Latency Anomaly
@@ -201,7 +207,7 @@ def detect_anomalies(
                     current=current_p95,
                     text=f"p95 latency degraded from {round(base_p95, 1)}ms to {current_p95}ms (+{delta_pct}%)"
                 )],
-                metadata={"operations": list(data["ops"])}
+                metadata={**impact_evidence, "operations": list(data["ops"])}
             ))
 
         # Detector 4: Error-Rate Anomaly
@@ -227,7 +233,7 @@ def detect_anomalies(
                     current=round(current_err * 100, 2),
                     text=f"Error rate surged from {round(base_err*100, 1)}% to {round(current_err*100, 1)}% (+{delta_pct}%)"
                 )],
-                metadata={"total_errors": data["errors"], "total_requests": data["reqs"]}
+                metadata=impact_evidence.copy()
             ))
 
     # 1b. Aggregate per (principal_name, target_service) to detect user-level traffic spikes
@@ -380,7 +386,7 @@ def detect_anomalies(
             anomalies.append(AnomalyEvent(
                 detected_at=detected_at,
                 anomaly_type="new_principal_edge",
-                severity="high" if "admin" in t.lower() or "pay" in t.lower() else "medium",
+                severity="medium",  # Resource names do not establish sensitivity.
                 score=75,
                 confidence=0.90,
                 caller_service=c,

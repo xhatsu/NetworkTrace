@@ -752,34 +752,35 @@ def aggregate_records_and_save(records: list[dict]):
 
 
 def save_topology_rollups(records: list[dict]):
-    """Materialize 5m interactive topology rollups in ClickHouse for all 10 days."""
-    print(f"Materializing 5m topology rollups for {len(records):,} records...")
+    """Materialize 5m interactive topology rollups in ClickHouse and Elasticsearch bandwidth index for all 10 days."""
+    print(f"Materializing 5m topology rollups and Elasticsearch bandwidth for {len(records):,} records...")
     t0 = time.time()
     now_ms = int(time.time() * 1000)
 
     service_edges_map = defaultdict(lambda: {
-        "count": 0, "errors": 0, "4xx": 0, "5xx": 0, "timeouts": 0,
+        "count": 0, "errors": 0, "auth_failures": 0, "4xx": 0, "5xx": 0, "timeouts": 0,
         "lat_sum": 0.0, "lats": [], "req_bytes": 0, "resp_bytes": 0,
         "principals": set(), "ips": set(), "anon": 0,
         "first_seen": 1e18, "last_seen": 0
     })
     api_edges_map = defaultdict(lambda: {
-        "count": 0, "errors": 0, "4xx": 0, "5xx": 0, "timeouts": 0,
+        "count": 0, "errors": 0, "auth_failures": 0, "4xx": 0, "5xx": 0, "timeouts": 0,
         "lat_sum": 0.0, "lats": [], "req_bytes": 0, "resp_bytes": 0,
         "principals": set(), "ips": set(), "anon": 0,
         "first_seen": 1e18, "last_seen": 0
     })
     principal_edges_map = defaultdict(lambda: {
-        "count": 0, "errors": 0, "4xx": 0, "5xx": 0, "timeouts": 0,
+        "count": 0, "errors": 0, "auth_failures": 0, "4xx": 0, "5xx": 0, "timeouts": 0,
         "lat_sum": 0.0, "lats": [], "req_bytes": 0, "resp_bytes": 0,
         "ips": set(), "anon": 0,
         "first_seen": 1e18, "last_seen": 0
     })
     ip_edges_map = defaultdict(lambda: {
-        "count": 0, "errors": 0, "4xx": 0, "5xx": 0, "timeouts": 0,
+        "count": 0, "errors": 0, "auth_failures": 0, "4xx": 0, "5xx": 0, "timeouts": 0,
         "lats": [], "req_bytes": 0, "resp_bytes": 0,
         "first_seen": 1e18, "last_seen": 0
     })
+
     seen_user_ips = set()
     sorted_records = sorted(
         records,
@@ -807,6 +808,7 @@ def save_topology_rollups(records: list[dict]):
         resp_bytes = int(doc.get("response_bytes") or doc.get("resp_bytes") or labels.get("http_response_content_length") or 0)
 
         is_err = status >= 400 or doc.get("transaction", {}).get("outcome") in ("failure", "error")
+        is_auth_failure = status in (401, 403) or doc.get("auth.result") == "failure" or doc.get("security", {}).get("auth", {}).get("result") == "failure"
         is_4xx = 400 <= status < 500
         is_5xx = status >= 500
         is_timeout = status == 504 or doc.get("transaction", {}).get("outcome") == "timeout"
@@ -822,6 +824,7 @@ def save_topology_rollups(records: list[dict]):
             st = service_edges_map[s_key]
             st["count"] += 1
             if is_err: st["errors"] += 1
+            if is_auth_failure: st["auth_failures"] += 1
             if is_4xx: st["4xx"] += 1
             if is_5xx: st["5xx"] += 1
             if is_timeout: st["timeouts"] += 1
@@ -840,6 +843,7 @@ def save_topology_rollups(records: list[dict]):
         ast = api_edges_map[api_key]
         ast["count"] += 1
         if is_err: ast["errors"] += 1
+        if is_auth_failure: ast["auth_failures"] += 1
         if is_4xx: ast["4xx"] += 1
         if is_5xx: ast["5xx"] += 1
         if is_timeout: ast["timeouts"] += 1
@@ -858,6 +862,7 @@ def save_topology_rollups(records: list[dict]):
         pst = principal_edges_map[p_key]
         pst["count"] += 1
         if is_err: pst["errors"] += 1
+        if is_auth_failure: pst["auth_failures"] += 1
         if is_4xx: pst["4xx"] += 1
         if is_5xx: pst["5xx"] += 1
         if is_timeout: pst["timeouts"] += 1
@@ -878,6 +883,7 @@ def save_topology_rollups(records: list[dict]):
             ist = ip_edges_map[ip_key]
             ist["count"] += 1
             if is_err: ist["errors"] += 1
+            if is_auth_failure: ist["auth_failures"] += 1
             if is_4xx: ist["4xx"] += 1
             if is_5xx: ist["5xx"] += 1
             if is_timeout: ist["timeouts"] += 1
@@ -887,7 +893,7 @@ def save_topology_rollups(records: list[dict]):
             if ts_ms < ist["first_seen"]: ist["first_seen"] = ts_ms
             if ts_ms > ist["last_seen"]: ist["last_seen"] = ts_ms
 
-    # Format rows for ClickHouse
+    # Format rows for ClickHouse matching 010_topology_auth_failures schema
     service_rows = []
     for (b5m, caller, target, ev_type, ev_detail, conf), st in service_edges_map.items():
         cnt = st["count"]
@@ -896,7 +902,7 @@ def save_topology_rollups(records: list[dict]):
         p95 = st["lats"][min(cnt - 1, int(cnt * 0.95))]
         p99 = st["lats"][min(cnt - 1, int(cnt * 0.99))]
         service_rows.append([
-            b5m, caller, target, cnt, st["errors"], st["4xx"], st["5xx"], st["timeouts"],
+            b5m, caller, target, cnt, st["errors"], st["auth_failures"], st["4xx"], st["5xx"], st["timeouts"],
             0, 0, st["lat_sum"], p50, p95, p99, st["req_bytes"], st["resp_bytes"],
             len(st["principals"]), len(st["ips"]), st["anon"], st["first_seen"], st["last_seen"],
             ev_type, ev_detail, conf, now_ms
@@ -910,7 +916,7 @@ def save_topology_rollups(records: list[dict]):
         p95 = ast["lats"][min(cnt - 1, int(cnt * 0.95))]
         p99 = ast["lats"][min(cnt - 1, int(cnt * 0.99))]
         api_rows.append([
-            b5m, caller, c_api, target, t_api, cnt, ast["errors"], ast["4xx"], ast["5xx"], ast["timeouts"],
+            b5m, caller, c_api, target, t_api, cnt, ast["errors"], ast["auth_failures"], ast["4xx"], ast["5xx"], ast["timeouts"],
             0, 0, ast["lat_sum"], p50, p95, p99, ast["req_bytes"], ast["resp_bytes"],
             len(ast["principals"]), len(ast["ips"]), ast["anon"], ast["first_seen"], ast["last_seen"],
             ev_type, ev_detail, conf, now_ms
@@ -924,7 +930,7 @@ def save_topology_rollups(records: list[dict]):
         p95 = pst["lats"][min(cnt - 1, int(cnt * 0.95))]
         p99 = pst["lats"][min(cnt - 1, int(cnt * 0.99))]
         principal_rows.append([
-            b5m, user, caller, c_api, target, t_api, cnt, pst["errors"], pst["4xx"], pst["5xx"], pst["timeouts"],
+            b5m, user, caller, c_api, target, t_api, cnt, pst["errors"], pst["auth_failures"], pst["4xx"], pst["5xx"], pst["timeouts"],
             0, 0, pst["lat_sum"], p50, p95, p99, pst["req_bytes"], pst["resp_bytes"],
             1, len(pst["ips"]), pst["anon"], pst["first_seen"], pst["last_seen"],
             ev_type, ev_detail, conf, now_ms
@@ -938,7 +944,7 @@ def save_topology_rollups(records: list[dict]):
         role, label, confidence_str = classify_source_ip_role(ip)
         is_lb = 1 if role in ("load_balancer", "reverse_proxy", "nat_gateway") else 0
         ip_rows.append([
-            b5m, user, ip, target, t_api, caller, cnt, ist["errors"], ist["4xx"], ist["5xx"], ist["timeouts"],
+            b5m, user, ip, target, t_api, caller, cnt, ist["errors"], ist["auth_failures"], ist["4xx"], ist["5xx"], ist["timeouts"],
             p95, ist["req_bytes"], ist["resp_bytes"], ist["first_seen"], ist["last_seen"],
             is_lb, role, label, confidence_str, is_new_ip, now_ms
         ])
@@ -971,6 +977,24 @@ def save_topology_rollups(records: list[dict]):
             db.client.insert("topology_principal_ip_current", ip_rows[-batch_size:], column_names=cols_ip)
 
     print(f"  ClickHouse topology 5m tables saved ({len(service_rows):,} svc, {len(api_rows):,} api, {len(principal_rows):,} usr, {len(ip_rows):,} ip rows)")
+
+    # Update worker checkpoint so the worker stays in live mode without backfilling or deleting metric_buckets
+    try:
+        from backend.worker import _checkpoint, _save_stage_checkpoint
+        stage_state = _checkpoint("worker_elasticsearch_sync")
+        last_ts_ms = int(datetime.fromisoformat(records[-1]["@timestamp"].replace("Z", "+00:00")).timestamp() * 1000)
+        _save_stage_checkpoint("worker_elasticsearch_sync", {
+            **stage_state,
+            "metrics": {
+                "mode": "live",
+                "cursor_ms": last_ts_ms,
+                "grain": 300,
+                "bytes_schema_version": 2,
+                "last_run_ms": int(time.time() * 1000),
+            },
+        })
+    except Exception as e:
+        print(f"Note on worker checkpoint update: {e}")
 
 def derive_analytics(now_sec: float, start_sec: float, injected_windows: set[int]):
     print("\n--- Running Derivations: Rollups, Baselines, Anomalies & Principal Intelligence ---")

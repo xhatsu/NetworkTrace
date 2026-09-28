@@ -2,6 +2,13 @@
 
 # TraceScope Context and State Management (AGENTS.md)
 
+## Changes impact policy v2 (implemented, backend activation pending)
+
+- `change_policy.py` now evaluates informational / Watch / Needs attention / Critical using structured impact and distinct observation buckets, not relative delta or detector count alone. `expected` remains a compatibility state with separate evaluated impact/disposition.
+- Service detectors emit baseline/count/bucket evidence; coalescing retains three distinct windows. Auth evidence uses scoped failure/success counts. UI supports Watch; API preserves `previous_evaluation` for comparison.
+- 22 isolated policy/L4/API tests and frontend build passed. Read-only replay: all 31 prior critical episodes become Watch because legacy structured evidence is insufficient; review before activation. Backend and worker were NOT restarted. Frontend bundle rebuilt.
+- See `docs/change-policy-v2.md` for thresholds, rollout caveats and deferred persistent lifecycle/notification work.
+
 ## 1. Project Overview
 **TraceScope** is an OpenTelemetry transaction analytics and behavioral observability platform for large service estates.
 - **Core Functionality**:
@@ -115,7 +122,7 @@
   - Multi-Color Visualizations: Restrained low-opacity fills, compact legends, HTTP status mapping (2xx green, 3xx blue, 4xx orange, 5xx red), and semantic topology nodes/edges without specular sheen.
 - **Built Output**: `frontend/dist` served directly by FastAPI on port 30102.
 - **Navigation & Pages**:
-  - `Overview` (`/`): Dense Grafana-style operational layout with 6 top health KPIs (TPS, Error rate, Bandwidth, P95 latency, Active users, and Services) equipped with sparklines and secondary telemetry (avg/peak TPS, peak error %, avg/peak bandwidth, p50/p99 latency, active users now, and registered services), Row 2 with an expanded Total TPS chart beside a taller consolidated Important changes panel (Critical, Attention, and Changed counters plus up to 6 recent episodes in an internally scrollable list), and Row 3 with Top Services and Top Users tables. Redundant separate bottom Recent Changes and Change evaluation panels eliminated.
+  - `Overview` (`/`): Behavior-focused operational dashboard with compact TPS, bandwidth, unresolved-attention, and grouped Service/User footprint cards. Main TPS/baseline line chart sits beside a service traffic-share donut; a weekday-by-hour episode-start heatmap reveals change clusters. Important changes and Service/User lists follow below.
   - `Topology` (`/topology`): Interactive seven-day map of observed service relationships. It opens with last-24-hour activity; the five-minute slider selects a specific historical slice. Connections observed in the selected window are blue, previously observed connections are muted and dashed with their last-seen time, and selected paths are thin yellow lines without inline guide labels. Initial service node positions use the measured canvas dimensions and keep cards separated; after layout, manual dragging is unrestricted and starts from card content while excluding the expand control. The right inspector is a compact floating panel with activity KPIs, a small trend, and expandable metrics/evidence/IP sections; its entity links navigate to Service, API, or User pages. The Elasticsearch metric worker reads explicit caller service fields from transaction metadata and stores them in ClickHouse metric buckets; observed materialized edges fill gaps where transactions lack caller names. Clicking graph nodes and scroll-box rows selects and highlights relationships in place without navigation. The former `/users/:principal/topology` route redirects to User Activity.
   - `Changes` (`/changes`, `/changes/:id`): Unified operator model over service anomaly signals and User behavior-change signals. Detector facts are correlated into episodes, then evaluated separately as `EXPECTED`, `CHANGED`, `NEEDS ATTENTION`, or `CRITICAL`. Legacy `/anomalies` and `/anomalies/:id` routes redirect into this experience. Every global episode card exposes `View details` and `Investigate`; Investigate opens the episode detail directly at its LLM investigation section. Detail pages include metric diff, relationship path, timeline, evidence, abnormality reasons, Trace links, operator decisions, and the LLM investigation UI.
   - `Services` (`/services`, `/services/:name`): Service catalog, operation percentiles, caller graphs, and instances. Service Detail places compact clickable KPI cards above a configurable TPS line chart; selecting Requests, Error rate, P95 latency, or Bandwidth overlays its available series while TPS remains plotted. The shared KPI card and TPS chart labels follow the User Activity style, and bandwidth uses its measured bucket series.
@@ -134,6 +141,26 @@
   - **Localization (i18n)**: Canonical Vietnamese UI copy across active pages, charts, tables, cards, and modals with persistent language switcher (`🇻🇳 VI` / `🇬🇧 EN`) defaulting to Vietnamese. DevOps/product vocabulary remains English where it improves operator recognition (`Service`, `API`, `User`, `TPS`, `Latency`, `Trace`, `IP`, `Baseline`, `Agent`, and protocol/database names); surrounding explanatory copy is translated.
 
 ---
+
+- **Dashboard behavior-focused layout (2026-09-28)**: Overview keeps TPS/baseline as its main line graph and replaces latency/error/bandwidth charts with a service traffic-share donut and a weekday-by-hour heatmap of episode starts inside the selected window. Compact top cards show TPS, bandwidth, unresolved attention episodes, and grouped Service/User footprint. Counts disclose loaded episode coverage; the heatmap supports focus/hover readouts, uses the selected timezone, and counts each episode once. Change/service/user lists remain below. Latency/error metrics remain available in service detail and Grafana.
+
+- **Dashboard sparklines and toolbar dropdowns (2026-09-28)**: TPS and bandwidth KPI cards reuse the shared MetricCard sparklines. The top-bar Filters panel uses native selects for Service, Operation, Account, Environment, Group, and Module, loading observed options only while expanded. Operation choices come from the selected service; changing or clearing Service clears Operation. URL-selected values are preserved even when absent from the loaded options. Service/account options are bounded at 500 and disclose the cap; loading/error/empty states and retry controls are provided.
+
+- **Compact Changes triage (2026-09-28)**: `/changes` uses dense responsive rows with evaluation/workflow state, localized change title, affected entity, exact signal-type chips, one before/after metric, last-seen time, and detail/investigation actions. Compact count tabs replace large KPI cards. The change-type dropdown matches all signal/evidence detector types in each episode, including secondary correlated types. Subject/search/AI/type/sort/view persist in the URL and survive detail-return navigation. Local filtering and 25-row pagination operate on up to 500 loaded episodes, with loaded/total coverage disclosed.
+
+## Dashboard time-series revision (2026-09-28)
+
+- Overview no longer renders the FleetTriage service table; service-level triage remains available on `/services` and `/changes` as appropriate.
+- The secondary dashboard panel now renders shared HTTP 4xx/5xx error-rate lines from `dashboard/series`, replacing Fleet Signals. The weekday/hour behavior-change heatmap is promoted to a full-width panel directly beneath TPS and error rate.
+- The dashboard remains focused on fleet-level trends and investigation entry points rather than duplicating the service catalog.
+- Validation pending after this revision.
+
+## Fleet-scale dashboard revision (2026-09-28)
+
+- Overview replaces the service-share donut with a compact fleet signal summary and full-width `FleetTriage` table. Designed for 200+ observed services, it loads at most 500 and renders 10 rows per page with service search, anomaly/error filters, and priority/TPS/error/max-bucket-P95/name ordering. Service links preserve the selected time filters.
+- Default ranking is open anomaly, error rate, then average TPS. Labels reflect the API semantics: open anomalies are current open flags, TPS is the selected-window average, and latency is maximum bucket P95. No-open-anomaly is explicitly not an availability/SLO guarantee; missing metrics display a dash.
+- Unresolved attention/critical changes precede the secondary weekday/hour heatmap and user list. The TPS/baseline chart and KPI sparklines remain. Loaded coverage and caps are disclosed.
+- Validation: production build and diff check passed; all seven live dashboard API requests returned 200. Chromium verified a mocked 240-service fleet, pagination/search/filter/sort, empty search, and 1440px/390px layouts without document overflow or page errors. No backend changes or restart.
 
 ## 3. Rules & Operational Guidelines
 - **Rule xHatsu**: Always start responses with `"I HAVE FOLLOW THE RULE xHatsu DEFINED FOR ME BY DEFAULT"`.

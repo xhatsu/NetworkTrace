@@ -747,7 +747,7 @@ export function UserChangesPage() {
                     </div>
                     <div className="mt-2 flex flex-wrap gap-1">
                       {p.types.slice(0, 3).map((t) => (
-                        <span key={t} className="rounded bg-white/[0.05] px-1.5 py-0.5 text-[9px] font-mono text-[#c4bdd9]">
+                        <span key={t} className="rounded bg-white/[0.05] px-1.5 py-0.5 text-[10px] font-mono text-[#c4bdd9]">
                           {label(t)}
                         </span>
                       ))}

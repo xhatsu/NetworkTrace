@@ -22,6 +22,8 @@ from .app.services.baseline import rebuild_baselines
 from .app.services.principal_relationships import process_principal_intelligence
 from .app.repositories.db_context import db_transaction
 from .app.repositories.db_context import get_connection
+from .app.services.alerting import enqueue_matching, deliver_pending
+from .app.services.change_episodes import _load_signals, _merge_signals, _window
 
 
 def _memory_snapshot() -> dict[str, int | None]:
@@ -130,6 +132,14 @@ def _run_changed_baselines(db_path=None) -> int:
     state.update({"last_run_ms": now_ms, "processed_series": len(targets)})
     _save_stage_checkpoint(source, state, db_path)
     return count
+
+
+def _enqueue_alerts(db_path=None) -> int:
+    """Match the newest bounded Change episodes and enqueue signed deliveries."""
+    now = int(time.time() * 1000)
+    signals = _load_signals(now - 15 * 60 * 1000, now + 1, 500)
+    episodes = _merge_signals(signals)
+    return enqueue_matching(episodes, db_path=db_path)
 
 
 def _run_revised_anomalies(db_path=None):
@@ -343,6 +353,10 @@ def run_jobs(db_path=None) -> dict[str, Any]:
         baselines = _run_stage("rebuild_baselines", lambda: _run_changed_baselines(db_path))
         anomalies = _run_stage("detect_anomalies", lambda: _run_revised_anomalies(db_path))
         principals = _run_stage("process_principal_intelligence", lambda: process_principal_intelligence(db_path=db_path))
+        # Alerting is an isolated outbox stage: matching/delivery failures must
+        # never invalidate analytics or ingestion commits.
+        alert_result = _run_stage("enqueue_alerts", lambda: _enqueue_alerts(db_path))
+        delivery_result = _run_stage("deliver_alerts", lambda: deliver_pending(db_path=db_path))
 
         from backend.app.services.prometheus_metrics import update_worker_prometheus_metrics
         prom_snap = _run_stage(
@@ -352,7 +366,7 @@ def run_jobs(db_path=None) -> dict[str, Any]:
 
         result = {**aggregates, "baselines": baselines, "anomalies": len(anomalies),
                   "principal_records": principals["processed"], "principal_changes": principals["changes"],
-                  "prometheus_metrics_updated": True}
+                  "prometheus_metrics_updated": True, "alerts_enqueued": alert_result, "alerts_delivered": delivery_result}
         if es_sync is not None:
             result["elasticsearch_read"] = es_sync.get("read", 0)
             result["elasticsearch_inserted"] = es_sync.get("inserted", 0)

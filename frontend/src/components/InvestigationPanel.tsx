@@ -354,7 +354,7 @@ function TechnicalSource({
       {investigation && (
         <details className="border-t border-[#2a2d30] pt-2">
           <summary className="cursor-pointer text-[10px] text-[#7b7d80]">{t("Snapshot and audit payload", "Snapshot và dữ liệu kiểm toán")}</summary>
-          <pre className="mt-2 max-h-96 overflow-auto whitespace-pre-wrap break-all bg-[#0b0c0e] p-2 font-mono text-[9px] leading-4 text-[#a7a9ab]">{JSON.stringify({
+          <pre className="mt-2 max-h-96 overflow-auto whitespace-pre-wrap break-all bg-[#0b0c0e] p-2 font-mono text-[10px] leading-4 text-[#a7a9ab]">{JSON.stringify({
             snapshot: investigation.snapshot,
             source_check: investigation.source_check,
             deterministic_summary: investigation.deterministic_summary,
@@ -368,7 +368,7 @@ function TechnicalSource({
 }
 
 function TechnicalValue({ label, value }: { label: string; value: string }) {
-  return <div className="min-w-0 border border-[#2a2d30] bg-[#0b0c0e] px-2.5 py-2"><div className="text-[9px] uppercase tracking-wide text-[#7b7d80]">{label}</div><div className="mt-1 break-all font-mono text-[10px] text-[#a7a9ab]">{value}</div></div>;
+  return <div className="min-w-0 border border-[#2a2d30] bg-[#0b0c0e] px-2.5 py-2"><div className="text-[10px] uppercase tracking-wide text-[#7b7d80]">{label}</div><div className="mt-1 break-all font-mono text-[10px] text-[#a7a9ab]">{value}</div></div>;
 }
 
 function TechnicalList({ label, values }: { label: string; values?: string[] }) {

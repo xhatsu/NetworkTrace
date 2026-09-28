@@ -171,12 +171,12 @@ function compactTime(value: unknown) {
   return new Date(timestamp(value)).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
 }
 
-function MetricTile({ label, value, detail, valueClass = "text-[#d8d9da]" }: { label: string; value: string; detail: string; valueClass?: string }) {
+function MetricTile({ label, value, detail, valueClass = "text-[#f1f3f5]" }: { label: string; value: string; detail: string; valueClass?: string }) {
   return (
     <div className="metric-panel p-3">
-      <div className="text-[10px] font-semibold uppercase tracking-[.08em] text-[#a7a9ab]">{label}</div>
+      <div className="text-xs font-semibold uppercase tracking-[.08em] text-[#c2c6cc]">{label}</div>
       <div className={`mt-2 font-mono text-xl font-semibold tabular-nums ${valueClass}`}>{value}</div>
-      <div className="mt-1 truncate text-[10px] text-[#7b7d80]" title={detail}>{detail}</div>
+      <div className="mt-1 truncate text-xs text-[#b8bcc4]" title={detail}>{detail}</div>
     </div>
   );
 }
@@ -186,10 +186,10 @@ function BoardColumn({ step, title, subtitle, children }: { step: number; title:
     <section className="min-h-[310px] border border-[#2a2d30] bg-[#0e0f12]">
       <header className="border-b border-[#2a2d30] px-3 py-2">
         <div className="flex items-center gap-2">
-          <span className="grid h-4 w-4 place-items-center rounded-full bg-[#34373b] font-mono text-[9px] text-[#d8d9da]">{step}</span>
-          <h3 className="text-[10px] font-semibold uppercase tracking-[.08em] text-[#d8d9da]">{title}</h3>
+          <span className="grid h-5 w-5 place-items-center rounded-full bg-[#34373b] font-mono text-xs text-[#f1f3f5]">{step}</span>
+          <h3 className="text-xs font-semibold uppercase tracking-[.08em] text-[#f1f3f5]">{title}</h3>
         </div>
-        <p className="mt-1 text-[9px] text-[#7b7d80]">{subtitle}</p>
+        <p className="mt-1 text-xs text-[#c2c6cc]">{subtitle}</p>
       </header>
       <div className="max-h-[360px] overflow-y-auto p-2">{children}</div>
     </section>
@@ -203,10 +203,10 @@ function ActiveHourHeatmapPanel({ hourlyActivity, heatmap, typicalWindow, t }: {
       {hourlyActivity.length ? (
         <div data-testid="activity-heatmap-data" className="flex min-h-[230px] flex-1 flex-col p-2.5">
           <div className="flex min-w-0 flex-1 flex-col">
-            <div className="mb-1 grid grid-cols-[40px_repeat(24,1fr)] gap-0.5 text-center font-mono text-[9px] text-[#7b7d80]"><span />{HOURS.map((hour) => <span key={hour}>{hour % 3 === 0 ? String(hour).padStart(2, "0") : ""}</span>)}</div>
+            <div className="mb-1 grid grid-cols-[40px_repeat(24,1fr)] gap-0.5 text-center font-mono text-[10px] text-[#7b7d80]"><span />{HOURS.map((hour) => <span key={hour}>{hour % 3 === 0 ? String(hour).padStart(2, "0") : ""}</span>)}</div>
             <div className="grid flex-1 grid-rows-7 gap-0.5">{DAYS.map((day, dayIndex) => (
               <div key={day} className="grid grid-cols-[40px_repeat(24,1fr)] items-center gap-0.5">
-                <span className="font-mono text-[9.5px] text-[#a7a9ab]">{day}</span>
+                <span className="font-mono text-[10px] text-[#a7a9ab]">{day}</span>
                 {HOURS.map((hour) => {
                   const value = heatmap.cells[dayIndex][hour];
                   const opacity = heatmap.maximum ? Math.max(0.08, value / heatmap.maximum) : 0;
@@ -827,33 +827,35 @@ export function UserActivityWorkspace() {
               <Panel
                 title={`${t("Access for", "Quyền truy cập của")} ${principal}`}
                 subtitle={`${principalRole} (${principalType.replaceAll("_", " ")}) · ${t("Select IP → Service → API")}`}
-                action={<span className="font-mono text-[10px] text-[#7b7d80]">{sourceRows.length} IP · {allRelationships.length} {t("relationships")}</span>}
+                titleClassName="text-sm font-semibold uppercase tracking-[0.06em] text-[#f1f3f5]"
+                subtitleClassName="text-xs text-[#c2c6cc]"
+                action={<span className="font-mono text-xs text-[#c2c6cc]">{sourceRows.length} IP · {allRelationships.length} {t("relationships")}</span>}
               >
                 <div className="grid gap-2 p-2 md:grid-cols-3 xl:grid-cols-[25%_35%_40%]">
                   <BoardColumn step={1} title={t("Selected IP")} subtitle={t("Supporting network evidence")}>
                     <label className="relative mb-2 block">
-                      <Search className="absolute left-2 top-2 text-[#7b7d80]" size={12} />
-                      <input value={ipSearch} onChange={(event) => setIpSearch(event.target.value)} placeholder={t("Find IP…")} className="toolbar-control h-7 w-full pl-7 pr-7 text-[10px]" />
-                      {ipSearch && <button type="button" onClick={() => setIpSearch("")} className="absolute right-2 top-1.5 text-[#7b7d80] hover:text-white"><X size={12} /></button>}
+                      <Search className="absolute left-2 top-2.5 text-[#b8bcc4]" size={15} />
+                      <input value={ipSearch} onChange={(event) => setIpSearch(event.target.value)} placeholder={t("Find IP…")} className="toolbar-control h-9 w-full pl-8 pr-8 text-sm text-[#f1f3f5] placeholder:text-[#b8bcc4]" />
+                      {ipSearch && <button type="button" onClick={() => setIpSearch("")} className="absolute right-2 top-2 text-[#b8bcc4] hover:text-white"><X size={15} /></button>}
                     </label>
                     <div className="space-y-1">
                       {filteredSources.map((source) => (
-                        <button key={source.ip} type="button" onClick={() => setSelectedIp(source.ip === selectedIp ? "" : source.ip)} className={`w-full border p-2 text-left ${source.ip === selectedIp ? "border-[#a7a9ab] bg-[#a7a9ab]/10" : "border-[#2a2d30] bg-[#111217] hover:border-[#34373b]"}`}>
-                          <div className="flex items-center justify-between gap-2"><span className="font-mono text-[10px] text-[#d8d9da]">{source.ip}</span>{source.isNew && <span className="border border-[#ff9830]/40 bg-[#ff9830]/10 px-1 text-[8px] text-[#ff9830]">NEW</span>}</div>
-                          <div className="mt-1 truncate text-[9px] text-[#7b7d80]">{source.role} · {n(source.requestCount, 0)} {t("requests")}</div>
+                        <button key={source.ip} type="button" onClick={() => setSelectedIp(source.ip === selectedIp ? "" : source.ip)} className={`w-full border p-3 text-left ${source.ip === selectedIp ? "border-[#c2c6cc] bg-[#a7a9ab]/10" : "border-[#2a2d30] bg-[#111217] hover:border-[#34373b]"}`}>
+                          <div className="flex items-center justify-between gap-2"><span className="font-mono text-sm text-[#f1f3f5]">{source.ip}</span>{source.isNew && <span className="border border-[#ff9830]/40 bg-[#ff9830]/10 px-1 text-xs text-[#ffb45e]">NEW</span>}</div>
+                          <div className="mt-1 truncate text-xs text-[#c2c6cc]">{source.role} · {n(source.requestCount, 0)} {t("requests")}</div>
                         </button>
                       ))}
-                      {!filteredSources.length && <div className="px-2 py-6 text-center text-[10px] text-[#7b7d80]">{t("No matching IP evidence")}</div>}
+                      {!filteredSources.length && <div className="px-2 py-6 text-center text-xs text-[#c2c6cc]">{t("No matching IP evidence")}</div>}
                     </div>
                   </BoardColumn>
 
                   <BoardColumn step={2} title={t("Service")} subtitle={t("Target Services for the selected IP")}>
-                    {!selectedIp ? <div className="grid min-h-44 place-items-center px-3 text-center text-[10px] text-[#7b7d80]">{t("Select an IP to reveal Services")}</div> : (
+                    {!selectedIp ? <div className="grid min-h-44 place-items-center px-3 text-center text-xs text-[#c2c6cc]">{t("Select an IP to reveal Services")}</div> : (
                       <div className="space-y-1">
                         {serviceChoices.map((service) => (
-                          <button key={service.name} type="button" onClick={() => setSelectedService(service.name === selectedService ? "" : service.name)} className={`w-full border p-2 text-left ${service.name === selectedService ? "border-[#5794f2] bg-[#5794f2]/10" : "border-[#2a2d30] bg-[#111217] hover:border-[#34373b]"}`}>
-                            <div className="flex items-center gap-1.5"><Server size={11} className="text-[#5794f2]" /><span className="truncate font-mono text-[10px] text-[#8db7fa]">{service.name}</span></div>
-                            <div className="mt-1 text-[9px] text-[#7b7d80]">{n(service.tps, 2)} TPS · {service.relationCount} API · {percent(service.errorRate)}</div>
+                          <button key={service.name} type="button" onClick={() => setSelectedService(service.name === selectedService ? "" : service.name)} className={`w-full border p-3 text-left ${service.name === selectedService ? "border-[#5794f2] bg-[#5794f2]/10" : "border-[#2a2d30] bg-[#111217] hover:border-[#34373b]"}`}>
+                            <div className="flex items-center gap-1.5"><Server size={14} className="text-[#5794f2]" /><span className="truncate font-mono text-sm text-[#a9ccff]">{service.name}</span></div>
+                            <div className="mt-1 text-xs text-[#c2c6cc]">{n(service.tps, 2)} TPS · {service.relationCount} API · {percent(service.errorRate)}</div>
                           </button>
                         ))}
                       </div>
@@ -861,12 +863,12 @@ export function UserActivityWorkspace() {
                   </BoardColumn>
 
                   <BoardColumn step={3} title="API" subtitle={t("Operations on the selected Service")}>
-                    {!selectedService ? <div className="grid min-h-44 place-items-center px-3 text-center text-[10px] text-[#7b7d80]">{t("Select a Service to reveal APIs")}</div> : (
+                    {!selectedService ? <div className="grid min-h-44 place-items-center px-3 text-center text-xs text-[#c2c6cc]">{t("Select a Service to reveal APIs")}</div> : (
                       <div className="space-y-1">
                         {apiChoices.map((apiChoice) => (
-                          <button key={apiChoice.name} type="button" onClick={() => setSelectedApi(apiChoice.name === selectedApi ? "" : apiChoice.name)} className={`w-full border p-2 text-left ${apiChoice.name === selectedApi ? "border-[#56b9a8] bg-[#56b9a8]/10" : "border-[#2a2d30] bg-[#111217] hover:border-[#34373b]"}`}>
-                            <div className="flex items-center gap-1.5"><Fingerprint size={11} className="text-[#56b9a8]" /><span className="truncate font-mono text-[10px] text-[#82d5c4]">{apiChoice.name}</span></div>
-                            <div className="mt-1 text-[9px] text-[#7b7d80]">{n(apiChoice.tps, 2)} TPS · {apiChoice.relationCount} {t("callers")} · {percent(apiChoice.errorRate)}</div>
+                          <button key={apiChoice.name} type="button" onClick={() => setSelectedApi(apiChoice.name === selectedApi ? "" : apiChoice.name)} className={`w-full border p-3 text-left ${apiChoice.name === selectedApi ? "border-[#56b9a8] bg-[#56b9a8]/10" : "border-[#2a2d30] bg-[#111217] hover:border-[#34373b]"}`}>
+                            <div className="flex items-center gap-1.5"><Fingerprint size={14} className="text-[#56b9a8]" /><span className="truncate font-mono text-sm text-[#9be7d8]">{apiChoice.name}</span></div>
+                            <div className="mt-1 text-xs text-[#c2c6cc]">{n(apiChoice.tps, 2)} TPS · {apiChoice.relationCount} {t("callers")} · {percent(apiChoice.errorRate)}</div>
                           </button>
                         ))}
                       </div>
@@ -874,7 +876,7 @@ export function UserActivityWorkspace() {
                   </BoardColumn>
                 </div>
                 {relationshipQuery.hasNextPage && (
-                  <div className="border-t border-[#2a2d30] p-2 text-center"><button type="button" disabled={relationshipQuery.isFetchingNextPage} onClick={() => relationshipQuery.fetchNextPage()} className="toolbar-control px-3 py-1 text-[10px] disabled:opacity-50">{relationshipQuery.isFetchingNextPage ? t("Loading…") : t("Load more relationships")}</button></div>
+                  <div className="border-t border-[#2a2d30] p-2 text-center"><button type="button" disabled={relationshipQuery.isFetchingNextPage} onClick={() => relationshipQuery.fetchNextPage()} className="toolbar-control px-3 py-1 text-xs disabled:opacity-50">{relationshipQuery.isFetchingNextPage ? t("Loading…") : t("Load more relationships")}</button></div>
                 )}
               </Panel>
 
@@ -882,18 +884,20 @@ export function UserActivityWorkspace() {
                 <Panel
                   title={selectedApi ? t("Selected API relationship") : t("Selected Service relationship")}
                   subtitle={t("Caller Service is shown separately from the identity observed on its request")}
-                  action={<span className="font-mono text-[10px] text-[#7b7d80]">{callerRows.length} {t("callers")}</span>}
+                  titleClassName="text-sm font-semibold uppercase tracking-[0.06em] text-[#f1f3f5]"
+                  subtitleClassName="text-xs text-[#c2c6cc]"
+                  action={<span className="font-mono text-xs text-[#c2c6cc]">{callerRows.length} {t("callers")}</span>}
                 >
                   <div className="border-b border-[#2a2d30] p-3">
-                    <div className="flex flex-wrap items-center gap-2 text-[10px]">
-                      <span className="inline-flex items-center gap-1 border border-[#a7a9ab]/40 bg-[#a7a9ab]/10 px-2 py-1 font-mono text-[#d8d9da]"><Globe2 size={11} />{selectedIp}</span>
-                      <ArrowRight size={12} className="text-[#7b7d80]" />
-                      <EntityLink entity={{ kind: "user", principal }} className="inline-flex items-center gap-1 border border-[#b877d9]/40 bg-[#b877d9]/10 px-2 py-1 font-mono text-[#d9b4ea]">{isHuman ? <UserRound size={11} /> : <KeyRound size={11} />}{principal}</EntityLink>
-                      <ArrowRight size={12} className="text-[#7b7d80]" />
-                      <EntityLink entity={{ kind: "service", name: selectedService }} className="inline-flex items-center gap-1 border border-[#5794f2]/40 bg-[#5794f2]/10 px-2 py-1 font-mono text-[#8db7fa]"><Server size={11} />{selectedService}</EntityLink>
-                      {selectedApi && <><ArrowRight size={12} className="text-[#7b7d80]" /><EntityLink entity={{ kind: "api", service: selectedService, operation: selectedApi }} className="inline-flex items-center gap-1 border border-[#56b9a8]/40 bg-[#56b9a8]/10 px-2 py-1 font-mono text-[#82d5c4]"><Fingerprint size={11} />{selectedApi}</EntityLink></>}
+                    <div className="flex flex-wrap items-center gap-2 text-xs">
+                      <span className="inline-flex items-center gap-1 border border-[#c2c6cc]/40 bg-[#a7a9ab]/10 px-2 py-1 font-mono text-[#f1f3f5]"><Globe2 size={14} />{selectedIp}</span>
+                      <ArrowRight size={14} className="text-[#b8bcc4]" />
+                      <EntityLink entity={{ kind: "user", principal }} className="inline-flex items-center gap-1 border border-[#b877d9]/50 bg-[#b877d9]/10 px-2 py-1 font-mono text-[#e3c4f1]">{isHuman ? <UserRound size={14} /> : <KeyRound size={14} />}{principal}</EntityLink>
+                      <ArrowRight size={14} className="text-[#b8bcc4]" />
+                      <EntityLink entity={{ kind: "service", name: selectedService }} className="inline-flex items-center gap-1 border border-[#5794f2]/50 bg-[#5794f2]/10 px-2 py-1 font-mono text-[#a9ccff]"><Server size={14} />{selectedService}</EntityLink>
+                      {selectedApi && <><ArrowRight size={14} className="text-[#b8bcc4]" /><EntityLink entity={{ kind: "api", service: selectedService, operation: selectedApi }} className="inline-flex items-center gap-1 border border-[#56b9a8]/50 bg-[#56b9a8]/10 px-2 py-1 font-mono text-[#9be7d8]"><Fingerprint size={14} />{selectedApi}</EntityLink></>}
                     </div>
-                    <p className="mt-2 text-[10px] text-[#7b7d80]">{t("This board scopes where the identity was observed. The table below shows the Caller Service recorded with each request; open a Trace to confirm the exact request chain and credential propagation.")}</p>
+                    <p className="mt-2 text-xs leading-relaxed text-[#c2c6cc]">{t("This board scopes where the identity was observed. The table below shows the Caller Service recorded with each request; open a Trace to confirm the exact request chain and credential propagation.")}</p>
                   </div>
 
                   <div className="grid grid-cols-2 gap-2 border-b border-[#2a2d30] p-2 lg:grid-cols-3">
@@ -903,26 +907,26 @@ export function UserActivityWorkspace() {
                   </div>
 
                   <div className="overflow-x-auto">
-                    <table className="data-table min-w-[860px]">
+                    <table className="data-table min-w-[860px] text-xs text-[#e4e7eb]">
                       <thead><tr><th className="text-left">{t("Caller Service")}</th><th className="text-right">TPS</th><th className="text-right">{t("Requests")}</th><th className="text-right">{t("Error")}</th><th className="text-right">P95</th><th className="text-right">{t("First seen")}</th><th className="text-right">{t("Last seen")}</th></tr></thead>
                       <tbody>{callerRows.map((caller) => (
                         <tr key={caller.name}>
-                          <td className="font-mono text-[11px] text-[#8db7fa]"><EntityLink entity={{ kind: "service", name: caller.name }} className="hover:underline">{caller.name}</EntityLink></td>
+                          <td className="font-mono text-xs text-[#a9ccff]"><EntityLink entity={{ kind: "service", name: caller.name }} className="hover:underline">{caller.name}</EntityLink></td>
                           <td className="text-right font-mono">{n(caller.tps, 2)}</td>
                           <td className="text-right font-mono">{n(caller.requestCount, 0)}</td>
                           <td className={`text-right font-mono ${caller.errorRate >= 0.05 ? "text-[#f2495c]" : "text-[#73bf69]"}`}>{percent(caller.errorRate)}</td>
                           <td className="text-right font-mono">{n(caller.p95, 0)} ms</td>
-                          <td className="text-right text-[10px] text-[#7b7d80]">{formatTime(caller.firstSeen)}</td>
-                          <td className="text-right text-[10px] text-[#7b7d80]">{formatTime(caller.lastSeen)}</td>
+                          <td className="text-right text-xs text-[#b8bcc4]">{formatTime(caller.firstSeen)}</td>
+                          <td className="text-right text-xs text-[#b8bcc4]">{formatTime(caller.lastSeen)}</td>
                         </tr>
                       ))}</tbody>
                     </table>
                   </div>
                   <div className="flex flex-wrap items-center justify-between gap-2 border-t border-[#2a2d30] bg-[#0e0f12] px-3 py-2">
-                    <span className="inline-flex items-center gap-1.5 text-[10px] text-[#7b7d80]"><Clock3 size={11} />{formatTime(selectedAccessMetrics.firstSeen)} → {formatTime(selectedAccessMetrics.lastSeen)}</span>
+                    <span className="inline-flex items-center gap-1.5 text-xs text-[#b8bcc4]"><Clock3 size={14} />{formatTime(selectedAccessMetrics.firstSeen)} → {formatTime(selectedAccessMetrics.lastSeen)}</span>
                     <div className="flex gap-2">
-                      <Link to={`/traces?principal=${encodeURIComponent(principal)}&service=${encodeURIComponent(selectedService)}`} className="toolbar-control inline-flex items-center gap-1.5 px-2 py-1 text-[10px] text-[#5794f2] hover:text-white">{t("View related Traces")}<ExternalLink size={11} /></Link>
-                      {selectedApi && <EntityLink entity={{ kind: "api", service: selectedService, operation: selectedApi }} className="toolbar-control inline-flex items-center gap-1.5 px-2 py-1 text-[10px] text-[#56b9a8] hover:text-white">{t("Open API")}<ExternalLink size={11} /></EntityLink>}
+                      <Link to={`/traces?principal=${encodeURIComponent(principal)}&service=${encodeURIComponent(selectedService)}`} className="toolbar-control inline-flex items-center gap-1.5 px-2 py-1 text-xs text-[#8bb7ff] hover:text-white">{t("View related Traces")}<ExternalLink size={14} /></Link>
+                      {selectedApi && <EntityLink entity={{ kind: "api", service: selectedService, operation: selectedApi }} className="toolbar-control inline-flex items-center gap-1.5 px-2 py-1 text-xs text-[#8edecf] hover:text-white">{t("Open API")}<ExternalLink size={14} /></EntityLink>}
                     </div>
                   </div>
                 </Panel>

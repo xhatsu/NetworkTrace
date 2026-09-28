@@ -1,5 +1,5 @@
 import { createContext, useContext, useEffect, useMemo, useState } from "react";
-import { useQueryClient } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   NavLink,
   Navigate,
@@ -12,6 +12,7 @@ import {
 import {
   Activity,
   AlertOctagon,
+  BellRing,
   Boxes,
   ChevronDown,
   Clock,
@@ -30,6 +31,7 @@ import {
   X,
 } from "lucide-react";
 import type { Filters } from "./types";
+import { api, queryString } from "./api";
 import { useI18n, LanguageSwitcher } from "./i18n";
 import { OverviewPage } from "./pages/Overview";
 import { ServicesPage, ServiceDetailPage } from "./pages/Services";
@@ -39,6 +41,7 @@ import { TracesPage, TraceDetailPage } from "./pages/Traces";
 import { AgentStatsPage, AgentNodeDetailPage } from "./pages/AgentStats";
 import { UnknownUsersPage } from "./pages/UnknownUsers";
 import { InteractiveTopologyPage } from "./pages/InteractiveTopology";
+import { AlertsPage } from "./pages/Alerts";
 import { entityPath } from "./entityRoutes";
 
 // 6 User-Centric Pages & Components
@@ -64,7 +67,7 @@ const FilterContext = createContext<{
   filters: {
     start: defaultStart,
     end: defaultEnd,
-    timezone: "UTC",
+    timezone: "local",
     comparison: "previous",
   },
   setFilter: () => {},
@@ -138,6 +141,7 @@ function SideNav() {
       hoverClass: "hover:bg-[#ff9830]/10 hover:text-white",
       links: [
         [AlertOctagon, "Changes", "/changes"],
+        [BellRing, "Alerts", "/alerts"],
       ],
     },
     {
@@ -179,7 +183,7 @@ function SideNav() {
         </div>
         <div className="rail-label">
           <div className="text-sm font-bold text-[#d8d9da] tracking-tight">TraceScope</div>
-          <div className="text-[9px] uppercase tracking-wider text-blue-300 font-bold">{t("Intelligence")}</div>
+          <div className="text-[10px] uppercase tracking-wider text-blue-300 font-bold">{t("Intelligence")}</div>
         </div>
       </div>
 
@@ -187,7 +191,7 @@ function SideNav() {
       <nav className="flex w-full flex-1 flex-col gap-3 px-2">
         {groups.map((group) => (
           <div key={group.label}>
-            <div className={`mb-1.5 flex items-center gap-1.5 px-2 text-[9px] uppercase tracking-[.14em] ${group.headerClass}`}>
+            <div className={`mb-1.5 flex items-center gap-1.5 px-2 text-[10px] uppercase tracking-[.14em] ${group.headerClass}`}>
               <span className={`h-1.5 w-1.5 rounded-full ${group.dotClass}`} />
               <span className="rail-section-label">{t(group.label)}</span>
             </div>
@@ -243,12 +247,20 @@ function SideNav() {
         </div>
         <div className="rail-label flex flex-col">
           <span className="text-[#d8d9da] font-bold leading-none">ClickHouse</span>
-          <span className="text-[9px] text-green-300 font-bold mt-0.5">● {t("Connected")}</span>
+          <span className="text-[10px] text-green-300 font-bold mt-0.5">● {t("Connected")}</span>
         </div>
       </div>
     </aside>
   );
 }
+
+type FilterService = { name: string; environment?: string; service_group?: string; service_module?: string };
+type EntityFilterKey = "service" | "operation" | "account" | "environment" | "group" | "module";
+const entityFilterFields: Array<{ key: EntityFilterKey; label: string }> = [
+  { key: "service", label: "Service" }, { key: "operation", label: "Operation" },
+  { key: "account", label: "Account" }, { key: "environment", label: "Environment" },
+  { key: "group", label: "Group" }, { key: "module", label: "Module" },
+];
 
 function FilterBar() {
   const { filters, setFilter } = useFilters();
@@ -257,6 +269,31 @@ function FilterBar() {
   const location = useLocation();
   const queryClient = useQueryClient();
   const [showFilters, setShowFilters] = useState(false);
+  const optionWindow = queryString({ start: filters.start, end: filters.end, timezone: filters.timezone, comparison: "none" });
+  const serviceOptionsQuery = useQuery({
+    queryKey: ["toolbar-service-options", optionWindow],
+    queryFn: () => api<{ items: FilterService[] }>(`/api/v1/services?${optionWindow}&limit=500`),
+    enabled: showFilters, staleTime: 60000,
+  });
+  const accountOptionsQuery = useQuery({
+    queryKey: ["toolbar-account-options", optionWindow],
+    queryFn: () => api<{ items: Array<{ principal_name: string }>; total?: number }>(`/api/v1/users?${optionWindow}&limit=500`),
+    enabled: showFilters, staleTime: 60000,
+  });
+  const operationOptionsQuery = useQuery({
+    queryKey: ["toolbar-operation-options", optionWindow, filters.service],
+    queryFn: () => api<{ operations: Array<{ name: string }> }>(`/api/v1/services/${encodeURIComponent(filters.service || "")}?${optionWindow}`),
+    enabled: showFilters && !!filters.service, staleTime: 60000,
+  });
+  const optionServices = serviceOptionsQuery.data?.items || [];
+  const observedOptions: Record<EntityFilterKey, Array<string | undefined>> = {
+    service: optionServices.map((item) => item.name),
+    environment: optionServices.map((item) => item.environment),
+    group: optionServices.map((item) => item.service_group),
+    module: optionServices.map((item) => item.service_module),
+    account: (accountOptionsQuery.data?.items || []).map((item) => item.principal_name),
+    operation: (operationOptionsQuery.data?.operations || []).map((item) => item.name),
+  };
   const [searchQuery, setSearchQuery] = useState("");
   const [isRefreshing, setIsRefreshing] = useState(false);
   const nav = useNavigate();
@@ -403,13 +440,16 @@ function FilterBar() {
           </button>
 
           <button
+            type="button"
+            aria-expanded={showFilters}
+            aria-controls="toolbar-filters"
             onClick={() => setShowFilters(!showFilters)}
             className={`btn ${showFilters || activeFilterKeys.length > 0 ? "border-cyan-400 bg-cyan-500/25 text-white" : ""}`}
           >
             <SlidersHorizontal size={13} />
             <span>{t("Filters")}</span>
             {activeFilterKeys.length > 0 && (
-              <span className="grid h-4 w-4 place-items-center rounded-full bg-cyan-400 text-[9px] font-bold text-black">
+              <span className="grid h-4 w-4 place-items-center rounded-full bg-cyan-400 text-[10px] font-bold text-black">
                 {activeFilterKeys.length}
               </span>
             )}
@@ -435,9 +475,9 @@ function FilterBar() {
             onChange={(e) => setFilter("timezone", e.target.value)}
             className="btn toolbar-control cursor-pointer"
           >
+            <option value="local" className="bg-[#181b1f]">{t("Browser Local", "Browser local")} ({Intl.DateTimeFormat().resolvedOptions().timeZone})</option>
             <option value="UTC" className="bg-[#181b1f]">UTC</option>
             <option value="Asia/Ho_Chi_Minh" className="bg-[#181b1f]">Asia/Ho Chi Minh</option>
-            <option value="local" className="bg-[#181b1f]">{t("Browser Local")}</option>
           </select>
 
           <div className="chip font-mono text-[10px] font-bold text-emerald-300 border-emerald-500/40 bg-emerald-500/15">
@@ -449,38 +489,36 @@ function FilterBar() {
 
       {/* Expanded filter panel */}
       {showFilters && (
-        <div className="mt-2 grid grid-cols-2 gap-2 border-t border-[#2a2d30] pt-2 sm:grid-cols-3 lg:grid-cols-6 animate-in fade-in duration-150">
-          {[
-            ["service", "Service", "focus:border-indigo-400"],
-            ["operation", "Operation", "focus:border-violet-400"],
-            ["account", "Account", "focus:border-cyan-400"],
-            ["environment", "Environment", "focus:border-emerald-400"],
-            ["group", "Group", "focus:border-amber-400"],
-            ["module", "Module", "focus:border-sky-400"],
-          ].map(([key, label, focusClass]) => (
-            <div key={key} className="flex flex-col gap-1">
-              <label className="text-[10px] font-bold uppercase tracking-wider text-[#94a3b8]">
-                {label}
-              </label>
-              <div className="relative">
-                <input
+        <div id="toolbar-filters" className="mt-2 grid grid-cols-2 gap-2 border-t border-[#2a2d30] pt-2 sm:grid-cols-3 lg:grid-cols-6">
+          {entityFilterFields.map(({ key, label }) => {
+            const source = key === "account" ? accountOptionsQuery : key === "operation" ? operationOptionsQuery : serviceOptionsQuery;
+            const needsService = key === "operation" && !filters.service;
+            const values = [...new Set([...observedOptions[key], filters[key]].filter((value): value is string => !!value))].sort((a, b) => a.localeCompare(b));
+            const hint = needsService ? t("Select a service first", "Chọn Service trước")
+              : source.isLoading ? t("Loading options…", "Đang tải lựa chọn…")
+              : source.isError ? t("Options unavailable", "Không tải được lựa chọn")
+              : values.length === 0 ? t("No observed values", "Chưa có giá trị quan sát")
+              : (key === "account" || key === "service") && values.length >= 500 ? t("Showing up to 500 values", "Hiển thị tối đa 500 giá trị") : "";
+            return <div key={key} className="flex min-w-0 flex-col gap-1">
+              <label htmlFor={`toolbar-filter-${key}`} className="text-[10px] font-bold uppercase tracking-wider text-[#a7a9ab]">{t(label)}</label>
+              <div className="flex items-center gap-1">
+                <select
+                  id={`toolbar-filter-${key}`}
                   aria-label={`${label} filter`}
-                  placeholder={`All ${label.toLowerCase()}s`}
-                  value={filters[key as keyof Filters] || ""}
-                  onChange={(e) => setFilter(key as keyof Filters, e.target.value)}
-                  className={`toolbar-control w-full px-2 py-1 text-[11px] placeholder:text-[#7b7d80] ${focusClass} focus:outline-none`}
-                />
-                {filters[key as keyof Filters] && (
-                  <button
-                    onClick={() => setFilter(key as keyof Filters, "")}
-                    className="absolute right-2 top-1/2 -translate-y-1/2 text-[#94a3b8] hover:text-white"
-                  >
-                    <X size={12} />
-                  </button>
-                )}
+                  aria-describedby={hint ? `toolbar-filter-${key}-hint` : undefined}
+                  value={filters[key] || ""}
+                  disabled={needsService && !filters[key]}
+                  onChange={(event) => setFilter(key, event.target.value)}
+                  className="toolbar-control min-w-0 flex-1 cursor-pointer px-2 py-1 text-[11px] focus:border-[#5794f2] focus:outline-none disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  <option value="">{t("All", "Tất cả")} · {t(label)}</option>
+                  {values.map((value) => <option key={value} value={value}>{value}</option>)}
+                </select>
+                {filters[key] && <button type="button" aria-label={`${t("Clear", "Xóa")} ${t(label)}`} onClick={() => setFilter(key, "")} className="p-1 text-[#a7a9ab] hover:text-[#d8d9da] focus-visible:outline focus-visible:outline-2"><X size={12} /></button>}
               </div>
-            </div>
-          ))}
+              {hint && <span id={`toolbar-filter-${key}-hint`} className="text-[10px] text-[#a7a9ab]">{hint}{source.isError && !needsService && <button type="button" onClick={() => source.refetch()} className="ml-1 text-[#5794f2] underline">{t("Retry", "Thử lại")}</button>}</span>}
+            </div>;
+          })}
         </div>
       )}
     </div>
@@ -524,6 +562,7 @@ function Layout() {
             {/* System Observability & Fleet */}
             <Route path="/changes" element={<ChangesPage />} />
             <Route path="/changes/:id" element={<ChangeDetailPage />} />
+            <Route path="/alerts" element={<AlertsPage />} />
             <Route path="/anomalies" element={<Navigate to="/changes" replace />} />
             <Route path="/anomalies/:id" element={<LegacyAnomalyRedirect />} />
             <Route path="/topology" element={<InteractiveTopologyPage />} />
@@ -556,7 +595,7 @@ export default function App() {
     () => ({
       start: params.get("start") || defaultStart,
       end: params.get("end") || defaultEnd,
-      timezone: params.get("timezone") || "UTC",
+      timezone: params.get("timezone") || "local",
       environment: params.get("environment") || undefined,
       group: params.get("group") || undefined,
       module: params.get("module") || undefined,
@@ -572,6 +611,7 @@ export default function App() {
     setParams(
       (prev) => {
         const next = new URLSearchParams(prev);
+        if (k === "service" && v !== (prev.get("service") || "")) next.delete("operation");
         if (v) next.set(k, v);
         else next.delete(k);
         return next;

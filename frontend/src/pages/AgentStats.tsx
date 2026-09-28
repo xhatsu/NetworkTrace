@@ -261,7 +261,7 @@ function NodeRow({
           {reasons.length > 0 && (
             <div className="flex flex-wrap gap-1">
               {reasons.map((r) => (
-                <span key={r} className="rounded bg-amber-500/10 px-1.5 py-0.5 text-[9px] font-mono text-amber-400">
+                <span key={r} className="rounded bg-amber-500/10 px-1.5 py-0.5 text-[10px] font-mono text-amber-400">
                   {r}
                 </span>
               ))}
@@ -1215,7 +1215,7 @@ export function AgentNodeDetailPage() {
                         {rList.length > 0 ? (
                           <div className="flex flex-wrap gap-1">
                             {rList.map((r) => (
-                              <span key={r} className="rounded bg-amber-500/10 px-1.5 py-0.5 text-[9px] text-amber-400">
+                              <span key={r} className="rounded bg-amber-500/10 px-1.5 py-0.5 text-[10px] text-amber-400">
                                 {r}
                               </span>
                             ))}

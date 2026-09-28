@@ -24,9 +24,9 @@ html {
   --border-strong: #34373b;
   --grid: #303236;
 
-  --text: #d8d9da;
-  --text-secondary: #a7a9ab;
-  --text-muted: #7b7d80;
+  --text: #f1f3f5;
+  --text-secondary: #c2c6cc;
+  --text-muted: #b8bcc4;
 
   --blue: #5794f2;
   --green: #73bf69;
@@ -52,9 +52,9 @@ html {
   --theme-surface-muted: #202226;
   --theme-border: #2a2d30;
   --theme-border-strong: #34373b;
-  --theme-text: #d8d9da;
-  --theme-muted: #a7a9ab;
-  --theme-subtle: #7b7d80;
+  --theme-text: #f1f3f5;
+  --theme-muted: #c2c6cc;
+  --theme-subtle: #b8bcc4;
   --theme-grid: #303236;
   --theme-green: #73bf69;
   --theme-blue: #5794f2;
@@ -64,8 +64,7 @@ html {
   --theme-purple: #b877d9;
 }
 
-[class*="text-[9px]"] { font-size: 9px !important; }
-[class*="text-[10px]"] { font-size: 10px !important; }
+[class*="text-[10px]"] { font-size: 11px !important; }
 [class*="text-[11px]"] { font-size: 11px !important; }
 [class*="text-[12px]"] { font-size: 12px !important; }
 [class*="text-[13px]"] { font-size: 13px !important; }
@@ -243,6 +242,47 @@ html:not([data-theme="light"]) [class~="text-\[#7e7489]"],
 html:not([data-theme="light"]) [class~="text-\[#6e7681]"],
 html:not([data-theme="light"]) [class~="text-\[#59616b]"] {
   color: var(--theme-muted) !important;
+}
+
+html:not([data-theme="light"]) [class~="text-\[#d8d9da]"] {
+  color: var(--theme-text) !important;
+}
+
+html:not([data-theme="light"]) [class~="text-\[#a7a9ab]"],
+html:not([data-theme="light"]) [class~="text-\[#756b81]"],
+html:not([data-theme="light"]) [class~="text-\[#81768d]"],
+html:not([data-theme="light"]) [class~="text-\[#887e94]"],
+html:not([data-theme="light"]) [class~="text-\[#8c8297]"],
+html:not([data-theme="light"]) [class~="text-\[#aba2b5]"],
+html:not([data-theme="light"]) [class~="text-\[#b9b0c2]"] {
+  color: var(--theme-muted) !important;
+}
+
+html:not([data-theme="light"]) [class~="text-\[#7b7d80]"],
+html:not([data-theme="light"]) [class~="text-\[#64748b]"],
+html:not([data-theme="light"]) [class~="text-slate-500"],
+html:not([data-theme="light"]) [class~="text-slate-700"] {
+  color: var(--theme-subtle) !important;
+}
+
+html:not([data-theme="light"]) [class~="text-slate-400"] {
+  color: var(--theme-muted) !important;
+}
+
+html:not([data-theme="light"]) [class*="placeholder:text-"]::placeholder {
+  color: var(--theme-subtle) !important;
+}
+
+html:not([data-theme="light"]) [class*="hover:text-white"]:hover {
+  color: #ffffff !important;
+}
+
+.recharts-cartesian-axis-tick-value {
+  font-size: 11px !important;
+}
+
+html:not([data-theme="light"]) .recharts-cartesian-axis-tick-value {
+  fill: var(--theme-subtle) !important;
 }
 
 button,
@@ -516,11 +556,13 @@ html[data-theme="light"] .scrollbar::-webkit-scrollbar-thumb:hover { background:
   }
   
   .label {
-    @apply text-[10px] font-bold uppercase tracking-[.1em] text-[#a7a9ab];
+    @apply text-[11px] font-bold uppercase tracking-[.1em];
+    color: var(--theme-muted);
   }
   
   .btn {
-    @apply focus-ring inline-flex items-center justify-center gap-1.5 rounded-[2px] border border-[#34373b] bg-[#181b1f] px-2.5 py-1 text-[11px] font-semibold text-[#d8d9da] transition hover:border-[#5794f2] hover:bg-[#202226] active:scale-[0.99];
+    @apply focus-ring inline-flex items-center justify-center gap-1.5 rounded-[2px] border border-[#34373b] bg-[#181b1f] px-2.5 py-1 text-[11px] font-semibold transition hover:border-[#5794f2] hover:bg-[#202226] active:scale-[0.99];
+    color: var(--theme-text);
   }
 
   .btn-primary {
@@ -532,7 +574,8 @@ html[data-theme="light"] .scrollbar::-webkit-scrollbar-thumb:hover { background:
   }
   
   .chip {
-    @apply inline-flex items-center gap-1 rounded-[2px] border border-[#34373b] bg-[#181b1f] px-2 py-0.5 text-[10px] font-semibold text-[#d8d9da];
+    @apply inline-flex items-center gap-1 rounded-[2px] border border-[#34373b] bg-[#181b1f] px-2 py-0.5 text-[11px] font-semibold;
+    color: var(--theme-text);
   }
 
   .badge-cyan {
@@ -560,6 +603,7 @@ html[data-theme="light"] .scrollbar::-webkit-scrollbar-thumb:hover { background:
   }
   
   .table-head {
-    @apply text-left text-[10px] font-bold uppercase tracking-[.08em] text-[#a7a9ab];
+    @apply text-left text-[11px] font-bold uppercase tracking-[.08em];
+    color: var(--theme-muted);
   }
 }

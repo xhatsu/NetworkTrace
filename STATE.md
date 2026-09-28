@@ -1,5 +1,9 @@
 # TraceScope & Testbed Cluster Services — STATE.md
 
+## Changes policy v2 — implementation awaiting backend activation
+
+Evidence-gated classification and Watch UI are implemented; 22 isolated unit/L4/mocked API tests, Python compilation and frontend production build passed. The frontend bundle is rebuilt; backend/worker were not restarted and stored findings were not modified. A bounded read-only replay of 182 episodes produced 31 critical→watch, 72 attention→watch, 13 attention→informational, 9 informational→watch and 57 unchanged informational results. Missing legacy structured evidence must not be interpreted as disproven impact: review critical downgrades before activation. `previous_evaluation` preserves v1 comparison in new responses. Persistent incident lifecycle and notification delivery remain deferred. Thresholds, evidence contract and rollout guidance: `docs/change-policy-v2.md`.
+
 ## 1. Active Cluster Services & Telemetry Ingestion
 
 ### Kubernetes Testbed Services
@@ -32,7 +36,7 @@
   - Service Type: `ClusterIP`
   - Cluster IP: `10.105.101.253:8123` (auto-detected by `backend/config.py:_detect_clickhouse_host`)
   - Status: Healthy, open, serving ClickHouse 24.8.14.39.
-    - `tracescope` (Application database): **Populated with 10-day continuous dataset across all 24 hours of every day (175,164 1m buckets, 35,420 5m buckets in ClickHouse; 225,982 traces in Elasticsearch; 41,808 traces in ClickHouse with 1-day TTL)**.
+    - `tracescope` (Application database): **Populated with 10-day continuous dataset across all 24 hours of every day (188,717 1m buckets, 36,382 5m buckets in ClickHouse; 306,232 traces in Elasticsearch; 306,232 traces in ClickHouse with 1-day TTL; 24,735 5m service edges, 33,058 5m api edges, 35,919 5m principal edges, 35,919 5m principal ip edges; max 1m TPS for `svc_checkout_gateway` is 0.783 TPS ~200% increase over baseline)**.
     - **ClickHouse Trace Retention Invariant (1-Day TTL)**:
       - Raw traces copied into ClickHouse for worker SQL rollups expire automatically after 1 day (`TTL toDateTime(intDiv(timestamp_ms, 1000)) + toIntervalDay(1)` applied via `backend/clickhouse_migrations/009_trace_1day_ttl.sql`).
       - All permanent multi-tier span waterfalls on `/traces/:id` are served directly by Elasticsearch (`tmp-elk-svc`), preventing dual-storage bloat while giving the worker its required window for calculations.
@@ -1549,3 +1553,53 @@ Exposes standard Prometheus 0.0.4 text exposition format at `GET /metrics` on po
 
 - Increased separation between service groups, SCC grid members, and disconnected components in the topology auto-layout.
 - Initial service positions now scale against the measured topology canvas so the automatic layout preserves its pixel spacing at the active viewport size. Manual dragging no longer runs an overlap guard; card selection buttons may begin a drag, while links and the expand control remain excluded.
+
+## Provider-neutral L4 semantic assessment scaffold (2026-09-24)
+
+- Moved Changes signal normalization, correlation, and deterministic episode evaluation into `backend/app/services/change_episodes.py`; L3 state and reasons remain unchanged. Episodes now expose their stable correlation `episode_key` and a SHA-256 `episode_version` over signal identity/types, highlights, and L3 evaluation.
+- Added the `SemanticAssessmentV1` contract, ClickHouse migration `012_semantic_assessments.sql`, bulk assessment repository lookup, stale-version handling, and a provider protocol/disabled worker scaffold. Changes endpoints only read stored L4 records and fail open to `not_evaluated`; no request is made during a page load and no native Jev API is configured. The OpenRouter adapter now uses the Decisions API for `typesafe/jev-1.13`, validates Jev Noul/Choice outputs, and preserves category/priority distributions, effective model/request ID, and usage cost. Jev does not return narrative explanations or per-signal attribution, so those fields remain empty and the UI labels its typed outputs accordingly.
+- Global Changes and User Change cards show L3 state alongside compact L4 status. Detail pages show the L4 semantic assessment above deterministic L3 rationale, provide L4 filtering on global Changes, and label the existing on-demand panel `Deep AI Investigation`.
+- Initial scaffold verification: Python compilation, focused L3/L4 unit tests (**9 passed**), `git diff --check`, and frontend production build passed; application API tests were skipped as requested. After the Jev Decisions API alignment, the captured live response passed local typed-model validation, Python compilation passed, and the frontend production build passed. No database migration or deployment was run.
+
+- Local OpenRouter configuration uses the ignored root `.env` (mode 0600), base URL `https://openrouter.ai`, model `typesafe/jev-1.13`, and `OTEL_SEMANTIC_ASSESSMENT_ENABLED=false`. One synthetic Jev Decisions API request returned HTTP 200 with Noul/Choice answers, category and priority distributions, and usage: 704 input tokens, 165 output tokens, and `$0.000029568` reported cost. No telemetry or application API tests were sent.
+
+## Dashboard metrics-first redesign (2026-09-28)
+
+- Overview on `/` now prioritizes six KPI cards and a compact request count, P99 latency, critical/attention count, and latest telemetry strip. Four trend panels show TPS/baseline, P50/P95/P99 latency, HTTP 4xx/5xx rates, and measured bandwidth before the change and service/user lists.
+- Charts share hover timestamps, use the selected timezone, and show explicit empty/unavailable states. Active user totals use the active-principal field; missing entity-count samples no longer invent historical activity from current totals. KPI captions stack for readability, and large latency values use seconds.
+- Validation: TypeScript/Vite production build passed; live health and all seven dashboard data requests returned HTTP 200. Chromium verified desktop (1440px) and mobile (390px) rendering with no JavaScript errors or document overflow. Production assets are served by the existing app on port 30102; no backend restart or data changes were needed.
+
+## Dashboard time-series revision (2026-09-28)
+
+- Removed the Overview FleetTriage service table; service catalog and change triage remain available on their dedicated routes.
+- Replaced Fleet Signals with a shared HTTP 4xx/5xx error-rate line chart backed by `dashboard/series`.
+- Promoted the weekday/hour behavior-change heatmap to a full-width panel directly beneath TPS and HTTP error rate.
+- Validation: frontend build and browser smoke test completed after revision.
+
+## Fleet-scale dashboard (2026-09-28, supersedes traffic donut)
+
+- Removed the service traffic-share donut. `frontend/src/components/FleetTriage.tsx` provides a full-width service table with search, open-anomaly/error filters, priority/error/TPS/max-bucket-P95/name sorting, and 10-row pagination across up to 500 loaded services.
+- `frontend/src/pages/Overview.tsx` keeps TPS/baseline and KPI sparklines, adds a compact fleet signal summary, and moves historical change activity and users below the operational queue. Important changes now show only unresolved attention/critical episodes.
+- Metric labels distinguish average TPS, maximum bucket P95, and current open anomaly flags. Counts may overlap; no open anomaly does not establish availability or SLO compliance. Loading/failure and bounded coverage are explicit.
+- Production build and diff check passed. Read-only live dashboard checks returned HTTP 200 for all seven API requests. Chromium tested a mocked 240-service fleet with working search/filter/sort/pagination and empty results, plus 1440px/390px document overflow checks and zero page errors. Test script: `/tmp/test_fleet_dashboard.py`. Built assets served on :30102 without backend restart.
+
+## Dashboard behavior and traffic composition revision (2026-09-28)
+
+- Replaced the latency, HTTP error, and bandwidth trend panels with a service traffic-share donut and an episode-start heatmap by weekday/hour. Kept the main TPS/baseline graph. The donut groups the long tail into Other services, displays numeric percentages, and links named services to details.
+- Reduced the KPI area to TPS, bandwidth, unresolved attention episodes, and one compact Service/User footprint card. Removed duplicate change counters. Attention excludes resolved episodes and discloses loaded/total episode coverage (API request capped at 500).
+- The heatmap counts only episode starts inside the selected time window, groups in the selected timezone, shows numeric counts, and provides hover/focus/click readouts. For windows longer than a week, matching weekdays/hours combine. It describes when detected changes started, not their duration or request volume.
+- Validation: TypeScript/Vite build passed. Live Chromium checks at 1440px and 390px found no JavaScript errors or document overflow; all seven dashboard API requests returned 200. Empty and unavailable-data scenarios rendered without NaN or overflow, and keyboard/click heatmap readouts passed. Assets served by the existing app on port 30102.
+
+## KPI sparklines and selectable toolbar filters (2026-09-28)
+
+- Restored shared MetricCard sparklines for TPS and measured bandwidth. Unavailable bandwidth omits the sparkline.
+- Replaced all six top-bar filter text fields with native dropdowns: Service, Operation, Account, Environment, Group, and Module. Choices load on expansion from existing service/user APIs; Operation loads from the selected service. Changing Service clears Operation atomically. All/clear controls retain existing URL filter semantics; current URL values remain selectable even if missing from loaded data. Service and account lists are bounded at 500 with a visible limit hint.
+- Added loading, empty, unavailable, and retry states plus accessible field labels and filter-panel expanded state.
+- Validation: TypeScript/Vite production build and diff whitespace check passed. Chromium confirmed two KPI sparklines, all six dropdown selections, URL persistence through reload, automatic operation reset on service clear, and mobile layout at 390px without overflow or JavaScript errors. Existing live service/user/detail endpoints supplied the options successfully; no backend restart was required.
+
+## Compact Changes page and signal-type filtering (2026-09-28)
+
+- Replaced the global Changes feed's large KPI cards and expanded episode cards with compact workflow count tabs and responsive triage rows. Each row shows evaluation state separately from workflow, localized change title, entity link, signal types/count, one before/after metric, last observation, and detail/investigation actions. AI badges appear only for assessments with a status beyond not-evaluated; full evidence and explanations remain in detail.
+- Added exact change-type selection and clickable type chips. Matches include every signal/evidence detector in a correlated episode, including secondary types. Search, subject, AI assessment, sort, type, and workflow view persist in URL parameters and are restored on returning from detail. Default ordering prioritizes severity then recency; 25-row pages bound rendering.
+- Filtering applies to the API's loaded set of up to 500 episodes; the footer reports matching rows and loaded/total coverage rather than implying exhaustive history.
+- Validation: TypeScript/Vite production build and diff whitespace check passed. Live Chromium checks verified traffic-spike and latency filters, URL persistence, detail-return context, empty search, and mobile layout without page overflow or JavaScript errors. The Changes list/detail APIs loaded successfully on port 30102. No backend changes or restarts were required.

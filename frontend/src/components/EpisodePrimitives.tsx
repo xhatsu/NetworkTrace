@@ -1,4 +1,4 @@
-import { ArrowRight, CheckCircle2, Clock3, Activity, AlertTriangle, UserRound, Boxes, CircleDot, KeyRound } from "lucide-react";
+import { ArrowRight, CheckCircle2, Clock3, Activity, AlertTriangle, UserRound, Boxes, CircleDot, KeyRound, Sparkles } from "lucide-react";
 import type { ReactNode } from "react";
 import { useI18n } from "../i18n";
 import type { FindingRef } from "../investigations";
@@ -14,8 +14,34 @@ export type EpisodeHighlight = {
   delta?: number | null;
 };
 
+export type SemanticAssessment = {
+  status: "not_evaluated" | "pending" | "succeeded" | "failed" | "stale";
+  provider?: "jev" | null;
+  provider_model?: string | null;
+  provider_request_id?: string | null;
+  assessment_version: "semantic-v1";
+  episode_version?: string | null;
+  abnormal_probability?: number | null;
+  category?: "access_behavior" | "traffic" | "performance" | "errors" | "authentication" | "infrastructure" | "identity" | "mixed" | "normal_variation" | "insufficient_evidence" | null;
+  category_confidence?: number | null;
+  category_probabilities?: Record<string, number>;
+  priority?: "informational" | "watch" | "investigate" | "urgent" | null;
+  priority_confidence?: number | null;
+  priority_probabilities?: Record<string, number>;
+  summary?: string | null;
+  supporting_signal_ids?: string[];
+  caveats?: string[];
+  input_tokens?: number | null;
+  output_tokens?: number | null;
+  cost_usd?: number | null;
+  evaluated_at?: number | null;
+};
+
 export type Episode = {
   id: string;
+  episode_key?: string;
+  episode_version?: string;
+  semantic_assessment?: SemanticAssessment;
   source?: "anomaly" | "principal_change";
   source_id?: string;
   subject: { type: "user" | "service"; name: string };
@@ -35,9 +61,9 @@ export type Episode = {
   signal_ids?: string[];
   signals?: Array<{ id: string; source: string; type: string; detected_at: number }>;
   timeline?: Array<{ at: number; type: string; source: string }>;
-  state: "expected" | "changed" | "needs_attention" | "critical";
+  state: "expected" | "changed" | "watch" | "needs_attention" | "critical";
   abnormality?: {
-    state: "expected" | "changed" | "needs_attention" | "critical";
+    state: "expected" | "changed" | "watch" | "needs_attention" | "critical";
     is_abnormal: boolean;
     correlated: boolean;
     infrastructure_only: boolean;
@@ -57,11 +83,16 @@ export type EpisodeResponse = {
   summary?: {
     expected: number;
     changed: number;
+    watch?: number;
     needs_attention: number;
     critical: number;
     changed_users: number;
     changed_services: number;
     reviewed?: number;
+    l4_evaluated?: number;
+    l4_pending?: number;
+    l4_high_confidence?: number;
+    l4_not_evaluated?: number;
   };
 };
 
@@ -107,10 +138,12 @@ export function episodeStatusLabel(state: Episode["state"], t: (key: string, fal
   if (state === "expected") return t("Expected", "Đã xác nhận");
   if (state === "critical") return t("Critical", "Nghiêm trọng");
   if (state === "needs_attention") return t("Needs attention", "Cần chú ý");
-  return t("Changed", "Đã thay đổi");
+  if (state === "watch") return t("Watch", "Theo dõi thêm");
+  return t("Informational change", "Thay đổi thông tin");
 }
 
 export function episodeStatusClass(state: Episode["state"]) {
+  if (state === "watch") return "border-[#b877d9]/60 bg-[#b877d9]/10 text-[#b877d9]";
   if (state === "expected") return "border-[#73bf69]/60 bg-[#73bf69]/10 text-[#73bf69]";
   if (state === "critical") return "border-[#f2495c]/60 bg-[#f2495c]/10 text-[#f2495c]";
   if (state === "needs_attention") return "border-[#ff9830]/60 bg-[#ff9830]/10 text-[#ff9830]";
@@ -160,6 +193,30 @@ function displayValue(value: unknown, unit?: string | null) {
   return String(value);
 }
 
+/** Group repeated detector highlights so one episode reads as one change. */
+export function dedupeEpisodeHighlights(episode: Episode): EpisodeHighlight[] {
+  const grouped = new Map<string, EpisodeHighlight>();
+  for (const highlight of episode.highlights) {
+    const key = `${highlight.label.trim().toLowerCase()}|${highlight.unit || ""}`;
+    const existing = grouped.get(key);
+    if (!existing) {
+      grouped.set(key, highlight);
+      continue;
+    }
+    const existingDelta = Math.abs(Number(existing.delta) || 0);
+    const currentDelta = Math.abs(Number(highlight.delta) || 0);
+    if (currentDelta > existingDelta || (currentDelta === existingDelta && highlight.after != null && existing.after == null)) grouped.set(key, highlight);
+  }
+  return [...grouped.values()];
+}
+
+export function formatHighlightDelta(highlight: EpisodeHighlight, t: (key: string, fallback?: string) => string) {
+  const before = Number(highlight.before);
+  const after = Number(highlight.after);
+  if (Number.isFinite(before) && before === 0 && Number.isFinite(after) && after > 0) return t("New", "Mới");
+  return highlight.delta == null ? "—" : `${Number(highlight.delta) >= 0 ? "+" : ""}${Number(highlight.delta).toFixed(1)}%`;
+}
+
 export function EpisodeStatusBadge({ episode }: { episode: Episode }) {
   const { t } = useI18n();
   const Icon = episode.state === "expected" ? CheckCircle2 : episode.state === "critical" ? AlertTriangle : episode.state === "needs_attention" ? Activity : Clock3;
@@ -177,6 +234,103 @@ export function EpisodeWorkflowBadge({ episode }: { episode: Episode }) {
   const label = resolved ? t("Resolved", "Đã xử lý") : monitoring ? t("Monitoring", "Đang theo dõi") : t("Open", "Đang mở");
   const tone = resolved ? "text-[#73bf69]" : monitoring ? "text-[#ff9830]" : "text-[#a7a9ab]";
   return <span className={`inline-flex items-center gap-1 text-[10px] font-semibold uppercase tracking-wide ${tone}`}><CircleDot size={10} />{label}</span>;
+}
+
+function assessmentCategoryLabel(category: NonNullable<SemanticAssessment["category"]>, t: (key: string, fallback?: string) => string) {
+  const labels: Record<NonNullable<SemanticAssessment["category"]>, [string, string]> = {
+    access_behavior: ["Access behavior", "Hành vi truy cập"],
+    traffic: ["Traffic", "Lưu lượng"],
+    performance: ["Performance", "Hiệu năng"],
+    errors: ["Errors", "Lỗi"],
+    authentication: ["Authentication", "Xác thực"],
+    infrastructure: ["Infrastructure", "Hạ tầng"],
+    identity: ["Identity", "Danh tính"],
+    mixed: ["Mixed", "Hỗn hợp"],
+    normal_variation: ["Normal variation", "Biến động bình thường"],
+    insufficient_evidence: ["Insufficient evidence", "Chưa đủ bằng chứng"],
+  };
+  const [english, vietnamese] = labels[category];
+  return t(english, vietnamese);
+}
+
+function assessmentPriorityLabel(priority: NonNullable<SemanticAssessment["priority"]>, t: (key: string, fallback?: string) => string) {
+  const labels: Record<NonNullable<SemanticAssessment["priority"]>, [string, string]> = {
+    informational: ["Informational", "Thông tin"],
+    watch: ["Watch", "Theo dõi"],
+    investigate: ["Investigate", "Điều tra"],
+    urgent: ["Urgent", "Khẩn cấp"],
+  };
+  const [english, vietnamese] = labels[priority];
+  return t(english, vietnamese);
+}
+
+export function SemanticAssessmentBadge({ assessment }: { assessment?: SemanticAssessment }) {
+  const { t } = useI18n();
+  const status = assessment?.status || "not_evaluated";
+  const text = status === "succeeded" && assessment?.abnormal_probability != null
+    ? `${t("AI", "AI")} ${Math.round(assessment.abnormal_probability * 100)}%${assessment.category ? ` · ${assessmentCategoryLabel(assessment.category, t)}` : ""}`
+    : status === "pending" ? t("AI evaluating", "AI đang đánh giá")
+      : status === "failed" ? t("AI unavailable", "AI không khả dụng")
+        : status === "stale" ? t("AI stale", "AI đã cũ")
+          : t("AI not evaluated", "AI chưa đánh giá");
+  const tone = status === "succeeded" ? "border-[#b877d9]/50 bg-[#b877d9]/10 text-[#d9b4ea]"
+    : status === "pending" ? "border-[#5794f2]/50 bg-[#5794f2]/10 text-[#8bb8fa]"
+      : status === "failed" || status === "stale" ? "border-[#ff9830]/50 bg-[#ff9830]/10 text-[#ffb767]"
+        : "border-[#34373b] bg-[#181b1f] text-[#a7a9ab]";
+  return <span className={`inline-flex shrink-0 items-center gap-1 whitespace-nowrap border px-2 py-1 text-[10px] font-semibold ${tone}`}><Sparkles size={11} aria-hidden="true" />{text}</span>;
+}
+
+export function SemanticAssessmentSummary({ episode, full = false, timezone = "local" }: { episode: Episode; full?: boolean; timezone?: string }) {
+  const { t } = useI18n();
+  const assessment = episode.semantic_assessment;
+  const status = assessment?.status || "not_evaluated";
+  const stale = status === "stale";
+  const succeeded = status === "succeeded" || stale;
+  const categoryProbabilities = Object.entries(assessment?.category_probabilities || {})
+    .filter(([, probability]) => probability > 0.005).sort((left, right) => right[1] - left[1]).slice(0, 4);
+  const priorityProbabilities = Object.entries(assessment?.priority_probabilities || {})
+    .filter(([, probability]) => probability > 0.005).sort((left, right) => right[1] - left[1]).slice(0, 3);
+
+  if (!full) {
+    if (status !== "succeeded" || !assessment) return null;
+    return <div className="mt-2 border-l-2 border-[#b877d9]/60 pl-2">
+      <div className="text-[10px] font-semibold uppercase tracking-[.12em] text-[#b877d9]">{t("L4 assessment", "Đánh giá L4")}{assessment.category ? ` · ${assessmentCategoryLabel(assessment.category, t)}` : ""}{assessment.priority ? ` · ${assessmentPriorityLabel(assessment.priority, t)}` : ""}</div>
+      <p className="mt-0.5 line-clamp-2 text-[11px] leading-4 text-[#c9c1d1]">{assessment.summary || t("Typed decision from Jev; see the detail panel for category and priority probabilities.", "Jev trả về quyết định có kiểu dữ liệu; xem bảng chi tiết để biết xác suất danh mục và ưu tiên.")}</p>
+    </div>;
+  }
+
+  return <section aria-labelledby={`semantic-assessment-${episode.id}`} className="border border-[#34373b] bg-[#111217]">
+    <div className="flex flex-wrap items-center justify-between gap-2 border-b border-[#2a2d30] px-3 py-2.5">
+      <h2 id={`semantic-assessment-${episode.id}`} className="flex items-center gap-2 text-[11px] font-semibold uppercase tracking-[.12em] text-[#d9b4ea]"><Sparkles size={13} aria-hidden="true" />{t("L4 semantic assessment", "Đánh giá ngữ nghĩa L4")}</h2>
+      <SemanticAssessmentBadge assessment={assessment} />
+    </div>
+    {succeeded && assessment ? <div className="space-y-3 p-3">
+      {stale && <p role="status" className="border-l-2 border-[#ff9830] pl-2 text-[11px] text-[#ffb767]">{t("This assessment uses an earlier evidence version and may no longer match the current episode.", "Đánh giá này dùng phiên bản bằng chứng trước đó và có thể không còn khớp với episode hiện tại.")}</p>}
+      <div className="flex flex-wrap gap-x-6 gap-y-2 text-[11px]">
+        {assessment.abnormal_probability != null && <div><div className="text-[10px] uppercase tracking-wide text-[#7b7d80]">{t("Abnormal probability", "Xác suất bất thường")}</div><div className="mt-1 font-mono text-lg font-semibold text-[#d9b4ea]">{Math.round(assessment.abnormal_probability * 100)}%</div></div>}
+        {assessment.category && <div><div className="text-[10px] uppercase tracking-wide text-[#7b7d80]">{t("Category · confidence", "Danh mục · độ tin cậy")}</div><div className="mt-1 text-xs text-[#d8d9da]">{assessmentCategoryLabel(assessment.category, t)}{assessment.category_confidence != null ? ` · ${Math.round(assessment.category_confidence * 100)}%` : ""}</div></div>}
+        {assessment.priority && <div><div className="text-[10px] uppercase tracking-wide text-[#7b7d80]">{t("Priority · confidence", "Ưu tiên · độ tin cậy")}</div><div className="mt-1 text-xs text-[#d8d9da]">{assessmentPriorityLabel(assessment.priority, t)}{assessment.priority_confidence != null ? ` · ${Math.round(assessment.priority_confidence * 100)}%` : ""}</div></div>}
+      </div>
+      {assessment.summary && <p className="max-w-4xl text-xs leading-5 text-[#d8d9da]">{assessment.summary}</p>}
+      {(categoryProbabilities.length > 0 || priorityProbabilities.length > 0) && <div className="grid gap-3 sm:grid-cols-2">
+        {categoryProbabilities.length > 0 && <div>
+          <div className="mb-1.5 text-[10px] font-semibold uppercase tracking-wide text-[#7b7d80]">{t("Category probabilities", "Xác suất danh mục")}</div>
+          <ul className="space-y-1">{categoryProbabilities.map(([category, probability]) => <li key={category} className="flex items-center justify-between gap-2 text-[10px] text-[#c4bdd9]"><span>{assessmentCategoryLabel(category as NonNullable<SemanticAssessment["category"]>, t)}</span><span className="font-mono">{Math.round(probability * 100)}%</span></li>)}</ul>
+        </div>}
+        {priorityProbabilities.length > 0 && <div>
+          <div className="mb-1.5 text-[10px] font-semibold uppercase tracking-wide text-[#7b7d80]">{t("Priority probabilities", "Xác suất ưu tiên")}</div>
+          <ul className="space-y-1">{priorityProbabilities.map(([priority, probability]) => <li key={priority} className="flex items-center justify-between gap-2 text-[10px] text-[#c4bdd9]"><span>{assessmentPriorityLabel(priority as NonNullable<SemanticAssessment["priority"]>, t)}</span><span className="font-mono">{Math.round(probability * 100)}%</span></li>)}</ul>
+        </div>}
+      </div>}
+      <p className="max-w-4xl border-l-2 border-[#5794f2]/50 pl-2 text-[10px] leading-4 text-[#a7a9ab]">{t("Jev returns typed decisions and probabilities, not a generated explanation or per-signal attribution. Use the L3 evidence and rationale for the underlying facts.", "Jev trả về quyết định và xác suất có kiểu dữ liệu, không tạo giải thích bằng văn bản hoặc gán theo từng tín hiệu. Xem bằng chứng và lý do L3 để biết các dữ kiện nền.")}</p>
+      {!!assessment.caveats?.length && <div><div className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-[#7b7d80]">{t("Caveats", "Lưu ý")}</div><ul className="space-y-1">{assessment.caveats.map((caveat, index) => <li key={`${caveat}-${index}`} className="border-l-2 border-[#ff9830]/60 pl-2 text-[11px] leading-4 text-[#c4bdd9]">{caveat}</li>)}</ul></div>}
+      <div className="border-t border-[#2a2d30] pt-2 text-[10px] text-[#7b7d80]">{assessment.provider === "jev" ? "Jev" : t("Semantic provider", "Nhà cung cấp ngữ nghĩa")} · {assessment.provider_model || assessment.assessment_version}{assessment.evaluated_at ? ` · ${formatEpisodeTime(assessment.evaluated_at, true, timezone)}` : ""}{assessment.input_tokens != null ? ` · ${assessment.input_tokens} ${t("input tokens", "token đầu vào")}` : ""}{assessment.cost_usd != null ? ` · $${assessment.cost_usd.toFixed(6)}` : ""}</div>
+    </div> : <div className="p-3 text-[11px] leading-4 text-[#a7a9ab]">
+      {status === "pending" ? t("An automatic semantic assessment is in progress.", "Đang thực hiện đánh giá ngữ nghĩa tự động.")
+        : status === "failed" ? t("The semantic assessment could not be completed. Deterministic L3 state remains authoritative.", "Không thể hoàn tất đánh giá ngữ nghĩa. Trạng thái L3 xác định vẫn là căn cứ chính.")
+          : t("No semantic assessment is stored for this episode version yet.", "Chưa có đánh giá ngữ nghĩa được lưu cho phiên bản episode này.")}
+    </div>}
+  </section>;
 }
 
 export type EntityKind = "user" | "service" | "api" | "ip";
@@ -237,7 +391,7 @@ export function EpisodePath({ episode, compact = false }: { episode: Episode; co
           <span key={`${node.label}-${node.value}-${index}`} className="flex items-end gap-1.5">
             {index > 0 && <ArrowRight size={12} className="mb-1.5 shrink-0 text-[#7b7d80]" aria-hidden="true" />}
             <span className="min-w-0">
-              <span className="mb-1 block text-[9px] font-semibold uppercase tracking-[.12em] text-[#7b7d80]">{node.label}</span>
+              <span className="mb-1 block text-[10px] font-semibold uppercase tracking-[.12em] text-[#7b7d80]">{node.label}</span>
               <EntityToken
                 kind={node.kind}
                 entity={node.kind === "user"
@@ -279,17 +433,19 @@ export function EpisodeCard({ episode, onInvestigate, detailSearch = "", timezon
           <div className="flex flex-wrap items-center gap-2">
             <EpisodeStatusBadge episode={episode} />
             <EpisodeWorkflowBadge episode={episode} />
+            <SemanticAssessmentBadge assessment={episode.semantic_assessment} />
             <span className="text-[10px] text-[#7b7d80]">{t("Last observed", "Quan sát gần nhất")} {formatEpisodeTime(episode.last_seen_at, true, timezone)}</span>
           </div>
           <h3 className="mt-2 flex items-center gap-2 text-sm font-semibold text-[#d8d9da]"><Icon size={14} className="text-[#5794f2]" />{episodeTitle(episode, t)}</h3>
           <div className="mt-2"><EpisodePath episode={episode} compact /></div>
           {episode.abnormality?.reasons?.[0] && <p className="mt-2 text-[11px] text-[#a7a9ab]">{episode.abnormality.reasons[0]}</p>}
+          <SemanticAssessmentSummary episode={episode} />
         </div>
         <div className="flex shrink-0 gap-2">
           <EntityLink entity={{ kind: "change", id: episode.id }} search={detailSearch} className="btn h-7 px-2.5 text-[11px]">
             {t("View details", "Xem chi tiết")} <ArrowRight size={12} />
           </EntityLink>
-          {onInvestigate && <button type="button" onClick={onInvestigate} className="btn h-7 border-[#b877d9]/50 px-2.5 text-[11px] text-[#b877d9]">{t("Investigate", "Điều tra")}</button>}
+          {onInvestigate && <button type="button" onClick={onInvestigate} className="btn h-7 border-[#b877d9]/50 px-2.5 text-[11px] text-[#b877d9]">{t("Deep investigate", "Điều tra chuyên sâu")}</button>}
         </div>
       </div>
       {episode.highlights.length > 0 && (
@@ -314,13 +470,14 @@ export function EpisodeCard({ episode, onInvestigate, detailSearch = "", timezon
 
 export function EpisodeMetricTable({ episode }: { episode: Episode }) {
   const { t } = useI18n();
-  if (!episode.highlights.length) return <div className="p-4 text-xs text-[#7b7d80]">{t("No metric comparison available", "Chưa có so sánh chỉ số")}</div>;
+  const highlights = dedupeEpisodeHighlights(episode);
+  if (!highlights.length) return <div className="p-4 text-xs text-[#7b7d80]">{t("No metric comparison available", "Chưa có so sánh chỉ số")}</div>;
   return (
     <div className="overflow-x-auto">
       <table className="w-full min-w-[560px] text-left text-xs">
         <thead><tr className="border-b border-[#2a2d30] text-[10px] uppercase tracking-wide text-[#7b7d80]"><th className="px-3 py-2">{t("Metric", "Chỉ số")}</th><th className="px-3 py-2">{t("Normal", "Bình thường")}</th><th className="px-3 py-2">{t("During change", "Trong thay đổi")}</th><th className="px-3 py-2 text-right">{t("Difference", "Chênh lệch")}</th></tr></thead>
         <tbody className="divide-y divide-[#2a2d30]">
-          {episode.highlights.map((highlight) => <tr key={`${highlight.label}-${String(highlight.after)}`}><td className="px-3 py-2 font-semibold text-[#d8d9da]">{t(highlight.label, highlight.label)}</td><td className="px-3 py-2 font-mono text-[#a7a9ab]">{displayValue(highlight.before, highlight.unit)}</td><td className="px-3 py-2 font-mono text-[#d8d9da]">{displayValue(highlight.after, highlight.unit)}{highlight.before == null && highlight.after != null && <span className="ml-2 text-[9px] font-sans font-semibold uppercase text-[#5794f2]">{t("Added", "Mới")}</span>}</td><td className="px-3 py-2 text-right font-mono text-[#a7a9ab]">{highlight.delta == null ? "—" : `${Number(highlight.delta) >= 0 ? "+" : ""}${Number(highlight.delta).toFixed(1)}%`}</td></tr>)}
+          {highlights.map((highlight) => <tr key={`${highlight.label}-${highlight.unit || ""}`}><td className="px-3 py-2 font-semibold text-[#d8d9da]">{t(highlight.label, highlight.label)}</td><td className="px-3 py-2 font-mono text-[#a7a9ab]">{displayValue(highlight.before, highlight.unit)}</td><td className="px-3 py-2 font-mono text-[#d8d9da]">{displayValue(highlight.after, highlight.unit)}{highlight.before == null && highlight.after != null && <span className="ml-2 text-[10px] font-sans font-semibold uppercase text-[#5794f2]">{t("Added", "Mới")}</span>}</td><td className="px-3 py-2 text-right font-mono text-[#a7a9ab]">{formatHighlightDelta(highlight, t)}</td></tr>)}
         </tbody>
       </table>
     </div>

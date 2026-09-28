@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
 import {
@@ -11,11 +12,11 @@ import {
 } from "recharts";
 import { AlertOctagon, ArrowRight, Server, UserRound } from "lucide-react";
 import { api, queryString } from "../api";
-import { ErrorState, Loading, MetricCard, Page, Panel, TpsLineChart, chartTooltip, n } from "../components";
+import { ErrorState, Loading, MetricCard, Page, Panel, chartTooltip, n } from "../components";
 import { useFilters } from "../App";
 import { useI18n } from "../i18n";
 import type { SeriesPoint, Summary } from "../types";
-import { episodeStatusClass, episodeStatusLabel, type Episode, type EpisodeResponse } from "../components/EpisodePrimitives";
+import { isEpisodeAttention, episodeStatusClass, episodeStatusLabel, type Episode, type EpisodeResponse } from "../components/EpisodePrimitives";
 import { EntityLink } from "../components/EntityLink";
 
 type UserSummary = {
@@ -42,6 +43,7 @@ type ServiceHealth = {
   p95_latency?: number;
   principal_count?: number;
   operations_count?: number;
+  total_requests?: number;
 };
 
 type DashboardBandwidth = {
@@ -60,15 +62,71 @@ function formatTime(value: number, timezone: string) {
   }
 }
 
-function formatTooltipTime(value: unknown, timezone: string) {
-  if (!value) return "";
-  try {
-    const options: Intl.DateTimeFormatOptions = { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit", second: "2-digit" };
-    if (timezone !== "local") options.timeZone = timezone;
-    return new Intl.DateTimeFormat([], options).format(new Date(Number(value)));
-  } catch {
-    return new Date(Number(value)).toLocaleString();
+type TrendLine = { key: string; label: string; color: string; dash?: string };
+
+function MetricTrend({ data, lines, timezone, formatValue }: {
+  data: Array<{ timestamp_ms: number; [key: string]: unknown }>;
+  lines: TrendLine[];
+  timezone: string;
+  formatValue: (value: number) => string;
+}) {
+  const { t } = useI18n();
+  if (!data.length) return <div className="grid h-56 place-items-center text-xs text-[#a7a9ab]">{t("No telemetry points in the selected window")}</div>;
+  return <>
+    <div className="h-56 px-2 pt-2" role="img" aria-label={lines.map((line) => line.label).join(", ")}>
+      <ResponsiveContainer width="100%" height="100%">
+        <LineChart data={data} syncId="overview-metrics" syncMethod="value" margin={{ top: 5, right: 12, bottom: 0, left: 0 }}>
+          <CartesianGrid stroke="#303236" vertical={false} />
+          <XAxis dataKey="timestamp_ms" type="number" domain={["dataMin", "dataMax"]} minTickGap={65} tick={{ fill: "#a7a9ab", fontSize: 12 }} tickFormatter={(value) => formatTime(Number(value), timezone)} axisLine={false} tickLine={false} />
+          <YAxis width={70} domain={[0, "auto"]} tick={{ fill: "#a7a9ab", fontSize: 12 }} tickFormatter={formatValue} axisLine={false} tickLine={false} />
+          <Tooltip {...chartTooltip} labelFormatter={(value) => formatTime(Number(value), timezone)} formatter={(value: unknown, name: unknown) => [formatValue(Number(value)), String(name)]} />
+          {lines.map((line) => <Line key={line.key} type="linear" dataKey={line.key} name={line.label} stroke={line.color} strokeDasharray={line.dash} strokeWidth={1.8} dot={false} isAnimationActive={false} />)}
+        </LineChart>
+      </ResponsiveContainer>
+    </div>
+    <div className="flex flex-wrap gap-x-4 gap-y-1 px-3 pb-2 text-[11px] text-[#a7a9ab]">
+      {lines.map((line) => <span key={line.key} className="inline-flex items-center gap-1.5"><span className="w-4 border-t-2" style={{ borderColor: line.color, borderTopStyle: line.dash ? "dashed" : "solid" }} />{line.label}</span>)}
+    </div>
+  </>;
+}
+
+function ChangeActivity({ changes, timezone }: { changes: Episode[]; timezone: string }) {
+  const { t } = useI18n();
+  const [selected, setSelected] = useState<number | null>(null);
+  const days = [t("Mon", "T2"), t("Tue", "T3"), t("Wed", "T4"), t("Thu", "T5"), t("Fri", "T6"), t("Sat", "T7"), t("Sun", "CN")];
+  const dayKeys = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
+  const formatter = new Intl.DateTimeFormat("en-GB", { weekday: "short", hour: "2-digit", hourCycle: "h23", ...(timezone === "local" ? {} : { timeZone: timezone }) });
+  const cells = Array.from({ length: 168 }, () => ({ count: 0, critical: 0, attention: 0 }));
+  for (const change of changes) {
+    if (!Number.isFinite(change.started_at)) continue;
+    const parts = formatter.formatToParts(new Date(change.started_at));
+    const day = dayKeys.indexOf(parts.find((part) => part.type === "weekday")?.value || "");
+    const hour = Number(parts.find((part) => part.type === "hour")?.value);
+    if (day < 0 || !Number.isFinite(hour)) continue;
+    const cell = cells[day * 24 + hour];
+    cell.count += 1;
+    cell.critical += Number(change.state === "critical");
+    cell.attention += Number(change.state === "needs_attention");
   }
+  const peak = Math.max(1, ...cells.map((cell) => cell.count));
+  const activeIndex = selected ?? cells.findIndex((cell) => cell.count === peak);
+  const active = cells[activeIndex];
+  return <div className="px-3 pb-3 pt-2">
+    <div className="overflow-x-auto">
+      <table className="w-full min-w-[560px] table-fixed border-separate border-spacing-[3px] text-[10px]" aria-label={t("Episode starts by weekday and hour", "Thời điểm bắt đầu thay đổi theo thứ và giờ")}>
+        <thead><tr><th className="w-9" /><th colSpan={24} className="text-left font-normal text-[#a7a9ab]">{t("Hour", "Giờ")} · {timezone}</th></tr><tr><th />{Array.from({ length: 24 }, (_, hour) => <th key={hour} className="font-mono font-normal text-[#a7a9ab]">{hour % 3 === 0 ? String(hour).padStart(2, "0") : ""}</th>)}</tr></thead>
+        <tbody>{days.map((day, index) => <tr key={day}><th scope="row" className="text-left font-normal text-[#a7a9ab]">{day}</th>{cells.slice(index * 24, index * 24 + 24).map((cell, hour) => {
+          const key = index * 24 + hour;
+          const label = `${day} ${String(hour).padStart(2, "0")}:00 · ${cell.count} ${t("episodes", "thay đổi")}`;
+          return <td key={hour} className="h-5 p-0"><button type="button" aria-label={label} title={label} onMouseEnter={() => setSelected(key)} onFocus={() => setSelected(key)} onClick={() => setSelected(key)} className="h-full w-full rounded-[2px] font-mono text-[10px] outline-offset-2 focus-visible:outline focus-visible:outline-2 focus-visible:outline-[#d8d9da]" style={{ background: cell.count ? `rgba(87, 148, 242, ${0.22 + 0.78 * cell.count / peak})` : "#181b1f", color: cell.count / peak > 0.6 ? "#0b0c0e" : "#d8d9da" }}>{cell.count || ""}</button></td>;
+        })}</tr>)}</tbody>
+      </table>
+    </div>
+    <div className="mt-2 flex flex-wrap items-center justify-between gap-2 text-[11px] text-[#a7a9ab]">
+      <span aria-live="polite">{active ? <>{days[Math.floor(activeIndex / 24)]} {String(activeIndex % 24).padStart(2, "0")}:00 · <strong className="text-[#d8d9da]">{active.count} {t("episodes", "thay đổi")}</strong> · {active.critical} {t("Critical")} · {active.attention} {t("Needs attention")}</> : t("No behavior changes in the current window.")}</span>
+      <span className="inline-flex items-center gap-1.5">0 <span className="h-2 w-3 bg-[#181b1f]" /><span className="h-2 w-3 bg-[#5794f2]/30" /><span className="h-2 w-3 bg-[#5794f2]/60" /><span className="h-2 w-3 bg-[#5794f2]" />{peak}</span>
+    </div>
+  </div>;
 }
 
 export function OverviewPage() {
@@ -102,20 +160,14 @@ export function OverviewPage() {
   const changes = changesQuery.data?.items || [];
   const latestPoint = points[points.length - 1];
   const totalTps = Number(latestPoint?.tps ?? summary.observed_tps ?? summary.observed_rps ?? 0);
-  const currentErrorPercent = Number(latestPoint?.http_5xx_rate ?? summary.http_5xx_rate ?? 0) * 100;
-  const currentP95 = Number(latestPoint?.p95_ms ?? summary.p95_latency_ms ?? 0);
   const totalUsers = Number(users.observed_principals || summary.active_accounts || 0);
   const totalServices = Number(summary.active_services || serviceItems.length || 0);
   const abnormalServices = serviceItems.filter((service) => service.anomaly_status === "abnormal");
-  const windowSeconds = Math.max(1, (new Date(filters.end).getTime() - new Date(filters.start).getTime()) / 1000);
 
-  const chartPoints = points.map((point) => ({ ...point, error_percent: Number(point.http_5xx_rate || 0) * 100 }));
-  const stateRank: Record<Episode["state"], number> = { expected: 0, changed: 1, needs_attention: 2, critical: 3 };
-  const importantChanges = [...changes].sort((a, b) => (stateRank[b.state] - stateRank[a.state]) || (b.last_seen_at - a.last_seen_at)).slice(0, 6);
-  const serviceHotspots = [...serviceItems].sort((a, b) => {
-    const abnormalDelta = Number(b.anomaly_status === "abnormal") - Number(a.anomaly_status === "abnormal");
-    return abnormalDelta || (Number(b.error_rate || 0) - Number(a.error_rate || 0)) || (Number(b.p95_latency || 0) - Number(a.p95_latency || 0));
-  }).slice(0, 6);
+  const windowSeconds = Math.max(1, (new Date(filters.end).getTime() - new Date(filters.start).getTime()) / 1000);
+  const chartPoints = points.map((point) => ({ ...point }));
+  const stateRank: Record<Episode["state"], number> = { expected: 0, changed: 1, watch: 2, needs_attention: 3, critical: 4 };
+  const importantChanges = changes.filter(isEpisodeAttention).sort((a, b) => (stateRank[b.state] - stateRank[a.state]) || (b.last_seen_at - a.last_seen_at)).slice(0, 6);
   const usersWithChanges = changes.reduce<Record<string, number>>((acc, change) => {
     const user = change.subject.type === "user" ? change.subject.name : undefined;
     if (user && user !== "unknown" && user !== "-anonymous-") acc[user] = (acc[user] || 0) + 1;
@@ -123,15 +175,13 @@ export function OverviewPage() {
   }, {});
   const changedUsers = Object.entries(usersWithChanges).sort(([, a], [, b]) => b - a).slice(0, 6);
 
-  const stateCounts = {
-    expected: changes.filter((change) => change.state === "expected").length,
-    changed: changes.filter((change) => change.state === "changed").length,
-    needs_attention: changes.filter((change) => change.state === "needs_attention").length,
-    critical: changes.filter((change) => change.state === "critical").length,
-  };
+  const attentionChanges = changes.filter(isEpisodeAttention);
+  const criticalCount = attentionChanges.filter((change) => change.state === "critical").length;
+  const changesReady = !changesQuery.isLoading && !changesQuery.isError;
+  const changeCoverage = changesReady ? `${changes.length}/${changesQuery.data?.total ?? changes.length} ${t("episodes loaded", "thay đổi đã tải")}` : "—";
 
   // 1. TPS sparkline & secondary metrics
-  const tpsSparkline = points.map((p) => Number(p.tps || p.rps || 0));
+  const tpsSparkline = points.map((p) => Number(p.tps ?? p.rps ?? 0));
   const avgTps = points.length ? tpsSparkline.reduce((a, b) => a + b, 0) / points.length : totalTps;
   const peakTps = points.length ? Math.max(...tpsSparkline) : totalTps;
 
@@ -153,26 +203,11 @@ export function OverviewPage() {
     return `${n(rate, 0)} B/s`;
   }
 
-  // 2. Error rate sparkline & peak
-  const errorSparkline = points.map((p) => Number(p.http_5xx_rate || 0) * 100);
-  const maxError = points.length ? Math.max(...errorSparkline) : currentErrorPercent;
-
-  // 3. P95 latency sparkline, avg p50 & peak p99
-  const p95Sparkline = points.map((p) => Number(p.p95_ms || 0));
-  const avgP50 = points.length ? points.reduce((acc, p) => acc + Number(p.p50_ms || 0), 0) / points.length : 0;
-  const peakP99 = points.length ? Math.max(...points.map((p) => Number(p.p99_ms || 0))) : 0;
-
-  // 4. Active users sparkline
-  const usersSparkline = points.map((p) => Number(p.active_users ?? (p.sample_count > 0 ? (users.active_principals || totalUsers) : 0)));
-
-  // 5. Active services sparkline
-  const servicesSparkline = points.map((p) => Number(p.active_services ?? (p.sample_count > 0 ? totalServices : 0)));
-
   return (
     <Page
       eyebrow={t("Observability Dashboard")}
       title={t("Operational Overview")}
-      description={t("Status, changes, and the services or users behind them.")}
+      description={t("Fleet-scale operations: spot exceptions, prioritize services, investigate impact.", "Vận hành toàn hệ thống: nhận diện bất thường, ưu tiên Service, điều tra tác động.")}
       actions={
         <button onClick={() => nav("/changes")} className="btn">
           <AlertOctagon size={14} className="text-[#ff9830]" />
@@ -180,107 +215,56 @@ export function OverviewPage() {
         </button>
       }
     >
-      {/* 1. Compact health summary with sparklines: TPS, Error Rate, Bandwidth, P95, Active Users, Services */}
-      <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-6">
-        <MetricCard
-          label={t("TPS")}
-          value={n(totalTps, 2)}
-          detail={t("Current throughput")}
-          subDetail={`avg ${n(avgTps, 1)} · peak ${n(peakTps, 1)}`}
-          sparkline={tpsSparkline}
-          accent="sky"
-        />
-        <MetricCard
-          label={t("Error rate")}
-          value={`${currentErrorPercent.toFixed(2)}%`}
-          detail={t("HTTP 5xx")}
-          subDetail={`peak ${maxError.toFixed(1)}%`}
-          sparkline={errorSparkline}
-          tone={currentErrorPercent > 1 ? "bad" : "normal"}
-          accent="rose"
-        />
-        <MetricCard
-          label={t("Bandwidth")}
-          value={bandwidthQuery.isError || bandwidthQuery.data?.available === false ? "—" : formatRate(currentBandwidth)}
-          detail={t("Request + response bytes/s")}
-          subDetail={`avg ${formatRate(avgBandwidth)} · peak ${formatRate(peakBandwidth)}`}
-          sparkline={bandwidthSeries}
-          accent="sky"
-        />
-        <MetricCard
-          label={t("P95 latency")}
-          value={`${n(currentP95, 0)} ms`}
-          detail={t("Tail latency")}
-          subDetail={`p50 ${n(avgP50, 0)} · p99 ${n(peakP99, 0)}`}
-          sparkline={p95Sparkline}
-          accent="violet"
-        />
-        <MetricCard
-          label={t("Active users")}
-          value={n(totalUsers, 0)}
-          detail={t("Observed identities")}
-          subDetail={`${n(users.active_principals, 0)} ${t("active now")}`}
-          sparkline={usersSparkline}
-          accent="purple"
-        />
-        <MetricCard
-          label={t("Services")}
-          value={n(totalServices, 0)}
-          detail={`${n(abnormalServices.length, 0)} ${t("attention")}`}
-          subDetail={`${serviceItems.length} ${t("registered")}`}
-          sparkline={servicesSparkline}
-          tone={abnormalServices.length ? "bad" : "normal"}
-          accent="amber"
-        />
+      <div className="grid grid-cols-2 gap-2 xl:grid-cols-[1fr_1fr_1fr_1.2fr] [&_.metric-meta]:flex-col [&_.metric-meta]:items-start">
+        <MetricCard label="TPS" value={n(totalTps, 2)} detail={t("Current throughput")} subDetail={`${t("Avg", "TB")} ${n(avgTps, 2)} · ${t("Peak", "Đỉnh")} ${n(peakTps, 2)}`} sparkline={tpsSparkline} accent="sky" />
+        <MetricCard label={t("Bandwidth")} value={bandwidthQuery.isError || bandwidthQuery.data?.available === false ? "—" : formatRate(currentBandwidth)} detail={t("Request + response bytes/s")} subDetail={bandwidthQuery.isError || bandwidthQuery.data?.available === false ? "—" : `${t("Avg", "TB")} ${formatRate(avgBandwidth)} · ${t("Peak", "Đỉnh")} ${formatRate(peakBandwidth)}`} sparkline={bandwidthQuery.isError || bandwidthQuery.data?.available === false ? undefined : bandwidthSeries} accent="cyan" />
+        <button type="button" onClick={() => nav("/changes?view=attention")} className="panel p-3 text-left hover:border-[#ff9830] focus-visible:outline focus-visible:outline-2 focus-visible:outline-[#ff9830]">
+          <span className="text-[10px] font-semibold uppercase tracking-wider text-[#a7a9ab]">{t("Needs attention")}</span>
+          <span className="mt-1 block font-mono text-2xl font-semibold text-[#ff9830]">{changesReady ? n(attentionChanges.length, 0) : "—"}</span>
+          <span className="mt-1 block text-[11px] text-[#a7a9ab]">{changesReady ? criticalCount : "—"} {t("Critical")} · {t("Unresolved episodes", "Thay đổi chưa xử lý")}</span>
+          <span className="mt-1 block text-[10px] text-[#a7a9ab]">{changeCoverage} <ArrowRight size={12} className="inline" /></span>
+        </button>
+        <div className="panel flex flex-col justify-center p-3">
+          <span className="mb-2 text-[10px] font-semibold uppercase tracking-wider text-[#a7a9ab]">{t("Observed footprint", "Phạm vi quan sát")}</span>
+          <div className="grid grid-cols-2 divide-x divide-[#2a2d30]">
+            <button type="button" onClick={() => nav("/services")} className="pr-2 text-left hover:text-[#5794f2]"><span className="flex items-center gap-1.5 text-xs text-[#a7a9ab]"><Server size={12} />Services</span><strong className="font-mono text-xl">{n(totalServices, 0)}</strong><span className="mt-1 block text-[10px] text-[#a7a9ab]">{servicesQuery.isError || servicesQuery.isLoading ? "—" : abnormalServices.length} {t("with anomalies", "có bất thường")}</span></button>
+            <button type="button" onClick={() => nav("/users")} className="pl-3 text-left hover:text-[#b877d9]"><span className="flex items-center gap-1.5 text-xs text-[#a7a9ab]"><UserRound size={12} />{t("Active users")}</span><strong className="font-mono text-xl">{n(users.active_principals, 0)}</strong><span className="mt-1 block text-[10px] text-[#a7a9ab]">{n(totalUsers, 0)} {t("observed", "đã quan sát")}</span></button>
+          </div>
+        </div>
       </div>
 
-      {/* 2. Main TPS chart beside Important changes */}
-      <div className="mt-3 grid gap-3 xl:grid-cols-[minmax(0,1.45fr)_minmax(300px,.7fr)]">
-        <Panel title={t("Total TPS")} subtitle={t("Five-minute buckets · last seven days")} action={<span className="font-mono text-[11px] font-semibold text-[#5794f2]">{n(totalTps, 2)} TPS</span>}>
-          <TpsLineChart data={points} heightClassName="h-60" />
+      <div className="mt-3 grid gap-3 xl:grid-cols-[minmax(0,1.8fr)_minmax(320px,1fr)]">
+        <Panel title={t("Total TPS")} subtitle={`${n(summary.total_requests, 0)} ${t("Requests")} · ${t("Selected window", "Khoảng đã chọn")}`} action={<span className="font-mono text-xs text-[#5794f2]">{n(totalTps, 2)} TPS</span>}>
+          <MetricTrend data={chartPoints} timezone={filters.timezone} formatValue={(value) => n(value, 2)} lines={[{ key: "tps", label: "TPS", color: "#5794f2" }, { key: "baseline_rps", label: "Baseline", color: "#a7a9ab", dash: "4 4" }]} />
         </Panel>
+        <Panel title={t("HTTP error rate", "Tỷ lệ lỗi HTTP")} subtitle={t("4xx and 5xx failure signals across the selected window", "Tín hiệu lỗi 4xx và 5xx trong khoảng thời gian đã chọn")} action={<span className="font-mono text-xs text-[#f2495c]">{n(Number(latestPoint?.http_5xx_rate || 0) * 100, 2)}% 5xx</span>}>
+          <MetricTrend data={chartPoints} timezone={filters.timezone} formatValue={(value) => `${n(value * 100, 2)}%`} lines={[{ key: "http_4xx_rate", label: "HTTP 4xx", color: "#ff9830" }, { key: "http_5xx_rate", label: "HTTP 5xx", color: "#f2495c" }]} />
+        </Panel>
+      </div>
+
+      <div className="mt-3">
+        <Panel title={t("When behavior changes", "Hành vi thay đổi khi nào")} subtitle={t("Episode starts by weekday × hour · selected window", "Số thay đổi bắt đầu theo thứ × giờ · khoảng đã chọn")} action={<span className="text-[10px] text-[#a7a9ab]">{changeCoverage}</span>}>
+          {changesQuery.isLoading ? <Loading /> : changesQuery.isError ? <div className="p-6 text-xs text-[#a7a9ab]">{t("Change data unavailable", "Chưa có dữ liệu thay đổi")}</div> : <ChangeActivity changes={changes.filter((change) => change.started_at >= new Date(filters.start).getTime() && change.started_at <= new Date(filters.end).getTime())} timezone={filters.timezone} />}
+        </Panel>
+      </div>
+      <p className="mt-2 text-right text-[10px] text-[#a7a9ab]">{t("Latest telemetry", "Telemetry mới nhất")}: {summary.latest_ingested_ms ? formatTime(summary.latest_ingested_ms, filters.timezone) : "—"}</p>
+
+      <div className="mt-5 mb-2 text-xs font-semibold uppercase tracking-wider text-[#a7a9ab]">{t("Investigation & affected entities", "Điều tra & thực thể bị ảnh hưởng")}</div>
+      <div>
         <Panel
-          title={t("Important changes", "Thay đổi quan trọng")}
-          subtitle={t("Recent behavior changes that need context")}
+          title={t("Unresolved priority changes", "Thay đổi ưu tiên chưa xử lý")}
+          subtitle={`${t("Critical first · up to 6 episodes", "Nghiêm trọng trước · tối đa 6 thay đổi")} · ${changeCoverage}`}
           action={
             <button onClick={() => nav("/changes")} className="text-[11px] font-semibold text-[#5794f2] hover:text-white">
               {t("View all")} <ArrowRight size={12} className="inline" />
             </button>
           }
         >
-          {/* Compact change state counter strip */}
-          <div className="grid grid-cols-3 gap-1 border-b border-[#2a2d30] bg-[#0e0f12] p-2">
-            <button
-              type="button"
-              onClick={() => nav("/changes?view=attention")}
-              className="flex items-center justify-between border border-[#f2495c]/30 bg-[#f2495c]/10 px-2 py-1 text-left transition hover:border-[#f2495c]"
-            >
-              <span className="text-[10px] font-semibold text-[#f2495c]">{t("Critical")}</span>
-              <span className="font-mono text-xs font-bold text-[#f2495c] tabular-nums">{stateCounts.critical}</span>
-            </button>
-            <button
-              type="button"
-              onClick={() => nav("/changes?view=attention")}
-              className="flex items-center justify-between border border-[#ff9830]/30 bg-[#ff9830]/10 px-2 py-1 text-left transition hover:border-[#ff9830]"
-            >
-              <span className="text-[10px] font-semibold text-[#ff9830]">{t("Attention")}</span>
-              <span className="font-mono text-xs font-bold text-[#ff9830] tabular-nums">{stateCounts.needs_attention}</span>
-            </button>
-            <button
-              type="button"
-              onClick={() => nav("/changes")}
-              className="flex items-center justify-between border border-[#5794f2]/30 bg-[#5794f2]/10 px-2 py-1 text-left transition hover:border-[#5794f2]"
-            >
-              <span className="text-[10px] font-semibold text-[#5794f2]">{t("Changed")}</span>
-              <span className="font-mono text-xs font-bold text-[#5794f2] tabular-nums">{stateCounts.changed}</span>
-            </button>
-          </div>
-
           {importantChanges.length ? (
             <div role="region" aria-label={t("Important changes list")} tabIndex={0} className="max-h-[284px] overflow-y-auto overscroll-contain scrollbar divide-y divide-[#2a2d30] xl:max-h-[196px]">
               {importantChanges.map((change) => (
                 <div key={change.id} className="flex items-start gap-2.5 px-3 py-2 transition hover:bg-[#181b1f]">
-                  <span className={`mt-0.5 border px-1.5 py-0.5 text-[9px] font-bold uppercase ${episodeStatusClass(change.state)}`}>{episodeStatusLabel(change.state, t)}</span>
+                  <span className={`mt-0.5 border px-1.5 py-0.5 text-[10px] font-bold uppercase ${episodeStatusClass(change.state)}`}>{episodeStatusLabel(change.state, t)}</span>
                   <span className="min-w-0 flex-1">
                     <EntityLink entity={{ kind: "change", id: change.id }} search={`?${queryString(filters)}`} className="block truncate text-xs font-semibold text-[#d8d9da] hover:text-[#5794f2]">{change.summary}</EntityLink>
                     <span className="mt-0.5 flex flex-wrap gap-x-1 text-[10px] text-[#a7a9ab]">
@@ -296,46 +280,13 @@ export function OverviewPage() {
               ))}
             </div>
           ) : (
-            <div className="grid min-h-36 place-items-center p-4 text-xs text-[#7b7d80]">{t("No behavior changes in the current window.")}</div>
+            <div className="grid min-h-36 place-items-center p-4 text-xs text-[#7b7d80]">{changesQuery.isError ? t("Change data unavailable", "Chưa có dữ liệu thay đổi") : changesQuery.isLoading ? t("Loading", "Đang tải") : t("No unresolved attention episodes in the loaded results.", "Không có thay đổi cần chú ý chưa xử lý trong kết quả đã tải.")}</div>
           )}
         </Panel>
       </div>
 
-      {/* 3. Top Services and Top Users tables */}
+      {/* Secondary context follows the operational triage queue. */}
       <div className="mt-3 grid gap-3 xl:grid-cols-2">
-        <Panel title={t("Top services")} subtitle={t("Service → API health signals ordered by operational risk.")} action={<button onClick={() => nav("/services")} className="text-[11px] font-semibold text-[#5794f2] hover:text-white">{t("View services")} <ArrowRight size={12} className="inline" /></button>}>
-          <div className="overflow-auto">
-            <table className="w-full min-w-[640px] text-left text-xs">
-              <thead>
-                <tr className="border-b border-[#2a2d30]">
-                  <th className="table-head px-3 py-2">{t("Service")}</th>
-                  <th className="table-head px-3 py-2 text-right">{t("TPS")}</th>
-                  <th className="table-head px-3 py-2 text-right">{t("Error")}</th>
-                  <th className="table-head px-3 py-2 text-right">{t("P95")}</th>
-                  <th className="table-head px-3 py-2 text-right">{t("Users")}</th>
-                  <th className="table-head px-3 py-2 text-right">{t("APIs")}</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-[#2a2d30]">
-                {serviceHotspots.map((service) => (
-                  <tr key={service.name} className="hover:bg-[#181b1f]">
-                    <td className="px-3 py-2">
-                      <EntityLink entity={{ kind: "service", name: service.name }} className="text-left font-semibold text-[#d8d9da] hover:text-[#5794f2]">{service.name}</EntityLink>
-                      <span className="block text-[10px] text-[#7b7d80]">{service.environment || "—"}</span>
-                    </td>
-                    <td className="px-3 py-2 text-right font-mono text-[#5794f2] tabular-nums">{n(service.rps, 2)}</td>
-                    <td className={`px-3 py-2 text-right font-mono tabular-nums ${Number(service.error_rate || 0) > 0.01 ? "text-[#f2495c]" : "text-[#73bf69]"}`}>{(Number(service.error_rate || 0) * 100).toFixed(2)}%</td>
-                    <td className="px-3 py-2 text-right font-mono text-[#b877d9] tabular-nums">{n(service.p95_latency, 0)} ms</td>
-                    <td className="px-3 py-2 text-right font-mono text-[#a7a9ab] tabular-nums">{n(service.principal_count, 0)}</td>
-                    <td className="px-3 py-2 text-right font-mono text-[#a7a9ab] tabular-nums">{n(service.operations_count, 0)}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-            {!serviceHotspots.length && <div className="p-6 text-center text-xs text-[#7b7d80]">{t("No service health data available.")}</div>}
-          </div>
-        </Panel>
-
         <Panel title={t("Top users")} subtitle={t("Identity activity and behavior changes in this window.")} action={<button onClick={() => nav("/users")} className="text-[11px] font-semibold text-[#5794f2] hover:text-white">{t("View users")} <ArrowRight size={12} className="inline" /></button>}>
           <div className="overflow-auto">
             <table className="w-full min-w-[500px] text-left text-xs">

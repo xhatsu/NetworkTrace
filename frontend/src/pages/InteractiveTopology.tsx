@@ -360,7 +360,7 @@ function MetricStrip({ metrics, vertical = false }: { metrics: Metrics; vertical
           <div className="label">{t("TPS")}</div>
           <div className="font-mono text-sm text-sky-300">{n(metrics.tps, 2)}</div>
         </div>
-        <span className={`rounded border px-1.5 py-0.5 text-[9px] font-bold uppercase ${metrics.error_rate > 0.05 ? "border-rose-400/50 text-rose-300" : statusTone(metrics.change?.status)}`}>
+        <span className={`rounded border px-1.5 py-0.5 text-[10px] font-bold uppercase ${metrics.error_rate > 0.05 ? "border-rose-400/50 text-rose-300" : statusTone(metrics.change?.status)}`}>
           {status}
         </span>
       </div>
@@ -450,7 +450,7 @@ function ServiceNodeCard({
               <span className="text-slate-500">{historical ? t("Previously observed") : t("No traffic")}</span>
             )}
           </span>
-          <span className="mt-0.5 h-3 w-full truncate text-[9px] font-medium leading-3" title={change?.label}>
+          <span className="mt-0.5 h-3 w-full truncate text-[10px] font-medium leading-3" title={change?.label}>
             {historical ? <span className="text-slate-500">{t("Last seen")}: {formatTime(metrics.last_seen_ms)}</span> : change && <span className={serviceChangeClass(change.severity)}>{change.label}</span>}
           </span>
         </button>
@@ -497,15 +497,15 @@ function TpsLineGraph({ data, compact = false }: { data: Array<{ timestamp_ms: n
         {[0, 0.5, 1].map((ratio) => {
           const y = top + plotHeight * ratio;
           const value = maxTps * (1 - ratio);
-          return <g key={ratio}><line x1={left} y1={y} x2={width - right} y2={y} stroke="#25293a" strokeWidth="1" /><text x={left - 5} y={y + 3} fill="#64748b" fontSize="8" textAnchor="end">{n(value, 1)}</text></g>;
+          return <g key={ratio}><line x1={left} y1={y} x2={width - right} y2={y} stroke="#25293a" strokeWidth="1" /><text x={left - 5} y={y + 3} fill="#64748b" fontSize="10" textAnchor="end">{n(value, 1)}</text></g>;
         })}
         {coordinates.length > 1 && <path className="time-series-curve" d={smoothPath} fill="none" stroke="#38bdf8" strokeLinejoin="round" strokeLinecap="round" vectorEffect="non-scaling-stroke" />}
         {data.map((point, index) => {
           const coordinate = coordinates[index];
           return <circle key={`${point.timestamp_ms}-${index}`} cx={coordinate.x} cy={coordinate.y} r="2" fill="#38bdf8"><title>{`${formatTime(point.timestamp_ms)} · ${n(point.tps, 2)} TPS · 5m bucket`}</title></circle>;
         })}
-        <text x={left} y={height - 4} fill="#64748b" fontSize="8">{firstTime ? shortTime(firstTime) : ""}</text>
-        <text x={width - right} y={height - 4} fill="#64748b" fontSize="8" textAnchor="end">{lastTime ? shortTime(lastTime) : ""}</text>
+        <text x={left} y={height - 4} fill="#64748b" fontSize="10">{firstTime ? shortTime(firstTime) : ""}</text>
+        <text x={width - right} y={height - 4} fill="#64748b" fontSize="10" textAnchor="end">{lastTime ? shortTime(lastTime) : ""}</text>
       </svg>
     </div>
   );
@@ -703,7 +703,7 @@ function GraphSurface({
                   <button type="button" className={`flex items-center gap-2 text-xs font-semibold focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-cyan-400 ${tone.text}`} onClick={(event) => { event.stopPropagation(); onSelect({ kind: "node", node }); }} aria-label={`Inspect ${node.type} ${node.name}`}>
                     <NodeIcon type={node.type} /><span className="truncate">{node.name}</span>
                   </button>
-                  <span className={`mt-0.5 block text-[9px] uppercase tracking-wider ${tone.text}`}>{node.type === "principal" ? t("User") : t("API")}</span>
+                  <span className={`mt-0.5 block text-[10px] uppercase tracking-wider ${tone.text}`}>{node.type === "principal" ? t("User") : t("API")}</span>
                   <button type="button" className="mt-1 block w-full text-left focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-cyan-400" onClick={(event) => { event.stopPropagation(); onSelect({ kind: "node", node }); }} aria-label={`Inspect ${node.type} ${node.name}`}>
                     <MetricStrip metrics={node.metrics} vertical />
                   </button>
@@ -725,7 +725,7 @@ function GraphSurface({
       </div>
       <div className="absolute bottom-24 left-3 z-20 flex flex-col overflow-hidden rounded border border-[#303449] bg-[#141622] xl:bottom-14" data-topology-object="true" aria-label={t("Canvas navigation controls")}>
         <button type="button" data-testid="topology-zoom-in" className="grid h-7 w-8 place-items-center text-[#cbd5e1] hover:bg-[#202333] hover:text-white" onClick={(event) => { event.stopPropagation(); changeZoom(0.1); }} aria-label={t("Zoom in")} title={t("Zoom in")}><ZoomIn size={14} /></button>
-        <button type="button" data-testid="topology-reset-view" className="border-y border-[#303449] px-1 py-1 font-mono text-[9px] font-semibold text-cyan-300" onClick={(event) => { event.stopPropagation(); resetViewport(); }} aria-label={t("Reset canvas view")} title={t("Reset canvas view")}>{Math.round(zoom * 100)}%</button>
+        <button type="button" data-testid="topology-reset-view" className="border-y border-[#303449] px-1 py-1 font-mono text-[10px] font-semibold text-cyan-300" onClick={(event) => { event.stopPropagation(); resetViewport(); }} aria-label={t("Reset canvas view")} title={t("Reset canvas view")}>{Math.round(zoom * 100)}%</button>
         <button type="button" data-testid="topology-zoom-out" className="grid h-7 w-8 place-items-center text-[#cbd5e1] hover:bg-[#202333] hover:text-white" onClick={(event) => { event.stopPropagation(); changeZoom(-0.1); }} aria-label={t("Zoom out")} title={t("Zoom out")}><ZoomOut size={14} /></button>
       </div>
     </div>
@@ -827,7 +827,7 @@ function RelationshipListPanel({
         {items.map((item) => (
           <button key={item.id} type="button" data-testid="topology-drilldown-item" onClick={() => onSelect(item)} className={`mb-0.5 flex w-full items-center gap-1.5 rounded px-1.5 py-1 text-left transition focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-yellow-400 ${selectedId === item.id ? "bg-[#2a2a25] ring-1 ring-yellow-400/70" : "hover:bg-[#202333]"}`}>
             <span className={`grid h-6 w-6 shrink-0 place-items-center rounded border border-[#303449] ${entityTone(item.type).soft} ${entityTone(item.type).text}`}><NodeIcon type={item.type} /></span>
-            <span className="min-w-0 flex-1"><span className={`block truncate text-[11px] font-medium ${entityTone(item.type).text}`}>{item.name}</span><span className="block truncate font-mono text-[9px] text-[#64748b]">{n(item.metrics.request_count, 0)} {t("requests")} · {n(item.metrics.tps, 2)} TPS</span></span>
+            <span className="min-w-0 flex-1"><span className={`block truncate text-[11px] font-medium ${entityTone(item.type).text}`}>{item.name}</span><span className="block truncate font-mono text-[10px] text-[#64748b]">{n(item.metrics.request_count, 0)} {t("requests")} · {n(item.metrics.tps, 2)} TPS</span></span>
             {item.type === "service" && item.metrics.api_count !== undefined && <span className="shrink-0 text-[10px] text-[#94a3b8]">{item.metrics.api_count} APIs</span>}
           </button>
         ))}
@@ -1357,16 +1357,16 @@ export function InteractiveTopologyPage() {
                 {searchQuery.data?.items.map((node) => (
                   <button key={node.id + "-" + node.service + "-" + node.api} type="button" data-topology-search-result="true" className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left hover:bg-[#202333] focus:bg-[#202333] focus:outline-none" onMouseDown={(event) => event.preventDefault()} onClick={() => travelTo(node)}>
                     <span className={"grid h-6 w-6 shrink-0 place-items-center rounded border border-[#303449] " + entityTone(node.type).soft + " " + entityTone(node.type).text}><NodeIcon type={node.type} /></span>
-                    <span className="min-w-0 flex-1"><span className={"block truncate text-[11px] font-semibold " + entityTone(node.type).text}>{node.name}</span><span className="block truncate text-[9px] uppercase tracking-wider text-[#64748b]">{node.type === "principal" ? t("User") : t(node.type)}{node.service && node.type !== "service" ? " · " + node.service : ""}</span></span>
-                    <span className="font-mono text-[9px] text-sky-300">{n(node.metrics.tps, 2)} tps</span>
+                    <span className="min-w-0 flex-1"><span className={"block truncate text-[11px] font-semibold " + entityTone(node.type).text}>{node.name}</span><span className="block truncate text-[10px] uppercase tracking-wider text-[#64748b]">{node.type === "principal" ? t("User") : t(node.type)}{node.service && node.type !== "service" ? " · " + node.service : ""}</span></span>
+                    <span className="font-mono text-[10px] text-sky-300">{n(node.metrics.tps, 2)} tps</span>
                   </button>
                 ))}
               </div>
             )}
           </div>
           <div className="mt-1.5 flex rounded border border-[#303449] bg-[#10121c] p-0.5" role="group" aria-label={t("Topology navigation mode")}>
-            <button type="button" data-testid="topology-mode-service-first" onClick={() => changeMode("service-first")} className={"min-w-0 flex-1 rounded px-1 py-1 text-[9px] font-medium " + (mode === "service-first" ? "bg-[#263043] text-cyan-200" : "text-[#94a3b8] hover:text-white")}>{t("Service → API → User")}</button>
-            <button type="button" data-testid="topology-mode-user-first" onClick={() => changeMode("user-first")} className={"min-w-0 flex-1 rounded px-1 py-1 text-[9px] font-medium " + (mode === "user-first" ? "bg-[#263043] text-cyan-200" : "text-[#94a3b8] hover:text-white")}>{t("User → Service → API")}</button>
+            <button type="button" data-testid="topology-mode-service-first" onClick={() => changeMode("service-first")} className={"min-w-0 flex-1 rounded px-1 py-1 text-[10px] font-medium " + (mode === "service-first" ? "bg-[#263043] text-cyan-200" : "text-[#94a3b8] hover:text-white")}>{t("Service → API → User")}</button>
+            <button type="button" data-testid="topology-mode-user-first" onClick={() => changeMode("user-first")} className={"min-w-0 flex-1 rounded px-1 py-1 text-[10px] font-medium " + (mode === "user-first" ? "bg-[#263043] text-cyan-200" : "text-[#94a3b8] hover:text-white")}>{t("User → Service → API")}</button>
           </div>
         </div>
 
@@ -1377,7 +1377,7 @@ export function InteractiveTopologyPage() {
               <div className="mb-1.5 flex items-center justify-between gap-2 text-[10px] uppercase tracking-wider text-[#94a3b8]"><span>{t("Seven-day timeline")}</span><button type="button" onClick={showLast24Hours} className={`rounded px-2 py-0.5 normal-case tracking-normal ${activityWindow === "24h" ? "bg-[#263043] text-cyan-200" : "text-[#94a3b8] hover:text-white"}`}>{t("Last 24h")}</button></div>
               <div className="mb-1.5 text-right font-mono text-[10px] text-cyan-300" data-testid="topology-selected-window">{activityWindow === "24h" ? `${sliderTimeFormatter.format(selectedStartMs)} – ${sliderTimeFormatter.format(selectedEndMs)}` : `${sliderTimeFormatter.format(previewStartMs)} – ${sliderTimeFormatter.format(previewEndMs)}`}</div>
               <input type="range" min={0} max={SEVEN_DAY_SLICES - 1} step={1} value={sliderPreviewIndex} data-testid="topology-time-slider" aria-label={t("Select a five-minute topology window within the last seven days")} className="h-2 w-full cursor-ew-resize accent-cyan-400" onChange={(event) => setSliderPreviewIndex(Number(event.target.value))} onPointerUp={(event) => commitTimeSlice(Number(event.currentTarget.value))} onKeyUp={(event) => commitTimeSlice(Number(event.currentTarget.value))} />
-              <div className="mt-1 flex items-center justify-between font-mono text-[9px] text-[#64748b]"><span>{sliderTimeFormatter.format(sliderStartMs)}</span><span className="text-[#94a3b8]">{t("5-minute window")}</span><span>{t("Now")}</span></div>
+              <div className="mt-1 flex items-center justify-between font-mono text-[10px] text-[#64748b]"><span>{sliderTimeFormatter.format(sliderStartMs)}</span><span className="text-[#94a3b8]">{t("5-minute window")}</span><span>{t("Now")}</span></div>
             </div>}
           </div>
           <button type="button" className="btn bg-[#141622]" onClick={relayout}><Maximize2 size={13} /> {t("Re-layout")}</button>
@@ -1399,7 +1399,7 @@ export function InteractiveTopologyPage() {
       <div className="pointer-events-none absolute bottom-3 left-3 z-20 flex max-w-[calc(100%-1.5rem)] flex-wrap items-stretch gap-1 text-[10px]">
         <div className="pointer-events-auto flex items-center gap-2 rounded border border-[#303449] bg-[#141622] px-2 py-1 text-[#cbd5e1]">
           <span className="font-medium text-cyan-300">{mode === "service-first" ? t("Service → API → User") : t("User → Service → API")}</span>
-          <span className="font-mono text-[9px] uppercase tracking-wider text-[#64748b]">{graphQuery.data?.backend || "clickhouse"}</span>
+          <span className="font-mono text-[10px] uppercase tracking-wider text-[#64748b]">{graphQuery.data?.backend || "clickhouse"}</span>
           <span className="inline-flex items-center gap-1.5"><span className="w-5 border-t-2 border-[#5794c8]" />{t("Observed in window")}</span>
           <span className="inline-flex items-center gap-1.5"><span className="w-5 border-t-2 border-dashed border-[#6b7280]" />{t("Previously observed")}</span>
           <span className="inline-flex items-center gap-1.5"><span className="w-5 border-t-2 border-yellow-400" />{t("Selected path")}</span>

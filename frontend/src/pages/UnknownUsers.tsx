@@ -389,7 +389,7 @@ export function UnknownUsersPage() {
                         {src.source_ip}
                       </span>
                       <span
-                        className={`text-[9px] font-bold px-1.5 py-0.5 rounded border uppercase ${
+                        className={`text-[10px] font-bold px-1.5 py-0.5 rounded border uppercase ${
                           src.is_load_balancer
                             ? "bg-amber-500/15 border-amber-500/30 text-amber-300"
                             : "bg-cyan-500/15 border-cyan-500/30 text-cyan-300"

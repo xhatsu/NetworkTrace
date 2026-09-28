@@ -61,20 +61,24 @@ export function Panel({
   children,
   className = "",
   action,
+  titleClassName = "text-[11px] font-semibold uppercase tracking-[0.06em] text-[#d8d9da]",
+  subtitleClassName = "text-[10px] text-[#7b7d80]",
 }: {
   title: string;
   subtitle?: string;
   children: ReactNode;
   className?: string;
   action?: ReactNode;
+  titleClassName?: string;
+  subtitleClassName?: string;
 }) {
   return (
     <section className={`panel overflow-hidden ${className}`}>
       <header className="panel-header flex min-h-9 items-center justify-between border-b border-[#2a2d30] px-3 py-2">
         <div>
-          <h3 className="panel-title text-[11px] font-semibold uppercase tracking-[0.06em] text-[#d8d9da]">{title}</h3>
+          <h3 className={`panel-title ${titleClassName}`}>{title}</h3>
           {subtitle && (
-            <p className="panel-subtitle mt-0.5 text-[10px] text-[#7b7d80]">{subtitle}</p>
+            <p className={`panel-subtitle mt-0.5 ${subtitleClassName}`}>{subtitle}</p>
           )}
         </div>
         {action}
@@ -165,7 +169,7 @@ export function InteractiveMetricCard({
         <span className="h-1.5 w-1.5 shrink-0 rounded-full" style={{ backgroundColor: color }} />
       </div>
       <div className={`mt-1 font-mono text-[22px] font-semibold leading-none tabular-nums ${valueClass}`}>{value}</div>
-      <div className="mt-1 flex items-center justify-between gap-1 text-[9.5px]">
+      <div className="mt-1 flex items-center justify-between gap-1 text-[10px]">
         <span className="truncate text-[#7b7d80]" title={detail}>{detail}</span>
         {subDetail && <span className="shrink-0 font-mono text-[#a7a9ab]">{subDetail}</span>}
       </div>
@@ -243,7 +247,7 @@ export function MetricCard({
         {value}
       </div>
       
-      <div className="metric-meta mt-1.5 flex min-h-4 items-center justify-between gap-1 text-[9.5px] text-[#7b7d80]">
+      <div className="metric-meta mt-1.5 flex min-h-4 items-center justify-between gap-1 text-[10px] text-[#7b7d80]">
         <div className="flex min-w-0 items-center gap-1">
           {delta != null && !isNaN(Number(delta)) && (
             <span className={`inline-flex items-center gap-0.5 font-mono font-medium ${Number(delta) >= 0 ? "text-[#f2495c]" : "text-[#73bf69]"}`}>
@@ -322,8 +326,8 @@ export const chartTooltip = {
     fontSize: "12px",
     padding: "8px 12px",
   },
-  labelStyle: { color: "#d8d9da", fontWeight: 600, marginBottom: "4px" },
-  itemStyle: { color: "#d8d9da", padding: "2px 0" },
+  labelStyle: { color: "#f1f3f5", fontWeight: 600, marginBottom: "4px" },
+  itemStyle: { color: "#f1f3f5", padding: "2px 0" },
 };
 
 /** Reduce rendered line points while keeping each bucket's real min/max samples. */

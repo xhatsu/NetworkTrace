@@ -928,7 +928,7 @@ function Relation({
               <EntityLink entity={{ kind: "service", name: i.name }} className="max-w-[180px] truncate font-medium text-[#f0f3f6] hover:text-[#5794f2]">{i.name}</EntityLink>
               <div className="flex items-center gap-2">
                 <span
-                  className={`rounded px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wider ${
+                  className={`rounded px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wider ${
                     i.evidence === "confirmed"
                       ? "border border-emerald-500/30 bg-emerald-500/10 text-emerald-400"
                       : "border border-amber-500/30 bg-amber-500/10 text-amber-400"

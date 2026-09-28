@@ -21,8 +21,8 @@ case "$ACTION" in
     tmux kill-session -t tracescope-30102 2>/dev/null || true
     tmux kill-session -t tracescope-worker 2>/dev/null || true
     tmux start-server 2>/dev/null || true
-    tmux new-session -d -s tracescope-30102 "cd $PROJECT_DIR && OTEL_STORAGE_BACKEND=$STORAGE_BACKEND OTEL_TRACE_STORAGE_BACKEND=$TRACE_STORAGE_BACKEND OTEL_ES_URL=$ES_URL OTEL_ES_INDEX=$ES_INDEX exec $PYTHON_BIN -m uvicorn backend.main:app --host $SERVER_HOST --port 30102"
-    tmux new-session -d -s tracescope-worker "cd $PROJECT_DIR && OTEL_STORAGE_BACKEND=$STORAGE_BACKEND OTEL_TRACE_STORAGE_BACKEND=$TRACE_STORAGE_BACKEND OTEL_ES_URL=$ES_URL OTEL_ES_INDEX=$ES_INDEX exec $PYTHON_BIN -m backend.worker --interval 60"
+    tmux new-session -d -s tracescope-30102 "cd $PROJECT_DIR && if [ -f .env ]; then set -a; . ./.env; set +a; fi; OTEL_STORAGE_BACKEND=$STORAGE_BACKEND OTEL_TRACE_STORAGE_BACKEND=$TRACE_STORAGE_BACKEND OTEL_ES_URL=$ES_URL OTEL_ES_INDEX=$ES_INDEX exec $PYTHON_BIN -m uvicorn backend.main:app --host $SERVER_HOST --port 30102"
+    tmux new-session -d -s tracescope-worker "cd $PROJECT_DIR && if [ -f .env ]; then set -a; . ./.env; set +a; fi; OTEL_STORAGE_BACKEND=$STORAGE_BACKEND OTEL_TRACE_STORAGE_BACKEND=$TRACE_STORAGE_BACKEND OTEL_ES_URL=$ES_URL OTEL_ES_INDEX=$ES_INDEX exec $PYTHON_BIN -m backend.worker --interval 60"
     if [ -f "$PROJECT_DIR/bootstrap/start.sh" ]; then
       sh "$PROJECT_DIR/bootstrap/start.sh"
     fi
