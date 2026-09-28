@@ -86,7 +86,7 @@ helm install tracescope deploy/helm/tracescope \
 | `elasticsearch.apiKey` | Elasticsearch API key for authentication | `""` |
 | `elasticsearch.verifyTls` | Verify Elasticsearch TLS certificates | `true` |
 | `elasticsearch.timeout` | Elasticsearch HTTP request timeout (seconds) | `10` |
-| `global.image.tag` | Unified global image tag for all TraceScope workloads | `0.4.0` |
+| `global.image.tag` | Unified global image tag for all TraceScope workloads | `0.4.1` |
 | `app.replicaCount` | Storage & Worker replicas (must remain 1) | `1` |
 | `app.image.tag` | Application image tag (defaults to `global.image.tag`) | `""` |
 | `ingest.replicaCount` | Initial replicas for trace ingestion | `2` |
