@@ -193,19 +193,15 @@ function displayValue(value: unknown, unit?: string | null) {
   return String(value);
 }
 
-/** Group repeated detector highlights so one episode reads as one change. */
+/** Use the latest signal's metric when one episode contains repeated metrics. */
 export function dedupeEpisodeHighlights(episode: Episode): EpisodeHighlight[] {
   const grouped = new Map<string, EpisodeHighlight>();
   for (const highlight of episode.highlights) {
     const key = `${highlight.label.trim().toLowerCase()}|${highlight.unit || ""}`;
-    const existing = grouped.get(key);
-    if (!existing) {
-      grouped.set(key, highlight);
-      continue;
-    }
-    const existingDelta = Math.abs(Number(existing.delta) || 0);
-    const currentDelta = Math.abs(Number(highlight.delta) || 0);
-    if (currentDelta > existingDelta || (currentDelta === existingDelta && highlight.after != null && existing.after == null)) grouped.set(key, highlight);
+    // _merge_signals orders signals newest first, so the first matching metric
+    // is the episode's latest observed value. Picking the largest delta can
+    // surface an old spike when the latest signal is a drop (or vice versa).
+    if (!grouped.has(key)) grouped.set(key, highlight);
   }
   return [...grouped.values()];
 }
@@ -475,7 +471,7 @@ export function EpisodeMetricTable({ episode }: { episode: Episode }) {
   return (
     <div className="overflow-x-auto">
       <table className="w-full min-w-[560px] text-left text-xs">
-        <thead><tr className="border-b border-[#2a2d30] text-[10px] uppercase tracking-wide text-[#7b7d80]"><th className="px-3 py-2">{t("Metric", "Chỉ số")}</th><th className="px-3 py-2">{t("Normal", "Bình thường")}</th><th className="px-3 py-2">{t("During change", "Trong thay đổi")}</th><th className="px-3 py-2 text-right">{t("Difference", "Chênh lệch")}</th></tr></thead>
+        <thead><tr className="border-b border-[#2a2d30] text-[10px] uppercase tracking-wide text-[#7b7d80]"><th className="px-3 py-2">{t("Metric", "Chỉ số")}</th><th className="px-3 py-2">{t("Detector reference", "Tham chiếu detector")}</th><th className="px-3 py-2">{t("Observed value", "Giá trị quan sát")}</th><th className="px-3 py-2 text-right">{t("Difference", "Chênh lệch")}</th></tr></thead>
         <tbody className="divide-y divide-[#2a2d30]">
           {highlights.map((highlight) => <tr key={`${highlight.label}-${highlight.unit || ""}`}><td className="px-3 py-2 font-semibold text-[#d8d9da]">{t(highlight.label, highlight.label)}</td><td className="px-3 py-2 font-mono text-[#a7a9ab]">{displayValue(highlight.before, highlight.unit)}</td><td className="px-3 py-2 font-mono text-[#d8d9da]">{displayValue(highlight.after, highlight.unit)}{highlight.before == null && highlight.after != null && <span className="ml-2 text-[10px] font-sans font-semibold uppercase text-[#5794f2]">{t("Added", "Mới")}</span>}</td><td className="px-3 py-2 text-right font-mono text-[#a7a9ab]">{formatHighlightDelta(highlight, t)}</td></tr>)}
         </tbody>

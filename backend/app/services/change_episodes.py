@@ -359,12 +359,15 @@ def _episode_key(signal: dict[str, Any]) -> str:
     subject = signal["subject"]["name"]
     raw = signal["signal"]
     incident_id = _text(raw.get("incident_id"))
-    if incident_id:
-        return f"{signal['subject']['type']}:{incident_id}"
     # A 15-minute correlation window makes adjacent facts one operator episode.
     window = int(signal["started_at"] or 0) // 900_000
     context = signal.get("context") or {}
     scope = context.get("target") or context.get("caller") or "estate"
+    # A source incident ID can remain stable through a long lifecycle. Keep it
+    # inside the same bounded correlation window so separate changes days apart
+    # do not become one episode.
+    if incident_id:
+        return f"{signal['subject']['type']}:{incident_id}:{window}"
     return f"{signal['subject']['type']}:{subject}:{scope}:{window}"
 
 
