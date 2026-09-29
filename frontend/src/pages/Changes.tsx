@@ -16,7 +16,6 @@ import {
   EpisodeStatusBadge,
   EpisodeWorkflowBadge,
   EpisodeTimeline,
-  SemanticAssessmentSummary,
   SemanticAssessmentBadge,
   episodeSearchText,
   episodeTitle,

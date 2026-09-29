@@ -296,6 +296,12 @@ function FilterBar() {
   };
   const [searchQuery, setSearchQuery] = useState("");
   const [isRefreshing, setIsRefreshing] = useState(false);
+  const entitySearchQuery = useQuery({
+    queryKey: ["global-entity-search", searchQuery.trim()],
+    queryFn: () => api<{ services: Array<{ name: string }>; apis: Array<{ service: string; name: string }> }>(`/api/v1/search?q=${encodeURIComponent(searchQuery.trim())}&limit=20`),
+    enabled: searchQuery.trim().length >= 2,
+    staleTime: 30000,
+  });
   const nav = useNavigate();
 
   const currentEntity = useMemo(() => {
@@ -359,6 +365,26 @@ function FilterBar() {
         nav(entityPath({ kind: "api", service: svc, operation: opParts.join("/") }));
         return;
       }
+    }
+
+    const searchData = entitySearchQuery.data;
+    const exactService = searchData?.services.find((item) => item.name.toLowerCase() === q.toLowerCase());
+    if (exactService) {
+      nav(entityPath({ kind: "service", name: exactService.name }));
+      return;
+    }
+    const exactApi = searchData?.apis.find((item) => item.name.toLowerCase() === q.toLowerCase() || `${item.service}/${item.name}`.toLowerCase() === q.toLowerCase());
+    if (exactApi) {
+      nav(entityPath({ kind: "api", service: exactApi.service, operation: exactApi.name }));
+      return;
+    }
+    if (searchData?.services[0] && !/^user:/i.test(q) && !/^change:/i.test(q)) {
+      nav(entityPath({ kind: "service", name: searchData.services[0].name }));
+      return;
+    }
+    if (searchData?.apis[0]) {
+      nav(entityPath({ kind: "api", service: searchData.apis[0].service, operation: searchData.apis[0].name }));
+      return;
     }
 
     if (/^service:/i.test(q)) {

@@ -1,3 +1,6 @@
+{{- if and (default false (default dict .Values.semantic).enabled) (ne (int .Values.app.replicaCount) 1) -}}
+{{- fail "semantic.enabled requires app.replicaCount=1 for single-owner assessment deduplication" -}}
+{{- end -}}
 {{- $appValues := default .Values.storage .Values.app -}}
 {{- $appImg := default dict $appValues.image -}}
 {{- $apiImg := default dict (dig "api" "image" nil $appValues) -}}

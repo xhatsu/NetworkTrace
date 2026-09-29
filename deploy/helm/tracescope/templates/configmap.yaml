@@ -43,3 +43,12 @@ data:
   OTEL_LLM_RESPONSE_MODE: {{ default "json_object" (default dict .Values.llm).responseMode | quote }}
   OTEL_LLM_ALLOW_LOOPBACK_HTTP: {{ default false (default dict .Values.llm).allowLoopbackHttp | quote }}
   OTEL_LLM_CONTEXT_TOKENS: {{ default 32768 (default dict .Values.llm).contextTokens | quote }}
+
+  OTEL_SEMANTIC_ASSESSMENT_ENABLED: {{ default false (default dict .Values.semantic).enabled | quote }}
+  OTEL_SEMANTIC_PROVIDER: {{ default "openrouter" (default dict .Values.semantic).provider | quote }}
+  OTEL_SEMANTIC_BASE_URL: {{ default "https://openrouter.ai" (default dict .Values.semantic).baseUrl | quote }}
+  OTEL_SEMANTIC_MODEL: {{ default "typesafe/jev-1.13" (default dict .Values.semantic).model | quote }}
+  OTEL_SEMANTIC_TIMEOUT_SECONDS: {{ default 15 (default dict .Values.semantic).timeoutSeconds | quote }}
+  OTEL_SEMANTIC_BATCH_SIZE: {{ default 2 (default dict .Values.semantic).batchSize | quote }}
+  OTEL_SEMANTIC_BUDGET_SECONDS: {{ default 20 (default dict .Values.semantic).budgetSeconds | quote }}
+  OTEL_SEMANTIC_RETRY_SECONDS: {{ default 900 (default dict .Values.semantic).retrySeconds | quote }}

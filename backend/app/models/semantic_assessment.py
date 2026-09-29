@@ -14,6 +14,7 @@ AssessmentCategory = Literal[
     "infrastructure", "identity", "mixed", "normal_variation", "insufficient_evidence",
 ]
 AssessmentPriority = Literal["informational", "watch", "investigate", "urgent"]
+AssessmentRecommendation = Literal["observe", "inspect_traces", "compare_baseline", "review_access", "check_dependencies", "collect_evidence"]
 SHA256_HEX = re.compile(r"^[0-9a-f]{64}$")
 
 
@@ -35,6 +36,10 @@ class SemanticAssessmentV1(BaseModel):
     priority: AssessmentPriority | None = None
     priority_confidence: float | None = Field(default=None, ge=0.0, le=1.0)
     priority_probabilities: dict[AssessmentPriority, float] = Field(default_factory=dict)
+    recommendation: AssessmentRecommendation | None = None
+    recommendation_confidence: float | None = Field(default=None, ge=0.0, le=1.0)
+    recommendation_probabilities: dict[AssessmentRecommendation, float] = Field(default_factory=dict)
+    input_signal_ids: list[str] = Field(default_factory=list, max_length=100)
     summary: str | None = Field(default=None, max_length=600)
     supporting_signal_ids: list[str] = Field(default_factory=list, max_length=100)
     caveats: list[str] = Field(default_factory=list, max_length=20)
@@ -85,7 +90,7 @@ class JevNoulAnswerV1(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
 
     type: Literal["noul"]
-    noul: float = Field(ge=0.0, le=1.0, strict=False)
+    noul: float = Field(ge=0.0, le=1.0)
 
     @field_validator("noul")
     @classmethod
@@ -103,7 +108,7 @@ class JevChoiceAnswerV1(BaseModel):
     type: Literal["choice"]
     choice: str
     probabilities: dict[str, float]
-    confidence: float = Field(ge=0.0, le=1.0, strict=False)
+    confidence: float = Field(ge=0.0, le=1.0)
 
     @field_validator("probabilities", mode="before")
     @classmethod
@@ -145,7 +150,7 @@ class JevUsageV1(BaseModel):
 
     input_tokens: int = Field(ge=0)
     output_tokens: int = Field(ge=0)
-    cost: float | None = Field(default=None, ge=0.0, strict=False)
+    cost: float | None = Field(default=None, ge=0.0)
 
     @field_validator("cost")
     @classmethod

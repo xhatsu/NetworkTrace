@@ -196,6 +196,10 @@ class Settings:
     semantic_model: str = os.getenv("OTEL_SEMANTIC_MODEL", "typesafe/jev-1.13")
     semantic_timeout_seconds: int = int(os.getenv("OTEL_SEMANTIC_TIMEOUT_SECONDS", "30"))
 
+    semantic_batch_size: int = int(os.getenv("OTEL_SEMANTIC_BATCH_SIZE", "2"))
+    semantic_budget_seconds: int = int(os.getenv("OTEL_SEMANTIC_BUDGET_SECONDS", "20"))
+    semantic_retry_seconds: int = int(os.getenv("OTEL_SEMANTIC_RETRY_SECONDS", "900"))
+
     @property
     def worker_start_time_ms(self) -> int | None:
         ts = _parse_timestamp_setting(self.worker_start_time)

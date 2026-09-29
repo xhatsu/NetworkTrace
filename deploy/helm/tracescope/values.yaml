@@ -274,3 +274,16 @@ ingress:
 podDisruptionBudget:
   enabled: true
   minAvailable: 1
+
+# Automatic advisory labels; deterministic detection remains authoritative.
+# One worker owns scheduling. Put secrets.semanticApiKey in ignored values-secrets.yaml
+# or OTEL_SEMANTIC_API_KEY in secrets.existingSecret, never in this file.
+semantic:
+  enabled: false
+  provider: openrouter
+  baseUrl: https://openrouter.ai
+  model: typesafe/jev-1.13
+  timeoutSeconds: 15
+  batchSize: 2
+  budgetSeconds: 20
+  retrySeconds: 900

@@ -1,16 +1,13 @@
 import { useQuery } from "@tanstack/react-query";
-import { ArrowRight } from "lucide-react";
 import {
   CartesianGrid, Line, LineChart, ReferenceLine, ResponsiveContainer, Tooltip, XAxis, YAxis,
 } from "recharts";
 import { api, queryString } from "../api";
 import { chartTooltip, n, Panel } from "../components";
-import { EntityLink } from "./EntityLink";
-import type { Episode } from "./EpisodePrimitives";
+import { SemanticAssessmentSummary, type Episode } from "./EpisodePrimitives";
 import { useI18n } from "../i18n";
 import type { Filters, SeriesPoint } from "../types";
 
-type OperationCount = { value: string; requests: number };
 type Metric = "tps" | "p95_ms" | "http_5xx_rate";
 
 const COMPARISON_MS = 60 * 60_000;
@@ -31,13 +28,6 @@ function formatClock(value: number, timezone: string) {
   } catch {
     return new Date(value).toLocaleTimeString();
   }
-}
-
-function operationParts(value: string) {
-  const separator = value.indexOf("→");
-  return separator < 0 ? { service: "", operation: value } : {
-    service: value.slice(0, separator), operation: value.slice(separator + 1),
-  };
 }
 
 export function ChangeVisualEvidence({ episode, filters }: { episode: Episode; filters: Filters }) {
@@ -66,18 +56,6 @@ export function ChangeVisualEvidence({ episode, filters }: { episode: Episode; f
     })}`),
     staleTime: 60_000,
   });
-  const principalPath = `/api/v1/users/${encodeURIComponent(subject)}/operations`;
-  const beforeQuery = useQuery({
-    queryKey: ["change-access-before", episode.id, pivot, subject],
-    queryFn: () => api<{ items: OperationCount[] }>(`${principalPath}?start=${start}&end=${pivot}`),
-    enabled: isUser, staleTime: 60_000,
-  });
-  const afterQuery = useQuery({
-    queryKey: ["change-access-after", episode.id, pivot, subject],
-    queryFn: () => api<{ items: OperationCount[] }>(`${principalPath}?start=${pivot}&end=${end}`),
-    enabled: isUser, staleTime: 60_000,
-  });
-
   const chartPoints = (graphQuery.data?.items || []).map((point) => ({
     ...point,
     observed: metric === "http_5xx_rate" ? Number(point.http_5xx_rate || 0) * 100 : Number(point[metric] || 0),
@@ -93,16 +71,6 @@ export function ChangeVisualEvidence({ episode, filters }: { episode: Episode; f
     ? formatMetric(Number(detectorHighlight.before)) : mean(beforePoints);
   const comparisonAfter = detectorHighlight?.after != null
     ? formatMetric(Number(detectorHighlight.after)) : mean(afterPoints);
-
-  const beforeMap = new Map((beforeQuery.data?.items || []).map((item) => [item.value, Number(item.requests || 0)]));
-  const afterMap = new Map((afterQuery.data?.items || []).map((item) => [item.value, Number(item.requests || 0)]));
-  const selectedKey = service && operation ? `${service}→${operation}` : "";
-  const sortedKeys = [...new Set([...beforeMap.keys(), ...afterMap.keys()])].sort((left, right) =>
-    Number(right === selectedKey) - Number(left === selectedKey)
-    || ((afterMap.get(right) || 0) - (beforeMap.get(right) || 0)) - ((afterMap.get(left) || 0) - (beforeMap.get(left) || 0)),
-  );
-  const visibleKeys = sortedKeys.slice(0, 8);
-  const maxRequests = Math.max(1, ...visibleKeys.flatMap((key) => [beforeMap.get(key) || 0, afterMap.get(key) || 0]));
 
   return <div className="mt-4 grid items-stretch gap-4 xl:grid-cols-[minmax(0,1.15fr)_minmax(0,1fr)]">
     <Panel title={t("Change in context", "Biến động quanh thời điểm thay đổi")}
@@ -136,50 +104,6 @@ export function ChangeVisualEvidence({ episode, filters }: { episode: Episode; f
       </p>
     </Panel>
 
-    {!isUser && <Panel className="h-full" title={t("Change scope", "Phạm vi thay đổi")}
-      subtitle={t("The operational context affected by this change.", "Ngữ cảnh vận hành bị ảnh hưởng bởi thay đổi này.")}
-      action={<span className="font-mono text-[11px] text-[#a7a9ab]">{episode.signal_count} {t("signals", "tín hiệu")}</span>}>
-      <div className="grid gap-px border-b border-[#2a2d30] bg-[#2a2d30] sm:grid-cols-2">
-        {[
-          [t("Caller Service", "Caller Service"), episode.context.caller || t("Not recorded", "Không ghi nhận")],
-          [t("Target Service", "Target Service"), service || t("Not recorded", "Không ghi nhận")],
-          [t("API / Operation", "API / Operation"), operation || t("All operations", "Mọi operation")],
-          [t("Subject", "Đối tượng"), subject],
-          [t("Source IP", "IP nguồn"), episode.context.source_ip || t("Not available", "Không có")],
-          [t("Duration", "Thời lượng"), (() => { const minutes = Math.max(0, Math.round((episode.last_seen_at - episode.started_at) / 60000)); return minutes < 1 ? t("Less than 1 min", "Dưới 1 phút") : minutes < 60 ? `${minutes} min` : `${(minutes / 60).toFixed(1)} h`; })()],
-        ].map(([label, value]) => <div key={label} className="bg-[#111217] px-3 py-2.5"><div className="text-[10px] uppercase tracking-wide text-[#7b7d80]">{label}</div><div className="mt-1 truncate font-mono text-[11px] text-[#d8d9da]">{value}</div></div>)}
-      </div>
-      <div className="px-3 py-2 text-[10px] leading-4 text-[#a7a9ab]">{t("This identifies where the change was observed. Open a related Trace to confirm the exact request chain.", "Thông tin này xác định nơi thay đổi được quan sát. Mở Trace liên quan để xác nhận chuỗi request chính xác.")}</div>
-    </Panel>}
-    {isUser && <Panel title={t("Access pattern: before → after", "Mẫu truy cập: trước → sau")}
-      subtitle={t("Service → API requests in equal one-hour windows", "Số request theo Service → API trong hai khoảng một giờ bằng nhau")}
-      action={<span className="font-mono text-[11px] text-[#a7a9ab]">{visibleKeys.length}/{sortedKeys.length}</span>}>
-      <div className="border-b border-[#2a2d30] px-3 py-2 text-[11px] text-[#a7a9ab]">
-        {episode.context.caller && <><span>{t("Caller Service")}: </span><EntityLink entity={{ kind: "service", name: episode.context.caller }} className="text-[#5794f2]">{episode.context.caller}</EntityLink><ArrowRight size={12} className="mx-1 inline" /></>}
-        {service && <><EntityLink entity={{ kind: "service", name: service }} className="text-[#5794f2]">{service}</EntityLink>{operation && <ArrowRight size={12} className="mx-1 inline" />}</>}
-        {operation && service && <EntityLink entity={{ kind: "api", service, operation }} className="break-all text-[#56b9a8]">{operation}</EntityLink>}
-        <div className="mt-1">{t("Observed credential", "Credential quan sát")}: <EntityLink entity={{ kind: "user", principal: subject }} className="text-[#b877d9]">{subject}</EntityLink></div>
-      </div>
-      {beforeQuery.isLoading || afterQuery.isLoading ? <div className="grid h-48 place-items-center text-xs text-[#a7a9ab]">{t("Loading…", "Đang tải…")}</div>
-        : beforeQuery.isError || afterQuery.isError ? <div className="grid h-48 place-items-center text-xs text-[#a7a9ab]">{t("Access comparison unavailable", "Chưa thể so sánh truy cập")}</div>
-          : visibleKeys.length ? <div className="max-h-80 overflow-y-auto divide-y divide-[#2a2d30]">
-            {visibleKeys.map((key) => {
-              const before = beforeMap.get(key) || 0;
-              const after = afterMap.get(key) || 0;
-              const { service: target, operation: apiName } = operationParts(key);
-              return <div key={key} className={`px-3 py-2 ${key === selectedKey ? "bg-[#56b9a8]/10" : ""}`}>
-                <div className="flex items-start justify-between gap-2 text-[11px]">
-                  <span className="min-w-0 break-all">{target && <><EntityLink entity={{ kind: "service", name: target }} className="text-[#5794f2]">{target}</EntityLink><span className="px-1 text-[#a7a9ab]">→</span></>}{target ? <EntityLink entity={{ kind: "api", service: target, operation: apiName }} className="text-[#56b9a8]">{apiName}</EntityLink> : apiName}</span>
-                  {before === 0 && after > 0 && <span className="shrink-0 border border-[#ff9830]/50 px-1.5 py-0.5 text-[10px] text-[#ff9830]">{t("New in window", "Mới trong khoảng")}</span>}
-                </div>
-                <div className="mt-1 grid grid-cols-[38px_minmax(0,1fr)_40px] items-center gap-2 text-[10px] text-[#a7a9ab]"><span>{t("Before", "Trước")}</span><span className="block h-1.5 bg-[#181b1f]"><span className="block h-full bg-[#7b7d80]" style={{ width: `${before / maxRequests * 100}%` }} /></span><span className="text-right font-mono">{n(before, 0)}</span></div>
-                <div className="mt-1 grid grid-cols-[38px_minmax(0,1fr)_40px] items-center gap-2 text-[10px] text-[#a7a9ab]"><span>{t("After", "Sau")}</span><span className="block h-1.5 bg-[#181b1f]"><span className="block h-full bg-[#56b9a8]" style={{ width: `${after / maxRequests * 100}%` }} /></span><span className="text-right font-mono">{n(after, 0)}</span></div>
-              </div>;
-            })}
-          </div> : <div className="grid h-48 place-items-center text-xs text-[#a7a9ab]">{t("No operation relationships observed in these windows", "Không có quan hệ API quan sát trong hai khoảng này")}</div>}
-      <p className="border-t border-[#2a2d30] px-3 py-2 text-[10px] leading-4 text-[#a7a9ab]">
-        {t("New in window means absent from the preceding hour, not first seen ever. Open a related Trace to confirm the exact request chain.", "Mới trong khoảng nghĩa là vắng mặt ở giờ trước đó, không khẳng định đây là lần đầu tiên. Mở Trace liên quan để xác nhận chuỗi request chính xác.")}
-      </p>
-    </Panel>}
+    <SemanticAssessmentSummary episode={episode} full timezone={filters.timezone} />
   </div>;
 }

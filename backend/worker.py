@@ -6,6 +6,7 @@ raw events into rollups, baselines, and behavioral evidence on a predictable cad
 from __future__ import annotations
 
 import argparse
+import asyncio
 import hashlib
 import json
 import logging
@@ -140,6 +141,32 @@ def _enqueue_alerts(db_path=None) -> int:
     signals = _load_signals(now - 15 * 60 * 1000, now + 1, 500)
     episodes = _merge_signals(signals)
     return enqueue_matching(episodes, db_path=db_path)
+
+
+def _run_semantic_assessments(db_path=None) -> dict:
+    """Isolated, opt-in single-owner stage; never run provider calls on API reads."""
+    if not settings.semantic_assessment_enabled:
+        return {"status": "disabled"}
+    from .app.services.semantic_provider import create_semantic_provider
+    from .app.services.semantic_worker import SemanticAssessmentWorker
+    from .app.repositories.semantic_assessment_repository import SemanticAssessmentRepository
+
+    async def assess(episodes):
+        worker = SemanticAssessmentWorker(
+            repository=SemanticAssessmentRepository(db_path),
+            provider=create_semantic_provider(settings), provider_model=settings.semantic_model,
+            batch_size=settings.semantic_batch_size, retry_seconds=settings.semantic_retry_seconds,
+        )
+        return await asyncio.wait_for(worker.run_once(episodes),
+                                      timeout=max(1, min(60, settings.semantic_budget_seconds)))
+    try:
+        now = int(time.time() * 1000)
+        episodes = _merge_signals(_load_signals(now - 24 * 3600 * 1000, now + 1, 500, db_path=db_path))
+        return asyncio.run(assess(episodes))
+    except Exception:
+        # Do not log exception bodies/chains: provider errors can contain secrets or input.
+        logging.warning("Semantic adviser unavailable; deterministic analytics continue")
+        return {"status": "unavailable"}
 
 
 def _run_revised_anomalies(db_path=None):
@@ -358,6 +385,8 @@ def run_jobs(db_path=None) -> dict[str, Any]:
         alert_result = _run_stage("enqueue_alerts", lambda: _enqueue_alerts(db_path))
         delivery_result = _run_stage("deliver_alerts", lambda: deliver_pending(db_path=db_path))
 
+        semantic_result = _run_stage("semantic_assessments", lambda: _run_semantic_assessments(db_path))
+
         from backend.app.services.prometheus_metrics import update_worker_prometheus_metrics
         prom_snap = _run_stage(
             "update_prometheus_metrics",
@@ -366,7 +395,7 @@ def run_jobs(db_path=None) -> dict[str, Any]:
 
         result = {**aggregates, "baselines": baselines, "anomalies": len(anomalies),
                   "principal_records": principals["processed"], "principal_changes": principals["changes"],
-                  "prometheus_metrics_updated": True, "alerts_enqueued": alert_result, "alerts_delivered": delivery_result}
+                  "semantic_assessments": semantic_result, "prometheus_metrics_updated": True, "alerts_enqueued": alert_result, "alerts_delivered": delivery_result}
         if es_sync is not None:
             result["elasticsearch_read"] = es_sync.get("read", 0)
             result["elasticsearch_inserted"] = es_sync.get("inserted", 0)

@@ -383,6 +383,8 @@ def _episode_version(signals: list[dict[str, Any]], highlights: list[dict[str, A
         normalized_signals.append({
             "id": str(signal["id"]),
             "type": _signal_type(signal),
+            "last_seen_at": signal.get("last_seen_at"),
+            "evidence": signal.get("evidence", []),
             "highlights": important,
         })
     normalized_signals.sort(key=lambda item: (item["id"], item["type"]))
@@ -401,6 +403,8 @@ def _episode_version(signals: list[dict[str, Any]], highlights: list[dict[str, A
         "evaluation_version": evaluation["evaluation_version"],
         "state": evaluation["state"],
         "domains": evaluation["domains"],
+        "gates": sorted(evaluation.get("gates", []), key=lambda gate: json.dumps(gate, sort_keys=True)),
+        "confidence": evaluation.get("confidence"),
     }
     payload = json.dumps(canonical, ensure_ascii=False, sort_keys=True, separators=(",", ":"), default=str)
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()
@@ -531,9 +535,9 @@ def attach_semantic_assessments(
     return episodes
 
 
-def _load_signals(start_ms: int | None, end_ms: int | None, limit: int) -> list[dict[str, Any]]:
-    anomaly_rows = AnomalyRepository().list_anomalies(start_ms=start_ms, end_ms=end_ms, limit=limit)
-    change_result = UserRepository().list_changes(start_ms=start_ms, end_ms=end_ms, limit=limit)
+def _load_signals(start_ms: int | None, end_ms: int | None, limit: int, db_path=None) -> list[dict[str, Any]]:
+    anomaly_rows = AnomalyRepository(db_path).list_anomalies(start_ms=start_ms, end_ms=end_ms, limit=limit)
+    change_result = UserRepository(db_path).list_changes(start_ms=start_ms, end_ms=end_ms, limit=limit)
     change_rows = change_result.get("items", [])
     # list_changes intentionally has a non-empty fallback for the user UI; the
     # Changes feed must still honor an explicit time window.

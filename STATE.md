@@ -1603,3 +1603,80 @@ Exposes standard Prometheus 0.0.4 text exposition format at `GET /metrics` on po
 - Added exact change-type selection and clickable type chips. Matches include every signal/evidence detector in a correlated episode, including secondary types. Search, subject, AI assessment, sort, type, and workflow view persist in URL parameters and are restored on returning from detail. Default ordering prioritizes severity then recency; 25-row pages bound rendering.
 - Filtering applies to the API's loaded set of up to 500 episodes; the footer reports matching rows and loaded/total coverage rather than implying exhaustive history.
 - Validation: TypeScript/Vite production build and diff whitespace check passed. Live Chromium checks verified traffic-spike and latency filters, URL persistence, detail-return context, empty search, and mobile layout without page overflow or JavaScript errors. The Changes list/detail APIs loaded successfully on port 30102. No backend changes or restarts were required.
+
+
+## Service operations redesign (2026-09-28)
+
+- `/services`: compact observed-service/open-anomaly/request/error summary, TPS chart, searchable sortable fleet triage with anomaly/error filters, 10-row pagination, metadata context and API/User counts. Loaded coverage is capped at 500; no-open-anomaly is not labeled Healthy or treated as an availability/SLO measurement.
+- `/services/:name`: TPS and metric overlays first, recent changes beside expandable caller/dependency evidence, then selectable API/User/Instance/Trace sections. API inventory has search and 15-row pages; latency is explicitly maximum bucket percentiles. Removed estimated HTTP status counts and fixed slow-rate columns in favor of measured error rate and traffic share. Instance average latency maps the actual response field; missing bandwidth displays a dash.
+- Change, Trace and dependency links preserve time context. Catalog environment/group/module/service filters apply to loaded rows; operation/account filters affect the estate chart, with that difference disclosed when selected. Backend APIs and retention unchanged; frontend bundle served on port 30102 without restarting backend or worker.
+- Validation: production TypeScript/Vite build and diff check passed. Chromium verified live catalog/detail APIs (all HTTP 200), search/sort, API and fleet pagination, all four detail views, and 1440px/390px/844px layouts without page overflow or JavaScript errors. A mocked 240-service fleet, empty catalog and HTTP 503 state passed. Screenshots: `/tmp/services-redesign-desktop.png`, `/tmp/service-detail-redesign-desktop.png` and corresponding mobile files. Browser smoke script: `/tmp/check_service_redesign.py`.
+
+
+## Selected Service access board (2026-09-28)
+
+- Replaced the Service relationships card on `/services/:name` with a full-width Access board modeled on User Activity Access. The selected Service stays fixed while the operator selects observed credential → IP → API; caller evidence and scoped Trace/API links appear below. This is a scope drilldown, not a causal credential-as-caller graph.
+- Extracted `AccessBoardColumn` for reuse by both User Activity and Service detail. Access rows load on credential selection from the existing `/api/v1/topology/principals/{principal}/ips` endpoint with service/time scope, 500-row cursor pages and explicit load-more. Credential/IP searches, dependent selection resets, missing/empty/error states, measured request/error/TPS/max-bucket-P95 summaries, and responsive columns are included. Anonymous traffic has no credential entry; absence of IP evidence is shown explicitly.
+- Trace links retain credential, Service, API and time context; they disclose those search dimensions rather than claiming IP-filtered results. Recent Changes remains above the access board. No backend changes or restart.
+- Validation: TypeScript/Vite build and diff check passed. Chromium verified live relationship API HTTP 200, credential/IP/API selection and resets, search, cursor load-more, empty IP evidence, Trace-link filters, the shared User Activity Access columns, and 1440px/390px/844px layouts without page errors or horizontal overflow. Smoke script `/tmp/check_service_access.py`; screenshots `/tmp/service-access-live.png`, `/tmp/service-access-selected.png`, `/tmp/service-access-mobile.png`.
+
+
+## Change metric comparison clarification (2026-09-28)
+
+- Investigated live navidrome episode `anm-4667094840709039`: saved detector baseline 0.41 TPS versus 4.71 TPS from 1,414 requests in the five-minute bucket starting `1790582400000`. Dashboard one-minute bucket request counts for that interval sum to exactly 1,414. The surrounding one-hour means are 0.907833 and 1.399833 TPS; they use different windows. Stored percentage uses the unrounded learned baseline, while displayed baseline is rounded.
+- Change detail now labels hourly bucket averages explicitly, labels saved comparison as Detector reference / Observed value instead of Before / Now, and explains five-minute service traffic detection and latest values in coalesced records. Chart reference is identified as current baseline/fallback, distinct from the baseline saved at detection. Hourly averages explicitly exclude the end boundary. English and Vietnamese copy updated.
+- Validation: live changes/anomaly/series reads succeeded; exact request-count reconciliation passed; TypeScript/Vite production build and diff check passed. Chromium checked live values/labels and 1440px/390px layouts with no page errors or document overflow. Browser check: `/tmp/check_change_metrics.py`; screenshots `/tmp/change-metrics-1440.png` and `/tmp/change-metrics-390.png`. Frontend rebuilt for port 30102; backend/worker not restarted.
+
+- Follow-up consistency fix: the Change in context headline now repeats the saved detector reference/observed values shown in The changed pattern. The plotted line remains one-minute context; its caption states that Service traffic detection uses five-minute windows. This removes conflicting hourly averages from the headline while keeping surrounding trend context.
+- Validation: production frontend build passed; existing live data reconciliation established 0.41 TPS / 4.71 TPS. Backend and worker were not restarted.
+
+
+## Change episode grouping and latest metric fix (2026-09-28)
+
+- Service change detail could present a current traffic drop in the chart summary while the main metric panel retained an older, larger spike. The panel chose the largest percentage delta; it now preserves the latest signal's same metric, matching the chart summary.
+- Episode keys now include the 15-minute time bucket even when a source incident ID is present, preventing a long-lived ID from joining changes from separate periods. Context chart centers on the latest signal, while the episode's original start/last-seen range remains available in the timeline and duration.
+- Validation: backend module compiles; production frontend build and diff check passed. Active API unavailable in this environment, so no live endpoint or browser verification was possible. Backend/worker were not restarted.
+
+
+## Detailed alert messages (2026-09-28)
+
+- New alert outbox payloads retain public episode highlights, evidence, signals/count and policy assessment. Scope resolves Service/API/caller/IP from episode context and observed credential from User subject.
+- Telegram messages include rule severity, evaluation/workflow, summary, scope, UTC timestamps, detector reference/observed metrics with units/delta, evidence and assessment, plus Change ID/link. Plain text supports legacy payloads and is capped at 4,000 UTF-16 units with space reserved for the link. Webhooks receive the enriched JSON; raw trace/auth records are not added.
+- Validation: four isolated unittest checks passed (format/zero values, legacy fields, Unicode length/link preservation, mocked enqueue and Telegram delivery). Live health and alert-deliveries GET endpoints returned HTTP 200 on port 30102. No external test notification was sent.
+- Backend/worker NOT restarted: activation remains pending alongside the existing policy-v2 rollout review. Existing queued payloads can only show their originally stored details.
+
+
+## Inventory-first Services catalog (2026-09-28)
+
+- `/services` now presents a compact inventory summary (observed Services, APIs, environments, groups) followed directly by the service directory. Removed the estate TPS chart, its dashboard-series request, and the catalog TPS column/sort labels. Service detail retains its scoped TPS and metric overlays.
+- Directory adds an environment selector, metadata-aware search hint and empty-result filter reset. Signal tabs, request/error/latency sorting, 10-row pagination, canonical entity links and loaded-500 coverage remain. Catalog priority ties use request counts. Account/operation filter copy now correctly explains that these do not narrow the inventory.
+- This supersedes the earlier catalog TPS requirement; detail/API/User workspace TPS requirements remain in force.
+- Validation: production TypeScript/Vite build and diff check passed; live Services API returned HTTP 200. Chromium verified live catalog/detail navigation and retained detail TPS, absence of catalog dashboard-series requests, mocked 240-Service filtering/sort/pagination/reset, empty/error states, and 1440px/390px/844px layouts without document overflow or page errors. Screenshots: `/tmp/services-catalog-desktop.png`, `/tmp/services-catalog-390.png`; smoke script `/tmp/check_services_catalog.py`.
+- Frontend bundle rebuilt and served on port 30102; no backend changes or restart required for this revision.
+
+
+## Jev advisory integration (2026-09-29; not activated)
+
+- Extended the existing semantic layer with typed OpenRouter Decisions recommendations using `typesafe/jev-1.13`, persisted confidence/distributions and submitted signal IDs. Jev remains advisory: deterministic state/severity and operator/alert actions are unchanged.
+- Added the opt-in analytics-worker stage, bounded input/batch/time budgets, critical-first processing, successful-result caching, failed/abandoned-pending retry cooldowns, and evidence-sensitive episode versions. Global and User Change detail share the localized advisory UI, including stale results and submitted evidence.
+- Added migration `015_semantic_adviser.sql`, non-secret Helm ConfigMap settings and Secret-only API-key wiring. Enabled Helm configurations require one app/worker owner. Existing ignored secret values were not read or changed. Defaults remain disabled.
+- Verification: 95 isolated focused/related tests passed with mocked provider calls; Python compilation, TypeScript/Vite build, Helm lint/template and diff checks passed. Chromium verified EN/VI, successful/stale/pending/failed/unevaluated output, evidence disclosure, and 1440px/390px/844px layouts without overflow or page errors. Existing Vite chunk-size and Starlette/httpx warnings remain.
+- Build output is `/tmp/jev-frontend-build`; served `frontend/dist` was not replaced. No production migration, restart, deployment, real LLM request, commit, push, or Kubernetes command. Unrelated tracked dirty diffs were compared with the initial snapshot and preserved.
+- Configuration, lifecycle, API fields, limits and verification details: `docs/jev-adviser.md`.
+
+
+## Jev standalone activation (2026-09-29)
+
+- Reviewed the implemented Jev advisory layer and started the local dashboard and single analytics worker with `./run_server.sh start`; dashboard listens on `0.0.0.0:30102`, bootstrap remains on `30105`, and Elasticsearch NodePort `32073` is reachable.
+- Live Jev assessments were explicitly authorized. The existing root `.env` already enabled the semantic layer and configured its API key; no secret or configuration change was needed. Jev remains advisory and uses `typesafe/jev-1.13` through OpenRouter Decisions.
+- Fixed migration 015's comment semicolon, which the existing statement splitter would interpret as SQL. Added a regression test exercising the actual migration runner with a mocked client. Verified migration 015 is installed with all four new columns; the migration runner and repeat run both reported no pending migrations at verification time.
+- Rebuilt the current frontend into served `frontend/dist`. Validation: 96 isolated Jev/policy/API/investigation/deployment tests passed, POSIX shell syntax and diff checks passed, and production frontend build passed (existing large-bundle warning). Tests exclude root conftest's broad test-database cleanup.
+- Confirmed live OpenRouter HTTP 200 responses and a completed worker cycle with 39 eligible episodes, 2 assessed, 0 failed. Changes list and detail returned persisted successful recommendations and submitted signal IDs. HTTP 200 checks passed for `/`, health, Changes list/filter/detail, Services, and ingestion status; an unknown Change returned 404.
+- Runtime health reports `demo_mode=true`, analytics on ClickHouse, and Trace Explorer on Elasticsearch. Starting the current working tree also activates its other existing backend/frontend changes. No Helm deployment or Kubernetes commands were used.
+
+
+## Changes Jev result placement (2026-09-29)
+
+- `/changes/:id` now places the shared **Jev AI result** card beside the change-in-context chart for both Service and User episodes, replacing Change scope and Access pattern. Removed the duplicate lower assessment and the unused before/after access queries.
+- Retains recommendation, probability/confidence, submitted evidence, and stale/pending/failed/unevaluated states in English and Vietnamese. The shared User workspace assessment uses the same Jev title.
+- Rebuilt served `frontend/dist`; HTTP checks confirmed healthy API and the current bundle on port 30102. Chromium validated both subject types, both languages, all five assessment states, and 1440/390/844px layouts without overflow or page errors. Build and diff checks passed; no backend restart or migration required.

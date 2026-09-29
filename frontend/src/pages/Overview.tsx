@@ -18,6 +18,7 @@ import { useI18n } from "../i18n";
 import type { SeriesPoint, Summary } from "../types";
 import { isEpisodeAttention, episodeStatusClass, episodeStatusLabel, type Episode, type EpisodeResponse } from "../components/EpisodePrimitives";
 import { EntityLink } from "../components/EntityLink";
+import { ZoomableDashboardChart } from "../components/ZoomableDashboardChart";
 
 type UserSummary = {
   observed_principals: number;
@@ -133,6 +134,9 @@ export function OverviewPage() {
   const { filters } = useFilters();
   const { t } = useI18n();
   const nav = useNavigate();
+  const [chartEngine, setChartEngine] = useState<"recharts" | "echarts">(() => {
+    try { return window.localStorage.getItem("tracescope-dashboard-chart") === "echarts" ? "echarts" : "recharts"; } catch { return "recharts"; }
+  });
   const qs = queryString(filters);
 
   const summaryQuery = useQuery({ queryKey: ["dashboard-summary", qs], queryFn: () => api<Summary>(`/api/v1/dashboard/summary?${qs}`), refetchInterval: 60000 });
@@ -234,8 +238,8 @@ export function OverviewPage() {
       </div>
 
       <div className="mt-3 grid gap-3 xl:grid-cols-[minmax(0,1.8fr)_minmax(320px,1fr)]">
-        <Panel title={t("Total TPS")} subtitle={`${n(summary.total_requests, 0)} ${t("Requests")} · ${t("Selected window", "Khoảng đã chọn")}`} action={<span className="font-mono text-xs text-[#5794f2]">{n(totalTps, 2)} TPS</span>}>
-          <MetricTrend data={chartPoints} timezone={filters.timezone} formatValue={(value) => n(value, 2)} lines={[{ key: "tps", label: "TPS", color: "#5794f2" }, { key: "baseline_rps", label: "Baseline", color: "#a7a9ab", dash: "4 4" }]} />
+        <Panel title={t("Total TPS")} subtitle={`${n(summary.total_requests, 0)} ${t("Requests")} · ${t("Selected window", "Khoảng đã chọn")}`} action={<div className="flex items-center gap-2"><span className="font-mono text-xs text-[#5794f2]">{n(totalTps, 2)} TPS</span><div className="flex items-center gap-1 rounded border border-[#34373b] p-0.5 text-[10px]"><button type="button" aria-pressed={chartEngine === "recharts"} className={`px-2 py-1 ${chartEngine === "recharts" ? "bg-[#5794f2]/20 text-[#d8d9da]" : "text-[#7b7d80]"}`} onClick={() => { setChartEngine("recharts"); localStorage.setItem("tracescope-dashboard-chart", "recharts"); }}>Recharts</button><button type="button" aria-pressed={chartEngine === "echarts"} className={`px-2 py-1 ${chartEngine === "echarts" ? "bg-[#5794f2]/20 text-[#d8d9da]" : "text-[#7b7d80]"}`} onClick={() => { setChartEngine("echarts"); localStorage.setItem("tracescope-dashboard-chart", "echarts"); }}>ECharts</button></div></div>}>
+          {chartEngine === "echarts" ? <ZoomableDashboardChart data={chartPoints} timezone={filters.timezone} /> : <MetricTrend data={chartPoints} timezone={filters.timezone} formatValue={(value) => n(value, 2)} lines={[{ key: "tps", label: "TPS", color: "#5794f2" }, { key: "baseline_rps", label: "Baseline", color: "#a7a9ab", dash: "4 4" }]} />}
         </Panel>
         <Panel title={t("HTTP error rate", "Tỷ lệ lỗi HTTP")} subtitle={t("4xx and 5xx failure signals across the selected window", "Tín hiệu lỗi 4xx và 5xx trong khoảng thời gian đã chọn")} action={<span className="font-mono text-xs text-[#f2495c]">{n(Number(latestPoint?.http_5xx_rate || 0) * 100, 2)}% 5xx</span>}>
           <MetricTrend data={chartPoints} timezone={filters.timezone} formatValue={(value) => `${n(value * 100, 2)}%`} lines={[{ key: "http_4xx_rate", label: "HTTP 4xx", color: "#ff9830" }, { key: "http_5xx_rate", label: "HTTP 5xx", color: "#f2495c" }]} />

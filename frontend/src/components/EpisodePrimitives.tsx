@@ -28,6 +28,10 @@ export type SemanticAssessment = {
   priority?: "informational" | "watch" | "investigate" | "urgent" | null;
   priority_confidence?: number | null;
   priority_probabilities?: Record<string, number>;
+  recommendation?: "observe" | "inspect_traces" | "compare_baseline" | "review_access" | "check_dependencies" | "collect_evidence" | null;
+  recommendation_confidence?: number | null;
+  recommendation_probabilities?: Record<string, number>;
+  input_signal_ids?: string[];
   summary?: string | null;
   supporting_signal_ids?: string[];
   caveats?: string[];
@@ -276,6 +280,18 @@ export function SemanticAssessmentBadge({ assessment }: { assessment?: SemanticA
   return <span className={`inline-flex shrink-0 items-center gap-1 whitespace-nowrap border px-2 py-1 text-[10px] font-semibold ${tone}`}><Sparkles size={11} aria-hidden="true" />{text}</span>;
 }
 
+function recommendationLabel(value: NonNullable<SemanticAssessment["recommendation"]>, t: (en: string, vi: string) => string) {
+  const labels = {
+    observe: t("Monitor subsequent observation windows.", "Theo dõi các cửa sổ quan sát tiếp theo."),
+    inspect_traces: t("Inspect related slow or failed Traces.", "Kiểm tra các Trace chậm hoặc thất bại có liên quan."),
+    compare_baseline: t("Compare traffic, Latency and errors with Baseline windows.", "So sánh lưu lượng, Latency và lỗi với các cửa sổ Baseline."),
+    review_access: t("Review caller, credential, target and authentication evidence.", "Rà soát bằng chứng về Service gọi, thông tin định danh, đích và xác thực."),
+    check_dependencies: t("Check downstream dependencies and recent routing or deployment changes.", "Kiểm tra Service phụ thuộc và thay đổi định tuyến hoặc triển khai gần đây."),
+    collect_evidence: t("Collect more telemetry to verify Baseline, persistence and attribution.", "Thu thập thêm telemetry để xác minh Baseline, tính kéo dài và nguồn phát sinh."),
+  };
+  return labels[value];
+}
+
 export function SemanticAssessmentSummary({ episode, full = false, timezone = "local" }: { episode: Episode; full?: boolean; timezone?: string }) {
   const { t } = useI18n();
   const assessment = episode.semantic_assessment;
@@ -291,13 +307,13 @@ export function SemanticAssessmentSummary({ episode, full = false, timezone = "l
     if (status !== "succeeded" || !assessment) return null;
     return <div className="mt-2 border-l-2 border-[#b877d9]/60 pl-2">
       <div className="text-[10px] font-semibold uppercase tracking-[.12em] text-[#b877d9]">{t("L4 assessment", "Đánh giá L4")}{assessment.category ? ` · ${assessmentCategoryLabel(assessment.category, t)}` : ""}{assessment.priority ? ` · ${assessmentPriorityLabel(assessment.priority, t)}` : ""}</div>
-      <p className="mt-0.5 line-clamp-2 text-[11px] leading-4 text-[#c9c1d1]">{assessment.summary || t("Typed decision from Jev; see the detail panel for category and priority probabilities.", "Jev trả về quyết định có kiểu dữ liệu; xem bảng chi tiết để biết xác suất danh mục và ưu tiên.")}</p>
+      <p className="mt-0.5 line-clamp-2 text-[11px] leading-4 text-[#c9c1d1]">{(assessment.recommendation ? recommendationLabel(assessment.recommendation, t) : assessment.summary) || t("Typed decision from Jev; see the detail panel for category and priority probabilities.", "Jev trả về quyết định có kiểu dữ liệu; xem bảng chi tiết để biết xác suất danh mục và ưu tiên.")}</p>
     </div>;
   }
 
-  return <section aria-labelledby={`semantic-assessment-${episode.id}`} className="border border-[#34373b] bg-[#111217]">
+  return <section aria-labelledby={`semantic-assessment-${episode.id}`} className="min-w-0 h-full border border-[#34373b] bg-[#111217]">
     <div className="flex flex-wrap items-center justify-between gap-2 border-b border-[#2a2d30] px-3 py-2.5">
-      <h2 id={`semantic-assessment-${episode.id}`} className="flex items-center gap-2 text-[11px] font-semibold uppercase tracking-[.12em] text-[#d9b4ea]"><Sparkles size={13} aria-hidden="true" />{t("L4 semantic assessment", "Đánh giá ngữ nghĩa L4")}</h2>
+      <h2 id={`semantic-assessment-${episode.id}`} className="flex items-center gap-2 text-[11px] font-semibold uppercase tracking-[.12em] text-[#d9b4ea]"><Sparkles size={13} aria-hidden="true" />{t("Jev AI result", "Kết quả Jev AI")}</h2>
       <SemanticAssessmentBadge assessment={assessment} />
     </div>
     {succeeded && assessment ? <div className="space-y-3 p-3">
@@ -307,6 +323,12 @@ export function SemanticAssessmentSummary({ episode, full = false, timezone = "l
         {assessment.category && <div><div className="text-[10px] uppercase tracking-wide text-[#7b7d80]">{t("Category · confidence", "Danh mục · độ tin cậy")}</div><div className="mt-1 text-xs text-[#d8d9da]">{assessmentCategoryLabel(assessment.category, t)}{assessment.category_confidence != null ? ` · ${Math.round(assessment.category_confidence * 100)}%` : ""}</div></div>}
         {assessment.priority && <div><div className="text-[10px] uppercase tracking-wide text-[#7b7d80]">{t("Priority · confidence", "Ưu tiên · độ tin cậy")}</div><div className="mt-1 text-xs text-[#d8d9da]">{assessmentPriorityLabel(assessment.priority, t)}{assessment.priority_confidence != null ? ` · ${Math.round(assessment.priority_confidence * 100)}%` : ""}</div></div>}
       </div>
+      {assessment.recommendation && <div className="space-y-1 text-xs leading-5 text-[#d8d9da]">
+        <div className="font-semibold">{stale ? t("Previous advisory recommendation", "Khuyến nghị tham khảo trước đây") : t("Advisory recommendation", "Khuyến nghị tham khảo")}{assessment.recommendation_confidence != null ? ` · ${Math.round(assessment.recommendation_confidence * 100)}%` : ""}</div>
+        <p>{recommendationLabel(assessment.recommendation, t)}</p>
+        <p className="text-[11px] text-[#a7a9ab]">{t("Advisory only. TraceScope state and severity remain authoritative; no action is executed.", "Chỉ mang tính tham khảo. Trạng thái và mức độ nghiêm trọng của TraceScope vẫn là căn cứ chính; không có hành động tự động.")}</p>
+        {!!assessment.input_signal_ids?.length && <details className="text-[11px] text-[#a7a9ab]"><summary className="cursor-pointer">{t("Submitted evidence", "Bằng chứng đã gửi")} ({assessment.input_signal_ids.length})</summary><p className="mt-1 break-words">{assessment.input_signal_ids.join(", ")}</p></details>}
+      </div>}
       {assessment.summary && <p className="max-w-4xl text-xs leading-5 text-[#d8d9da]">{assessment.summary}</p>}
       {(categoryProbabilities.length > 0 || priorityProbabilities.length > 0) && <div className="grid gap-3 sm:grid-cols-2">
         {categoryProbabilities.length > 0 && <div>

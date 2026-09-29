@@ -10,6 +10,22 @@ from backend.app.repositories.topology_repository import TopologyRepository
 
 router = APIRouter(prefix="/api/v1", tags=["services"])
 
+
+@router.get("/search")
+def search_entities(q: str = Query(..., min_length=1, max_length=200), limit: int = Query(20, ge=1, le=50)) -> Dict[str, Any]:
+    """Search observed Services and APIs for the global toolbar."""
+    needle = f"%{q.strip()}%"
+    with get_connection() as db:
+        services = [dict(row) for row in db.execute(
+            "SELECT target_service AS name, SUM(request_count) AS requests FROM metric_buckets FINAL WHERE target_service LIKE ? GROUP BY target_service ORDER BY requests DESC LIMIT ?",
+            (needle, limit),
+        ).fetchall()]
+        apis = [dict(row) for row in db.execute(
+            "SELECT target_service AS service, operation AS name, SUM(request_count) AS requests FROM metric_buckets FINAL WHERE (operation LIKE ? OR target_service LIKE ?) GROUP BY target_service, operation ORDER BY requests DESC LIMIT ?",
+            (needle, needle, limit),
+        ).fetchall()]
+    return {"services": services, "apis": apis}
+
 BANDWIDTH_FIELDS = (
     "request_bytes",
     "response_bytes",
