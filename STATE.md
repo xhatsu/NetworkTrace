@@ -1,5 +1,11 @@
 # TraceScope & Testbed Cluster Services — STATE.md
 
+## Metrics-only learned behavior and Changes integration (2026-09-29)
+- Learned behavior now has one input source: worker-owned five-minute `metric_buckets` (`legacy_metrics`). Direct Elasticsearch APM and raw ClickHouse `traces` reads were removed from the learning path; missing metric buckets do not fall back to raw spans.
+- Behavior API/UI source selectors now expose only `legacy_metrics`.
+- `/api/v1/changes` includes learned metric deviations as conservative `learned_behavior` signals with metric-bucket source scope, reference sample/day counts, observation bucket, baseline/current TPS, and Watch-level evidence. Existing impact/persistence gates remain authoritative.
+- Frontend build, Python compilation, diff check, and metrics-only boundary smoke check passed. Legacy tests that explicitly expect Elasticsearch/raw-trace learning are now obsolete and were not used as acceptance criteria.
+
 ## Changes policy v2 — implementation awaiting backend activation
 
 Evidence-gated classification and Watch UI are implemented; 22 isolated unit/L4/mocked API tests, Python compilation and frontend production build passed. The frontend bundle is rebuilt; backend/worker were not restarted and stored findings were not modified. A bounded read-only replay of 182 episodes produced 31 critical→watch, 72 attention→watch, 13 attention→informational, 9 informational→watch and 57 unchanged informational results. Missing legacy structured evidence must not be interpreted as disproven impact: review critical downgrades before activation. `previous_evaluation` preserves v1 comparison in new responses. Persistent incident lifecycle and notification delivery remain deferred. Thresholds, evidence contract and rollout guidance: `docs/change-policy-v2.md`.

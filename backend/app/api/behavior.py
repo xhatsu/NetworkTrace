@@ -56,7 +56,7 @@ def overview(repo=Depends(repository)):
 
 
 @router.get('/topology')
-def learned_topology(source: Literal['legacy_metrics','elasticsearch','clickhouse']='legacy_metrics',
+def learned_topology(source: Literal['legacy_metrics']='legacy_metrics',
                      environment: str=Query('',max_length=200),repo=Depends(repository)):
     from backend.app.services.behavior_topology import project_topology
     result=project_topology(repo.graph_state(source),environment)
@@ -66,7 +66,7 @@ def learned_topology(source: Literal['legacy_metrics','elasticsearch','clickhous
 
 @router.get('/topology/detail')
 def learned_topology_detail(object_id: str=Query(...,min_length=64,max_length=64),
-                           source: Literal['legacy_metrics','elasticsearch','clickhouse']='legacy_metrics',
+                           source: Literal['legacy_metrics']='legacy_metrics',
                            environment: str=Query('',max_length=200),repo=Depends(repository)):
     from backend.app.services.behavior_topology import project_topology, topology_series
     graph=repo.graph_state(source); view=project_topology(graph,environment)
@@ -79,7 +79,7 @@ def learned_topology_detail(object_id: str=Query(...,min_length=64,max_length=64
 
 
 @router.get('/graph')
-def graph_view(source: Literal['legacy_metrics','elasticsearch','clickhouse']='legacy_metrics',
+def graph_view(source: Literal['legacy_metrics']='legacy_metrics',
                q: str=Query('',max_length=200), node: str=Query('',max_length=64),
                limit: int=Query(150,ge=1,le=300),repo=Depends(repository)):
     from backend.app.services.behavior_graph import decayed_support, strength
@@ -110,7 +110,7 @@ def graph_view(source: Literal['legacy_metrics','elasticsearch','clickhouse']='l
 @router.get('/profiles')
 @router.get('/deviations')
 def collection(request: Request,
-    source: Literal['legacy_metrics','elasticsearch','clickhouse'] | None=None,
+    source: Literal['legacy_metrics'] | None=None,
     q: str=Query('',max_length=200), environment: str=Query('',max_length=200),
     state: str=Query('',max_length=40), offset: int=Query(0,ge=0,le=15000),
     limit: int=Query(25,ge=1,le=100), repo=Depends(repository)):

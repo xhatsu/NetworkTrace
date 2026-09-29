@@ -308,6 +308,36 @@ def _change_signal(row: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _learned_signal(row: dict[str, Any]) -> dict[str, Any]:
+    """Project a metrics-only learned deviation into the Changes contract."""
+    tps = row.get("tps") or {}
+    latest, baseline = tps.get("latest"), tps.get("baseline")
+    kind = str(row.get("kind") or "learned_behavior").upper()
+    detected = _timestamp(row.get("last_seen")) or 0
+    first = _timestamp(row.get("first_seen")) or detected
+    signal_type = "GRAPH_TPS_SHIFT" if "TPS" in kind or "SURGE" in kind else "GRAPH_EDGE_NOVELTY"
+    detail = ("Learned TPS exceeded the prior metric-bucket reference." if signal_type == "GRAPH_TPS_SHIFT"
+              else "A learned service/API relationship is less familiar than its metric-bucket history.")
+    metadata = {"learned_source": "legacy_metrics", "source_scope": "metric_buckets",
+                "reference_sample_count": tps.get("reference_windows", 0),
+                "reference_days": tps.get("reference_days", 0),
+                "observation_bucket_start_ms": detected, "persistent": bool(row.get("persistent"))}
+    return {"id": f"learn-{row.get('id')}", "source": "learned_behavior",
+            "source_id": str(row.get("id")),
+            "subject": {"type": "service", "name": row.get("target") or "unknown"},
+            "summary": detail, "explanation": detail, "started_at": first, "last_seen_at": detected,
+            "context": {"caller": row.get("caller"), "target": row.get("target"),
+                        "operation": row.get("operation"), "environment": row.get("environment")},
+            "highlights": [_highlight("TPS", baseline, latest, "tps")],
+            "evidence": [{"label": "Learned metric behavior", "detector": signal_type,
+                          "detail": detail + " Raw traces are not used by this signal."}],
+            "signal_count": 1, "state": "watch", "severity": "medium", "status": "open",
+            "raw_status": "open", "score": None,
+            "signal": {"change_type": signal_type, "metadata": metadata,
+                        "current_value": latest, "baseline_value": baseline,
+                        "reason": {"text": detail, "source": "metric_buckets"}}}
+
+
 def _anomaly_signal(row: dict[str, Any]) -> dict[str, Any]:
     detected = _timestamp(row.get("detected_at")) or _timestamp(row.get("last_seen")) or 0
     first = _timestamp(row.get("first_seen")) or detected
@@ -475,6 +505,15 @@ def get_source_signals(episode_id: str) -> list[dict[str, Any]]:
     if prefix == "anm":
         row = AnomalyRepository().get_anomaly(int(raw_id)) if raw_id.isdigit() else None
         return [_anomaly_signal(row)] if row else []
+    if prefix == "learn":
+        try:
+            from backend.app.repositories.behavior_repository import BehaviorRepository
+            row = next((item for item in BehaviorRepository().items('deviations', 'legacy_metrics')
+                        if str(item.get('id')) == raw_id), None)
+            return [_learned_signal(row)] if row else []
+        except Exception:
+            log.warning('Could not load learned Change source %s', raw_id, exc_info=True)
+            return []
     if episode_id.isdigit():
         anomaly_row = AnomalyRepository().get_anomaly(int(episode_id))
         change_row = UserRepository().get_change(int(episode_id))
@@ -547,7 +586,17 @@ def _load_signals(start_ms: int | None, end_ms: int | None, limit: int, db_path=
             if (start_ms is None or int(row.get("detected_at") or 0) >= start_ms)
             and (end_ms is None or int(row.get("detected_at") or 0) < end_ms)
         ]
-    return [_anomaly_signal(row) for row in anomaly_rows] + [_change_signal(row) for row in change_rows]
+    learned = []
+    try:
+        from backend.app.repositories.behavior_repository import BehaviorRepository
+        learned = [_learned_signal(row) for row in BehaviorRepository(db_path).items('deviations', 'legacy_metrics')]
+        if start_ms is not None or end_ms is not None:
+            learned = [row for row in learned if (start_ms is None or row['last_seen_at'] >= start_ms)
+                       and (end_ms is None or row['last_seen_at'] < end_ms)]
+    except Exception:
+        log.warning('Could not load learned metric deviations', exc_info=True)
+    return ([_anomaly_signal(row) for row in anomaly_rows] + [_change_signal(row) for row in change_rows]
+            + learned)
 
 
 def _filter_episodes(episodes: list[dict[str, Any]], *, subject_type: str | None, state: str | None,

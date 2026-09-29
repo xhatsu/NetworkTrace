@@ -10,7 +10,7 @@ from pathlib import Path
 from backend.config import settings
 from backend.app.repositories.behavior_repository import BehaviorRepository, SOURCES
 from backend.app.services.learned_behavior import DAY, BUCKET, summarize_day, build_profiles, digest
-from backend.app.services.behavior_sources import sql_day, es_page, apply_quality, coverage
+from backend.app.services.behavior_sources import sql_day, apply_quality, coverage
 
 
 def semantic_episode(item):
@@ -26,16 +26,16 @@ def semantic_episode(item):
 
 
 def run_source(repo, source, now):
+    if source != 'legacy_metrics':
+        raise ValueError('behavior learning accepts metric_buckets only')
     state=repo.state(source)
     complete_end=(now//BUCKET-1)*BUCKET  # allow one full bucket for ingestion lag
     today=complete_end//DAY*DAY
-    if source=='elasticsearch' and not settings.elasticsearch_url:
-        return {'status':'not_configured'}
     pending=state.get('pending')
     if not pending:
         if state.get('mode')=='live' and state.get('through_ms')==complete_end and state.get('graph_version'):
             return {'status':'current','through_ms':complete_end}
-        retention=7 if source=='elasticsearch' else 1 if source=='clickhouse' else 30
+        retention=30
         earliest=(now-retention*DAY+DAY-1)//DAY*DAY
         if source=='legacy_metrics' and not state.get('next_day'):
             existing=repo.query('SELECT min(bucket_start)*1000 AS first FROM metric_buckets FINAL WHERE bucket_size=300')
@@ -53,28 +53,9 @@ def run_source(repo, source, now):
     day,end,generation=pending['day'],pending['end'],pending['generation']
     if end<=day:
         return {'status':'waiting'}
-    if source=='elasticsearch':
-        for _ in range(2):
-            rows,after=es_page(day,end,pending['after'])
-            repo.stage(source,day,generation,rows)
-            pending.update(after=after,pages=pending['pages']+1)
-            repo.save_state(source,state)
-            if not after:
-                break
-        if pending['after']:
-            if pending['pages']>=400:
-                raise ValueError('behavior Elasticsearch day exceeds page limit')
-            return {'status':'materializing','day':day,'pages':pending['pages']}
-        rows=repo.staged(source,day,generation)
-    else:
-        if source=='clickhouse':
-            # Raw TTL must not erase already learned early-day observations on a
-            # late refresh. Only replace buckets fully inside the retained window.
-            retained_start=max(day,((now-DAY+BUCKET-1)//BUCKET)*BUCKET)
-            prefix=[r for r in repo.committed_day(source,day) if r['bucket_ms']<retained_start]
-            rows=prefix+sql_day(repo,source,retained_start,end)
-        else:
-            rows=sql_day(repo,source,day,end)
+    # legacy_metrics is the worker-owned metric_buckets source. Missing or late
+    # buckets are quality evidence; never fall back to raw spans or Elasticsearch.
+    rows=sql_day(repo,source,day,end)
     rows=apply_quality(repo,rows,day,end)
     # Replaces staged raw-quality rows before visibility marker is committed.
     repo.stage(source,day,generation,rows)

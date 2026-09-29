@@ -847,7 +847,7 @@ export function InteractiveTopologyPage() {
         </div>
 
         <div className="pointer-events-auto flex flex-wrap items-start justify-end gap-1.5">
-          <select className="btn max-w-[160px] bg-[#141622]" aria-label={t('Learning source','Nguồn học')} value={source} onChange={e=>{setSource(e.target.value);setEnvironment('');clearNavigation();setPositions({});serviceLayoutInitializedRef.current=false;}}>{['legacy_metrics','elasticsearch','clickhouse'].map(value=><option key={value} value={value}>{value}</option>)}</select>
+          <select className="btn max-w-[160px] bg-[#141622]" aria-label={t('Learning source','Nguồn học')} value={source} onChange={e=>{setSource(e.target.value);setEnvironment('');clearNavigation();setPositions({});serviceLayoutInitializedRef.current=false;}}>{['legacy_metrics'].map(value=><option key={value} value={value}>{value}</option>)}</select>
           <select className="btn max-w-[140px] bg-[#141622]" aria-label={t('Learning environment','Môi trường học')} value={environment||graphQuery.data?.environment||''} onChange={e=>{setEnvironment(e.target.value);clearNavigation();setPositions({});serviceLayoutInitializedRef.current=false;}}>{!graphQuery.data?.environments.length&&<option value="">{t('No environment','Chưa có môi trường')}</option>}{graphQuery.data?.environments.map(value=><option key={value} value={value}>{value}</option>)}</select>
           <button type="button" className="btn bg-[#141622]" onClick={relayout}><Maximize2 size={13} /> {t("Re-layout")}</button>
           <button type="button" className="btn bg-[#141622]" onClick={() => { void graphQuery.refetch(); void detailQuery.refetch(); }}><RefreshCw size={13} /> {t("Refresh")}</button>

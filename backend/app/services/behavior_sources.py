@@ -1,6 +1,5 @@
 """Source-isolated inputs. No cross-source summing or inferred environments."""
 from __future__ import annotations
-from backend.app.repositories.elasticsearch_metric_repository import ElasticsearchMetricRepository
 from backend.app.services.learned_behavior import BUCKET, UNKNOWN, eligible_identity
 from backend.config import settings
 
@@ -23,6 +22,8 @@ def normalize(source, row):
 
 
 def sql_day(repo, source, start, end):
+    if source != 'legacy_metrics':
+        raise ValueError('behavior learning only accepts metric_buckets')
     if source=='legacy_metrics':
         sql='''SELECT bucket_start*1000 AS bucket_ms, 'unknown' AS environment,
         caller_service AS caller,principal_name AS principal,target_service AS target,operation,
@@ -30,27 +31,22 @@ def sql_day(repo, source, start, end):
         request_bytes,response_bytes,request_bytes_samples AS byte_samples
         FROM metric_buckets FINAL WHERE bucket_size=300 AND bucket_start>={start:Int64}/1000
         AND bucket_start<{end:Int64}/1000 LIMIT 100001'''
-    else:
-        sql='''SELECT intDiv(timestamp_ms,300000)*300000 AS bucket_ms,
-        service_environment AS environment,ifNull(caller_service,'unknown') AS caller,
-        principal_name AS principal,target_service AS target,ifNull(operation_key,operation) AS operation_dimension,
-        count() AS requests,countIf(http_status>=400 OR outcome='failure') AS errors,
-        countIf(auth_result='failure') AS auth_failures,countIf(auth_result='success') AS auth_successes,
-        quantileExact(0.95)(duration_ms) AS p95_ms,
-        sum(ifNull(request_bytes,0)) AS request_bytes_sum,sum(ifNull(response_bytes,0)) AS response_bytes_sum,
-        countIf(request_bytes IS NOT NULL) AS byte_samples,groupUniqArray(3)(trace_id) AS trace_ids,
-        groupUniqArray(10)(ifNull(caller_ip,'')) AS observed_ips
-        FROM traces FINAL WHERE timestamp_ms>={start:Int64} AND timestamp_ms<{end:Int64}
-        AND lower(span_kind)='server'
-        GROUP BY bucket_ms,environment,caller,principal,target,operation_dimension LIMIT 100001'''
     rows=repo.query(sql,{'start':start,'end':end})
     if len(rows)>100000:
         raise ValueError('behavior input exceeds 100000 windows/day')
-    if source=='clickhouse':
-        for r in rows:
-            r.update(operation=r.pop('operation_dimension'),request_bytes=r.pop('request_bytes_sum'),response_bytes=r.pop('response_bytes_sum'))
     return [normalize(source,r) for r in rows]
 
+
+def _raw_sources_removed(start, end, after=None):
+    """Raw Elasticsearch learning was intentionally removed.
+
+    Kept as a private compatibility marker so callers fail explicitly rather
+    than silently switching the learner back to span documents.
+    """
+    raise ValueError('raw trace learning is disabled; use metric_buckets')
+
+
+'''DISABLED_RAW_SOURCE_IMPLEMENTATION
 
 def es_query(start,end,after=None):
     body=ElasticsearchMetricRepository._query(start,end,300,after)
@@ -108,6 +104,9 @@ def es_page(start,end,after=None):
             byte_samples=b['request_bytes_samples']['value'],trace_ids=traces,
             observed_ips=[r['key'] for r in b['observed_ips']['buckets']])))
     return rows, aggregation.get('after_key') if len(rows)>=250 else None
+
+
+'''
 
 
 def apply_quality(repo, rows, start, end):

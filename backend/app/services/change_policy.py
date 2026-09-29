@@ -26,7 +26,7 @@ def evaluate_episode(signals: list[dict[str, Any]]) -> dict[str, Any]:
     state = "changed"
     reasons = ["Novelty alone does not demonstrate operational or security impact."]
     gates: list[dict[str, Any]] = []
-    metric_types = {"ERROR_RATE", "LATENCY", "TRAFFIC_SPIKE", "TRAFFIC_DROP", "PRINCIPAL_RATE_SURGE"}
+    metric_types = {"ERROR_RATE", "LATENCY", "TRAFFIC_SPIKE", "TRAFFIC_DROP", "PRINCIPAL_RATE_SURGE", "GRAPH_TPS_SHIFT", "GRAPH_EDGE_NOVELTY"}
     behavioral_types = {"AUTH_FAILURE_BURST", "FAILURE_THEN_SUCCESS", "SOURCE_IDENTITY_FANOUT",
                         "OPERATION_MIX_SHIFT", "CALLER_PRINCIPAL_SWITCH", "TARGET_FANOUT_SURGE", "SOURCE_FANOUT_SURGE"}
     ranks = {"changed": 0, "watch": 1, "needs_attention": 2, "critical": 3}

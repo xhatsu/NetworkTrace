@@ -235,6 +235,10 @@ never fall back silently to the legacy topology data.
 
 Initial topology placement uses a bounded deterministic force layout with hub attraction, card repulsion and spiral collision resolution. Anonymous service traffic is retained independently of credential-profile eligibility. The plain canvas and straight edges form a scattered spider mesh. Re-layout repeats this arrangement; manual dragging remains unrestricted.
 
+## Metrics-only learning input
+
+The learning engine consumes only the worker-owned `metric_buckets` read model at five-minute grain (`legacy_metrics`). It does not read raw ClickHouse `traces` or Elasticsearch APM transactions. Elasticsearch and raw traces may continue to support ingestion, Trace Explorer, or upstream metric materialization, but they are not direct learning inputs. Missing or late metric buckets remain data-quality gaps and never trigger a raw-trace fallback.
+
 ## Operator UI and Changes integration boundary
 
 Topology exposes observed TPS, expected TPS when reference-ready, recent trend,
@@ -244,9 +248,4 @@ in the operator inspector. The UI consumes bounded summaries on a one-minute
 refresh, independent of the number of individual traces ingested. Relationship
 cardinality and peak ingestion rate still determine system capacity.
 
-Changes currently uses existing detector signals/baselines. Integrating the new
-graph should preserve the baseline version/cutoff that scored each observation,
-exact source/environment/entity scope, deduplication against equivalent detector
-signals, and persistence/quality/impact evidence. Learned novelty or elevated TPS
-alone should remain a candidate for review, without automatically escalating
-severity. Jev remains advisory. This UI revision does not alter that pipeline.
+Changes now includes learned metric deviations from the `legacy_metrics` snapshot as explicit `learned_behavior` signals. Each signal carries the metric-bucket source scope, reference sample/day counts, observation bucket, persistence, and learned baseline/current TPS values. Existing detector signals remain intact and are correlated into the same bounded episodes. Learned novelty or elevated TPS alone is a Watch/review candidate and cannot escalate severity without the existing measured-impact, persistence, and baseline gates. Jev remains advisory; raw trace evidence is not used to create these learned signals.

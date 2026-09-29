@@ -9,7 +9,10 @@ from backend.app.services.learned_behavior import DAY, active_contract
 
 LIMITS = {'max_execution_time': 10, 'max_memory_usage': 268435456, 'max_result_rows': 100001,
           'result_overflow_mode': 'throw'}
-SOURCES = ('legacy_metrics', 'elasticsearch', 'clickhouse')
+# The learning engine is intentionally metrics-only.  Raw APM documents and raw
+# ClickHouse traces are not learning inputs; metric_buckets is the canonical
+# replaceable five-minute observation source.
+SOURCES = ('legacy_metrics',)
 
 
 def stamp():
