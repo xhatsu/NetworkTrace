@@ -1041,3 +1041,37 @@
 - `/changes/:id` now places the shared **Jev AI result** card beside the change-in-context chart for both Service and User episodes, replacing Change scope and Access pattern. Removed the duplicate lower assessment and the unused before/after access queries.
 - Retains recommendation, probability/confidence, submitted evidence, and stale/pending/failed/unevaluated states in English and Vietnamese. The shared User workspace assessment uses the same Jev title.
 - Rebuilt served `frontend/dist`; HTTP checks confirmed healthy API and the current bundle on port 30102. Chromium validated both subject types, both languages, all five assessment states, and 1440/390/844px layouts without overflow or page errors. Build and diff checks passed; no backend restart or migration required.
+
+
+## Online behavior learning and learned topology (2026-09-29)
+
+- Added a separate `/behavior` workspace (Overview, Learning graph, Profiles, Deviations, Contracts), source-scoped persistent memory, TPS learning, scoped immutable operator decisions, and bounded stored Jev advisories. Python/FastAPI/ClickHouse worker plus existing React/TypeScript/Recharts/SVG; no added ML library or graph database.
+- Every completed five-minute observation reinforces typed nodes/edges once. Seven-day support half-life, exponentially weighted TPS mean/variance, score-before-update, withheld material spikes, deterministic late-data replay, durable snapshot publication, and bounded cleanup. Engine version `online-behavior-graph-v3` includes learned service-call edges as well as API ownership and credential/IP associations. Repetition never grants access approval; no packet enforcement.
+- `/topology` now reads `/api/v1/behavior/topology` and its detail endpoint exclusively. Replaced the seven-day/selected-window merge and slider with source/environment selectors and learned state. Preserved service-card dragging, zoom/reset/re-layout, expandable API/credential lists, reverse credential navigation, search, exact-path highlighting, entity links, and the floating inspector. Added keyboard edge selection. Old topology API endpoints remain for other consumers.
+- Inspector shows observed/expected TPS, freshness, a plain-language behavior state, a compact recent chart, and related IP evidence. Internal model counters are hidden from the operator view. Missing latency/error/health/IP-volume facts are not fabricated. Source/environment namespaces remain separate; missing callers produce no call edges. Global time filters do not truncate learned memory. The topology projects up to 500 services and 2,000 learned service edges, disclosing caps.
+- Additive migrations 016 and 017 verified installed. Local dashboard and single worker restarted using `./run_server.sh restart`, active on `0.0.0.0:30102`; ES NodePort `32073` reachable. Standalone learning enabled; Helm remains disabled by default and enforces a single app replica when enabled. Local ownership locks are not distributed; only one learning/review owner may run against these tables.
+- Validation: 135 isolated backend/storage/graph/topology/policy/API tests passed without root conftest or production-data test mutations; frontend production build, Helm lint and POSIX script/diff checks passed. Chromium exercised Behavior and learned Topology in EN/VI at 1440/390/844px, including drag/zoom, drilldowns, exact-path highlights, reverse navigation, source/environment switching and empty states. Live topology/detail APIs return learned data. Production bundle retains the existing size warning.
+- Full behavior observations retain 30 days; compact daily memory 90 days; old graph/profile snapshots seven days, with hourly obsolete-generation cleanup. Existing ES seven-day and ClickHouse raw one-day policies unchanged. See `docs/learned-behavior.md` for source caveats, replay, access rules, capacity and recovery. No Helm rollout, Kubernetes command, commit or push performed for this revision.
+
+
+## Topology spider layout (2026-09-29)
+
+- Initial placement and Re-layout now use a deterministic, bounded force layout: learned connections attract related services, hubs settle among their neighbors, and rectangle collision checks preserve card clearance. Residual overlap resolves via local spiral placement rather than grid rows.
+- Removed the square background grid and changed link routing to straight connections. Manual dragging, selection, zoom/reset and drilldowns are preserved. Layout works in measured CSS pixels before conversion to canvas coordinates.
+- Geometry verification covers 1/16/200/500 services for repeatable placement and non-overlap. Production build and EN/VI Chromium checks passed at 1440/390/844px, including dragging, edge keyboard selection, drilldowns and source switching. Live page rendered 16 service cards without page errors; served bundle `index-Nt5fMzHr.js`.
+
+
+## Straight topology edges and anonymous service coverage (2026-09-29)
+
+- Topology connections now use straight SVG line segments; scattered spider placement and interactions remain.
+- Navidrome was missing because all its metric traffic was anonymous: audit found 188,939 requests across 2,728 five-minute buckets, with no caller attribution. Fixed worker summaries to retain anonymous traffic for Service/API graph learning while `build_profiles` continues to exclude it from credential profiles, approvals and user findings. No anonymous credential node or invented caller edge is created.
+- Online graph algorithm version is now `online-behavior-graph-v3`. Replayed retained metric history and restarted the local dashboard/worker; no new schema migration. Regression suite: 136 isolated tests passed, including anonymous service visibility and identity isolation.
+
+
+## Operational topology UI (2026-09-29)
+
+- Removed retained request totals, observed/reference/withheld window counters, previous-reference TPS and first-seen timestamps from the topology inspector; cards and relationship lists no longer show cumulative training counts. Internal model state remains available to the worker/API.
+- Inspector now focuses on observed TPS, expected TPS when ready, a compact trend, relative observation freshness and plain-language behavior state. States distinguish learning, learned pattern, elevated TPS and no recent observations; they do not assert service health. IP evidence stays available without window counters.
+- Relationship drilldowns use indexed entity lookup and grouped edge IDs instead of repeated full-list scans. Search ranks exact matches and Services ahead of API-name matches. UI still reads bounded source/environment snapshots, pages lists by 100, and refreshes once per minute rather than rendering individual traces. No million-trace/day throughput certification is implied by the UI work.
+- Reviewed Changes: it currently consumes existing anomaly/user signals and their detector baselines, not the new online graph. Recommended integration is versioned, source/environment-scoped learned baseline evidence and correlated deviation candidates, retaining persistence/quality/material-impact gates and duplicate suppression. No Changes severity or alert-routing change made by this UI revision.
+- Frontend rebuilt to `index-BULjlgSd.js`; no backend restart or migration required. Final browser checks cover removed counters, EN/VI and existing topology interactions.

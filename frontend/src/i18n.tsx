@@ -12,6 +12,7 @@ interface I18nContextType {
 export const translations: Record<Language, Record<string, string>> = {
   vi: {
     // Top Navigation & Branding
+    "Learned behavior": "Hành vi đã học",
     "TraceScope": "TraceScope",
     "Intelligence": "Intelligence",
     "Monitor": "Theo dõi",

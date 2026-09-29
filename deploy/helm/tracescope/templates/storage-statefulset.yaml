@@ -1,3 +1,6 @@
+{{- if and (default false (default dict .Values.behavior).enabled) (ne (int .Values.app.replicaCount) 1) -}}
+{{- fail "behavior.enabled requires app.replicaCount=1 for single-owner learning and contract reviews" -}}
+{{- end -}}
 {{- if and (default false (default dict .Values.semantic).enabled) (ne (int .Values.app.replicaCount) 1) -}}
 {{- fail "semantic.enabled requires app.replicaCount=1 for single-owner assessment deduplication" -}}
 {{- end -}}

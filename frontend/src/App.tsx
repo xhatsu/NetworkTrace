@@ -36,6 +36,7 @@ import { useI18n, LanguageSwitcher } from "./i18n";
 import { OverviewPage } from "./pages/Overview";
 import { ServicesPage, ServiceDetailPage } from "./pages/Services";
 import { ApiDetailPage } from "./pages/ApiDetail";
+import { BehaviorPage, BehaviorDetailPage } from "./pages/Behavior";
 import { ChangesPage, ChangeDetailPage } from "./pages/Changes";
 import { TracesPage, TraceDetailPage } from "./pages/Traces";
 import { AgentStatsPage, AgentNodeDetailPage } from "./pages/AgentStats";
@@ -127,6 +128,7 @@ function SideNav() {
         [Boxes, "Services", "/services"],
         [Users, "Users", "/users"],
         [Network, "Topology", "/topology"],
+        [GitCompareArrows, "Learned behavior", "/behavior"],
       ],
     },
     {
@@ -343,6 +345,7 @@ function FilterBar() {
     if (path === "/topology") return t("Topology");
     if (path === "/services") return t("Services");
     if (path === "/users") return t("Users");
+    if (path.startsWith("/behavior")) return t("Learned behavior", "Hành vi đã học");
     if (path === "/changes") return t("Changes");
     if (path === "/traces") return t("Traces");
     if (path === "/dashboard" || path === "/overview" || path === "/") return t("Dashboard");
@@ -586,6 +589,9 @@ function Layout() {
             <Route path="/users/unknown" element={<Navigate to="/unknown-users" replace />} />
 
             {/* System Observability & Fleet */}
+            <Route path="/behavior" element={<BehaviorPage />} />
+            <Route path="/behavior/profiles/:id" element={<BehaviorDetailPage kind="profiles" />} />
+            <Route path="/behavior/deviations/:id" element={<BehaviorDetailPage kind="deviations" />} />
             <Route path="/changes" element={<ChangesPage />} />
             <Route path="/changes/:id" element={<ChangeDetailPage />} />
             <Route path="/alerts" element={<AlertsPage />} />

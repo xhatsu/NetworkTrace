@@ -52,3 +52,6 @@ data:
   OTEL_SEMANTIC_BATCH_SIZE: {{ default 2 (default dict .Values.semantic).batchSize | quote }}
   OTEL_SEMANTIC_BUDGET_SECONDS: {{ default 20 (default dict .Values.semantic).budgetSeconds | quote }}
   OTEL_SEMANTIC_RETRY_SECONDS: {{ default 900 (default dict .Values.semantic).retrySeconds | quote }}
+
+  OTEL_BEHAVIOR_LEARNING_ENABLED: {{ default false (default dict .Values.behavior).enabled | quote }}
+  OTEL_BEHAVIOR_BUDGET_SECONDS: {{ default 20 (default dict .Values.behavior).budgetSeconds | quote }}

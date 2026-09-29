@@ -385,6 +385,13 @@ def run_jobs(db_path=None) -> dict[str, Any]:
         alert_result = _run_stage("enqueue_alerts", lambda: _enqueue_alerts(db_path))
         delivery_result = _run_stage("deliver_alerts", lambda: deliver_pending(db_path=db_path))
 
+        from .app.services.behavior_worker import run_behavior_learning
+        try:
+            behavior_result = _run_stage("learned_behavior", lambda: run_behavior_learning(db_path))
+        except Exception:
+            logging.warning("Learned behavior unavailable; existing analytics continue")
+            behavior_result = {"status": "unavailable"}
+
         semantic_result = _run_stage("semantic_assessments", lambda: _run_semantic_assessments(db_path))
 
         from backend.app.services.prometheus_metrics import update_worker_prometheus_metrics
@@ -395,7 +402,7 @@ def run_jobs(db_path=None) -> dict[str, Any]:
 
         result = {**aggregates, "baselines": baselines, "anomalies": len(anomalies),
                   "principal_records": principals["processed"], "principal_changes": principals["changes"],
-                  "semantic_assessments": semantic_result, "prometheus_metrics_updated": True, "alerts_enqueued": alert_result, "alerts_delivered": delivery_result}
+                  "learned_behavior": behavior_result, "semantic_assessments": semantic_result, "prometheus_metrics_updated": True, "alerts_enqueued": alert_result, "alerts_delivered": delivery_result}
         if es_sync is not None:
             result["elasticsearch_read"] = es_sync.get("read", 0)
             result["elasticsearch_inserted"] = es_sync.get("inserted", 0)

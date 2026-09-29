@@ -287,3 +287,8 @@ semantic:
   batchSize: 2
   budgetSeconds: 20
   retrySeconds: 900
+
+# Shadow relationship learning; does not change alerting or enforce access.
+behavior:
+  enabled: false
+  budgetSeconds: 20
