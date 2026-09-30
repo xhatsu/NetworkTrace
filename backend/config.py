@@ -69,16 +69,20 @@ class Settings:
     clickhouse_system_error_log_retention_days: int = max(
         1, int(os.getenv("OTEL_CLICKHOUSE_SYSTEM_ERROR_LOG_RETENTION_DAYS", "1"))
     )
-    # Storage isolation: OTel trace data is retained in Elasticsearch; ClickHouse only stores agent trace data.
-    clickhouse_only_agent_traces: bool = (
-        os.getenv("OTEL_CLICKHOUSE_ONLY_AGENT_TRACES", "true").lower() == "true"
-    )
-    # Storage Backend: 'clickhouse' (default for local testbed) or 'elasticsearch' / 'elk'
-    storage_backend: str = os.getenv("OTEL_STORAGE_BACKEND", "clickhouse").lower()
-    # Trace Explorer can read application APM spans from ELK while analytics use ClickHouse rollups.
-    trace_storage_backend: str = os.getenv(
-        "OTEL_TRACE_STORAGE_BACKEND", os.getenv("OTEL_STORAGE_BACKEND", "clickhouse")
-    ).lower()
+    # Two supported trace pipelines.  Both persist the same normalized facts in
+    # ClickHouse and use the same ClickHouse aggregation/read model:
+    #   elk_to_clickhouse: ELK is the raw source and is copied into ClickHouse.
+    #   clickhouse: traces are already in ClickHouse; ELK is not consulted.
+    trace_pipeline_mode: str = os.getenv(
+        "OTEL_TRACE_PIPELINE_MODE", "elk_to_clickhouse"
+    ).strip().lower()
+    # Compatibility field retained for older callers; it no longer filters
+    # application traces from the canonical pipeline.
+    clickhouse_only_agent_traces: bool = False
+    # Analytics, topology, and trace explorer always use the canonical
+    # ClickHouse model in both supported modes.
+    storage_backend: str = "clickhouse"
+    trace_storage_backend: str = "clickhouse"
     elasticsearch_url: str = os.getenv("OTEL_ES_URL", os.getenv("ELASTICSEARCH_URL", "http://127.0.0.1:32073")).rstrip("/")
     elasticsearch_index: str = os.getenv("OTEL_ES_INDEX", "apm-*,traces-apm*")
     elasticsearch_api_key: str = os.getenv("OTEL_ES_API_KEY", "")

@@ -213,6 +213,9 @@ def create_app(role: str = ROLE_ALL) -> FastAPI:
             "service_role": role,
             "storage_backend": settings.storage_backend,
             "trace_storage_backend": settings.trace_storage_backend,
+            "trace_pipeline_mode": settings.trace_pipeline_mode,
+            "metric_source": "clickhouse",
+            "topology_source": "clickhouse",
             "elasticsearch_configured": bool(settings.elasticsearch_url),
         }
 

@@ -2,6 +2,14 @@
 
 # TraceScope Context and State Management (AGENTS.md)
 
+## Canonical two-mode ClickHouse pipeline (2026-09-30)
+
+- The only supported analytical shape is normalized ClickHouse `traces` followed by the ClickHouse worker aggregation/read model.
+- `OTEL_TRACE_PIPELINE_MODE=elk_to_clickhouse` (default) copies ELK raw traces into ClickHouse; `OTEL_TRACE_PIPELINE_MODE=clickhouse` uses existing ClickHouse traces and does not contact ELK for synchronization.
+- Direct Elasticsearch metric/IP materialization is disabled in the normal worker. ELK must not write `metric_buckets` or topology tables directly.
+- Analytics, topology, and trace explorer read ClickHouse in both modes. Use `backend/scripts/rebuild_clickhouse_analytics.py` to reset derived tables while preserving raw traces and rebuild them through the worker.
+- Verified live after rebuild: worker success, 34,626 traces, 3,751 1m buckets, 777 5m buckets, and health reports the selected pipeline mode plus ClickHouse metric/topology sources.
+
 ## ClickHouse Trace Aggregator & Dual-Aggregator Unification (2026-09-30)
 
 - **Root Cause of Split Operations**: SOAP-over-HTTP requests carried both a REST URL path (`POST /api/v1/orders/process`) and an XML SOAPAction header (`"processOrder"`). While Elasticsearch aggregated under the canonical HTTP route, the ClickHouse trace aggregator (`backend/app/services/aggregation.py`) prioritized `operation_key` (`orderservice/"processOrder"`). Because the operation strings differed, ClickHouse `ReplacingMergeTree` did not deduplicate them, causing traffic to split into 3-4 separate operations on the service board.

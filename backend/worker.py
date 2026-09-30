@@ -183,15 +183,14 @@ def _run_revised_anomalies(db_path=None):
 
 
 def _run_elasticsearch_sync(db_path=None) -> dict:
+    """Copy raw ELK facts only; all processing happens in ClickHouse."""
     from .elasticsearch import ElasticsearchReader
+    if settings.trace_pipeline_mode != "elk_to_clickhouse":
+        return {"status": "disabled", "reason": "clickhouse_pipeline_mode", "read": 0, "inserted": 0}
     reader = ElasticsearchReader()
     if not reader.url:
-        return {"status": "skipped", "message": "OTEL_ES_URL not configured"}
-    # One Elasticsearch stage owns the window and checkpoint. In agent-only
-    sync_enabled = settings.elasticsearch_sync_enabled
-    sync_result = (reader.sync(db_path=db_path) if (not settings.clickhouse_only_agent_traces or sync_enabled)
-                   else {"status": "aggregate_only", "read": 0, "inserted": 0})
-    metrics = _run_elasticsearch_metrics(db_path)
+        return {"status": "skipped", "message": "OTEL_ES_URL not configured", "read": 0, "inserted": 0}
+    sync_result = reader.sync(db_path=db_path)
     retention = reader.prune_expired_documents()
     state = _checkpoint("worker_elasticsearch_sync", db_path)
     _save_stage_checkpoint("worker_elasticsearch_sync", {**state,
@@ -199,8 +198,12 @@ def _run_elasticsearch_sync(db_path=None) -> dict:
         "read": sync_result.get("read", 0),
         "inserted": sync_result.get("inserted", 0),
         "retention": retention,
+        "pipeline_mode": settings.trace_pipeline_mode,
     }, db_path)
-    return {**sync_result, "metrics": metrics, "retention": retention}
+    return {**sync_result, "retention": retention, "metrics": {
+        "status": "disabled",
+        "reason": "clickhouse_is_the_only_metric_and_topology_source",
+    }}
 
 
 def _mark_elasticsearch_metric_windows(db_path, historical_start: int, complete_end: int) -> int:
