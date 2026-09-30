@@ -40,11 +40,37 @@ async def get_trace(trace_id: str) -> Dict[str, Any]:
         raise HTTPException(status_code=404, detail="Trace not found")
 
     spans = res.get("spans", [])
-    # Reconstruct trace graph / hierarchy
-    span_ids = {s["span_id"] for s in spans}
+    # Reconstruct trace graph / hierarchy & resolve caller service from parent spans
+    span_by_id = {s["span_id"]: s for s in spans if isinstance(s, dict) and "span_id" in s}
     for s in spans:
+        if not isinstance(s, dict):
+            continue
         p = s.get("parent_span_id")
-        s["is_root"] = (p is None or p == "" or p not in span_ids)
+        s["is_root"] = (p is None or p == "" or p not in span_by_id)
+        if p and p in span_by_id:
+            # PRIMARY: Parent span from distributed trace context (100% deterministic)
+            parent_span = span_by_id[p]
+            s["caller_service"] = parent_span.get("service_name")
+            s["caller_resolution_method"] = "parent_span"
+            s["caller_confidence"] = 1.0
+        else:
+            # FALLBACK & CROSS-CHECK: Root span or uninstrumented external caller
+            existing_caller = s.get("caller_service")
+            if existing_caller and existing_caller not in ("unknown", "None", None, ""):
+                s["caller_resolution_method"] = "caller_attribute"
+                s["caller_confidence"] = 0.8
+            elif s.get("effective_client_ip") and s["effective_client_ip"] not in ("unavailable", "unknown", None):
+                s["caller_service"] = f"external ({s['effective_client_ip']})"
+                s["caller_resolution_method"] = "client_ip"
+                s["caller_confidence"] = 0.7
+            elif s.get("principal_name") and s["principal_name"] not in ("unknown", "-anonymous-", None):
+                s["caller_service"] = f"user:{s['principal_name']}"
+                s["caller_resolution_method"] = "principal"
+                s["caller_confidence"] = 0.6
+            else:
+                s["caller_service"] = "external"
+                s["caller_resolution_method"] = "external_uninstrumented"
+                s["caller_confidence"] = 0.4
 
     res["waterfall"] = spans
     res["items"] = spans

@@ -118,3 +118,60 @@ def test_sources_and_environments_do_not_merge():
     graph=advance_graph(None,rows+second,'elasticsearch')
     assert len(graph['relations'])==2
     assert {n['environment'] for n in graph['nodes'].values()}=={'prod','staging'}
+
+
+def _trained(days=3):
+    return sum((day_rows(d,100,windows=12) for d in range(days)),[])
+
+
+def test_persistent_new_level_is_accepted_after_bounded_surge_period():
+    from backend.app.services.behavior_graph import LEVEL_SHIFT_WINDOWS, level_shift_starts
+    base=_trained()
+    previous=advance_graph(None,base,'elasticsearch')
+    shifted=advance_graph(previous,base+day_rows(3,400,windows=LEVEL_SHIFT_WINDOWS),'elasticsearch')
+    relation=next(iter(shifted['relations'].values()))
+    assert relation['level_shifts']==1
+    assert relation['mean_tps']==pytest.approx(400/300)
+    assert relation['surge_streak']==0 and 'shift_buffer' not in relation
+    assert relation['level_shift']['from_tps']==pytest.approx(100/300)
+    start=level_shift_starts(shifted)[relation['id']]
+    assert start==NOW+3*DAY
+    # Traffic at the accepted level is no longer a material surge.
+    later=advance_graph(shifted,base+day_rows(3,400,windows=LEVEL_SHIFT_WINDOWS+3),'elasticsearch')
+    assert next(iter(later['relations'].values()))['surge_streak']==0
+
+
+def test_shorter_surge_is_withheld_and_never_becomes_the_reference():
+    from backend.app.services.behavior_graph import LEVEL_SHIFT_WINDOWS
+    base=_trained()
+    graph=advance_graph(None,base+day_rows(3,400,windows=LEVEL_SHIFT_WINDOWS-1),'elasticsearch')
+    relation=next(iter(graph['relations'].values()))
+    assert relation.get('level_shifts',0)==0
+    assert relation['mean_tps']==pytest.approx(100/300)
+    assert len(relation['shift_buffer'])==LEVEL_SHIFT_WINDOWS-1
+
+
+def test_ineligible_surge_windows_do_not_trigger_level_acceptance():
+    from backend.app.services.behavior_graph import LEVEL_SHIFT_WINDOWS
+    surge=day_rows(3,400,windows=LEVEL_SHIFT_WINDOWS)
+    surge[0]['clean_windows']=[];surge[0]['clean_counts']=[]
+    graph=advance_graph(None,_trained()+surge,'elasticsearch')
+    relation=next(iter(graph['relations'].values()))
+    assert relation.get('level_shifts',0)==0 and 'shift_buffer' not in relation
+
+
+def test_profile_tps_reference_restarts_at_accepted_level_shift():
+    from backend.app.services.learned_behavior import build_profiles
+    days=sum((day_rows(d,100,windows=24) for d in range(8)),[])
+    rid=days[0]['id']; now=NOW+8*DAY
+    before,_=build_profiles(days,[],now)
+    after,_=build_profiles(days,[],now,{rid:NOW+7*DAY})
+    assert before[0]['tps']['reference_windows']>0
+    assert after[0]['tps']['reference_windows']==0 and after[0]['tps']['reference_start']==NOW+7*DAY
+
+
+def test_labelled_replay_benchmark_has_no_regressions():
+    from backend.scripts.benchmark_behavior import replay
+    results,_=replay(train_days=8,step=6,seed=3)
+    failures=[r for r in results if not r['pass'] and not r['known_gap']]
+    assert not failures, failures

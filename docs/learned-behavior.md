@@ -97,7 +97,20 @@ active days. The previous mean/variance score the next observation before any
 update. Material surges (at least 3x the mean, +100 requests/window and 6 scaled
 standard deviations) are withheld from reference updates; three contiguous
 surging windows produce a `graph_tps_shift` Watch candidate. Influence after warmup
-is bounded to three scaled standard deviations. Known incident/collection-gap
+is bounded to three scaled standard deviations.
+
+Persistent new levels are accepted rather than withheld forever. When at least 27
+of the last 36 eligible observed windows (three hours of observations) are material
+surges, the reference is re-seeded to their median TPS with a MAD-based spread, the
+surge streak resets, and `level_shift` (`at`, `from_tps`, `to_tps`, `windows`) is
+recorded on the entity and exposed in `graph_learning`. Shorter surges stay withheld.
+Incident/collection-gap windows never count toward acceptance. The profile same-UTC-hour
+TPS reference then restarts at the first window of the new level (`tps.reference_start`),
+so it needs fresh readiness instead of comparing against the old level for days.
+Trade-off: a sustained malicious surge also stops alerting after about three hours;
+the recorded `level_shift` keeps that acceptance visible. The worker now advances the
+graph before building profiles so shift points are available. Algorithm version is
+`online-behavior-graph-v4`; older snapshots replay automatically. Known incident/collection-gap
 windows reinforce observation support but cannot train TPS. Missing caller fields
 still permit measured credential/API rate learning within an isolated unknown-caller
 scope; they never fabricate a service-call edge.
@@ -168,6 +181,12 @@ reclaims obsolete generations after a one-hour reader grace period, protecting
 published and in-progress generations. Raw ES/ClickHouse retention is unchanged.
 
 Completed source windows refresh as new five-minute windows become available.
+A window becomes learnable `OTEL_BEHAVIOR_LEARN_GRACE_SECONDS` (default 90,
+range 30-300) after it closes, once the metric stage has written its one-minute
+buckets. Idle windows and windows the metric stage has not reached fall back to
+the former one-window lag; 300 restores that lag everywhere. The learned-through
+point never moves backwards. Late arrivals that change a learned window trigger
+the graph's deterministic replay. Topology ages count from the window end.
 Yesterday is refreshed periodically for late data; current-day history is also
 replaced, never incremented. Older late data needs a retained-source replay. This
 cannot reconstruct raw facts that have already expired. ClickHouse refreshes preserve already learned bucket prefixes outside the one-day raw TTL.
@@ -182,6 +201,25 @@ The script acquires the same local owner lock. Retry if a worker cycle owns it.
 Pending pages and replay progress survive bounded invocations. Contracts are
 preserved. Source errors preserve the previous published snapshot and are retried.
 The initial backfill is chronological; coverage progress is visible on Overview.
+
+## Labelled replay benchmark
+
+`backend/scripts/benchmark_behavior.py` replays synthetic five-minute buckets with
+known injected events through the same pure worker path (`summarize_day`,
+`advance_graph`, `build_profiles`, `graph_deviations`) at worker cadence. It uses
+no database. Scenarios: steady diurnal and sparse Poisson controls, a 1-hour 5x
+surge, a permanent 4x level shift, a new API for an established credential, and a
+2.5x surge on a high-volume API. It reports detection, delay and stale/false alert
+steps; known gaps are reported without failing the gate.
+
+```sh
+.venv/bin/python -m backend.scripts.benchmark_behavior [--seed N] [--step 3] [--json]
+```
+
+Current result (seeds 1, 2, 3 and 7): 6/7 pass. The level shift alerts for about
+2h45m, then stops (previously 61 stale steps over roughly 22 hours). Known gap: the
+2.5x high-volume surge is missed because of the fixed 3x material floor; count-based
+scoring is the planned fix. Run this benchmark before changing thresholds.
 
 ## Validation
 

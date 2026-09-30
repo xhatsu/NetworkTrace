@@ -6,7 +6,9 @@ tables receive stable dimensions, never reusable authentication secrets.
 from __future__ import annotations
 
 import base64
+from functools import lru_cache
 import hashlib
+import ipaddress
 import json
 import re
 import time
@@ -55,18 +57,57 @@ def is_agent_trace(raw: dict[str, Any], envelope_node: Any = None) -> bool:
     return False
 
 
+def _ip_matches_targets(clean: str, targets: tuple[str, ...]) -> bool:
+    if not clean or not targets:
+        return False
+    try:
+        addr = ipaddress.ip_address(clean)
+    except ValueError:
+        return False
+    for t in targets:
+        t = t.strip()
+        if not t:
+            continue
+        try:
+            if "/" in t:
+                if addr in ipaddress.ip_network(t, strict=False):
+                    return True
+            elif addr == ipaddress.ip_address(t):
+                return True
+        except ValueError:
+            continue
+    return False
+
+
+_is_ip_in_configured_targets = _ip_matches_targets
+
+
+@lru_cache(maxsize=2048)
+def _is_trusted_proxy_cached(clean: str, configured_proxies: tuple[str, ...]) -> bool:
+    if clean in {"127.0.0.1", "::1", "localhost"}:
+        return True
+    lower = clean.lower()
+    if "proxy" in lower or "gateway" in lower or "ingress" in lower or "loadbalancer" in lower:
+        return True
+    return _ip_matches_targets(clean, configured_proxies)
+
+
 def _is_trusted_proxy(ip: Optional[str]) -> bool:
     if not ip:
         return False
     clean = ip.strip()
-    return (
-        clean in {"127.0.0.1", "::1", "localhost"}
-        or clean.startswith("10.")
-        or clean.startswith("192.168.")
-        or any(clean.startswith(f"172.{i}.") for i in range(16, 32))
-        or "proxy" in clean.lower()
-        or "gateway" in clean.lower()
-    )
+    try:
+        from backend.config import settings
+        proxies = (
+            settings.trusted_proxies
+            + settings.known_load_balancers
+            + settings.known_f5
+            + settings.known_lb
+            + settings.known_reverse_proxy
+        )
+    except Exception:
+        proxies = ()
+    return _is_trusted_proxy_cached(clean, proxies)
 
 
 def classify_source_ip_role(ip: Optional[str], known_lbs: tuple[str, ...] = ()) -> tuple[str, str, str]:
@@ -88,24 +129,33 @@ def classify_source_ip_role(ip: Optional[str], known_lbs: tuple[str, ...] = ()) 
         known_rp = settings.known_reverse_proxy
         known_nat = settings.known_nat
         configured_lbs = settings.known_load_balancers
+        trusted_proxies = settings.trusted_proxies
     except Exception:
         known_f5 = ()
         known_lb = ()
         known_rp = ()
         known_nat = ()
         configured_lbs = ()
+        trusted_proxies = ()
 
-    # 1. Configured infrastructure IP lists
-    if clean in known_f5 or any(clean == x.strip() for x in known_f5):
+    # 1. Configured infrastructure IP lists (exact IP or CIDR)
+    if clean in known_f5 or any(clean == x.strip() for x in known_f5) or _ip_matches_targets(clean, known_f5):
         return "load_balancer", "F5 BIG-IP Load Balancer", "low"
-    if clean in known_lb or any(clean == x.strip() for x in known_lb):
+    if clean in known_lb or any(clean == x.strip() for x in known_lb) or _ip_matches_targets(clean, known_lb):
         return "load_balancer", "Load Balancer", "low"
-    if clean in known_rp or any(clean == x.strip() for x in known_rp):
+    if clean in known_rp or any(clean == x.strip() for x in known_rp) or _ip_matches_targets(clean, known_rp):
         return "reverse_proxy", "Reverse Proxy", "low"
-    if clean in known_nat or any(clean == x.strip() for x in known_nat):
+    if clean in known_nat or any(clean == x.strip() for x in known_nat) or _ip_matches_targets(clean, known_nat):
         return "nat_gateway", "NAT Gateway", "low"
-    if clean in known_lbs or clean in configured_lbs or any(clean == lb.strip() for lb in (known_lbs or configured_lbs)):
+    if (
+        clean in known_lbs
+        or clean in configured_lbs
+        or any(clean == lb.strip() for lb in (known_lbs or configured_lbs))
+        or _ip_matches_targets(clean, known_lbs or configured_lbs)
+    ):
         return "load_balancer", "Likely load balancer", "low"
+    if clean in trusted_proxies or any(clean == tp.strip() for tp in trusted_proxies) or _ip_matches_targets(clean, trusted_proxies):
+        return "load_balancer", "Configured trusted proxy", "low"
 
     lower = clean.lower()
     if "lb" in lower or "loadbalancer" in lower:
@@ -136,8 +186,15 @@ def is_known_infrastructure_ip(ip: Optional[str]) -> bool:
     clean = ip.strip()
     try:
         from backend.config import settings
-        known = set(settings.known_f5) | set(settings.known_lb) | set(settings.known_reverse_proxy) | set(settings.known_nat) | set(settings.known_load_balancers)
-        if clean in known or any(clean == x.strip() for x in known if x):
+        known = tuple(
+            settings.known_f5
+            + settings.known_lb
+            + settings.known_reverse_proxy
+            + settings.known_nat
+            + settings.known_load_balancers
+            + settings.trusted_proxies
+        )
+        if clean in known or any(clean == x.strip() for x in known if x) or _ip_matches_targets(clean, known):
             return True
     except Exception:
         pass
@@ -164,25 +221,26 @@ def derive_source_group(ip: Optional[str]) -> Optional[str]:
 
 
 def normalize_operation_key(target_service: str, raw_op: str, rpc_method: Optional[str] = None) -> str:
+    cleaned = (raw_op or "").strip()
+    if cleaned and cleaned != "unknown":
+        method = ""
+        route = cleaned
+        for m in ("GET ", "POST ", "PUT ", "DELETE ", "PATCH ", "HEAD ", "OPTIONS "):
+            if cleaned.upper().startswith(m):
+                method = m
+                route = cleaned[len(m):].strip()
+                break
+        route = re.sub(r'/[0-9a-fA-F-]{16,}', '/{id}', route)
+        route = re.sub(r'/\d+', '/{id}', route)
+        if method:
+            return f"{method.strip()} {route}"
+        if route.startswith("/"):
+            return route
     if rpc_method and str(rpc_method).strip():
+        clean_rpc = str(rpc_method).strip().strip('"\'')
         svc = target_service.split("/")[-1].replace("-", "") if target_service and target_service != "unknown" else "Service"
-        return f"{svc}/{str(rpc_method).strip()}"
-    if not raw_op or raw_op == "unknown":
-        return "unknown"
-    cleaned = raw_op.strip()
-    if cleaned.upper().startswith(("GET ", "POST ", "PUT ", "DELETE ", "PATCH ", "HEAD ", "OPTIONS ")):
-        parts = cleaned.split(None, 1)
-        cleaned = parts[1].strip() if len(parts) > 1 else cleaned
-    cleaned = re.sub(r'/[0-9a-fA-F-]{16,}', '/{id}', cleaned)
-    cleaned = re.sub(r'/\d+', '/{id}', cleaned)
-    cleaned = cleaned.lstrip("/")
-    if "/" in cleaned:
-        segments = [s for s in cleaned.split("/") if s]
-        if len(segments) >= 2:
-            return f"{segments[0]}/{segments[-1]}"
-        elif len(segments) == 1:
-            return f"{target_service}/{segments[0]}" if target_service and target_service != "unknown" else segments[0]
-    return f"{target_service}/{cleaned}" if target_service and target_service != "unknown" else cleaned
+        return f"{svc}/{clean_rpc}"
+    return cleaned or "unknown"
 
 
 def _safe_number(value: Any, default: float = 0.0) -> float:
@@ -345,12 +403,25 @@ def normalize_otel_record(raw: dict[str, Any], source_label: str = "import") -> 
         return default
 
     # Service & Instance
-    service_name = str(pick("service.name", "resource.service.name", "serviceName", "service", default="unknown"))[:200]
+    service_name = str(pick(
+        "service.name",
+        "resource.service.name",
+        "labels.k8s_deployment_name",
+        "k8s.deployment.name",
+        "labels.k8s_service_name",
+        "k8s.service.name",
+        "labels.k8s_pod_name",
+        "kubernetes.pod.name",
+        "k8s.pod.name",
+        "serviceName",
+        "service",
+        default="unknown"
+    ))[:200]
     service_instance = str(pick("service.node.name", "host.name", "node.name", "service.instance.id", "host", default=""))[:200] or None
     environment = str(pick("service.environment", "environment", default="production"))[:100]
 
     # Operation
-    operation = str(pick("transaction.name", "name", "path", default="unknown"))[:500]
+    operation = str(pick("span.name", "transaction.name", "name", "path", default="unknown"))[:500]
 
     # Timestamps
     start_nano = pick("startTimeUnixNano", "start_time_unix_nano")
@@ -363,7 +434,7 @@ def normalize_otel_record(raw: dict[str, Any], source_label: str = "import") -> 
         timestamp_ms = parse_timestamp(pick("@timestamp", "timestamp", "startTimeUnixNano", "ts"))
 
     # Duration
-    duration = pick("transaction.duration.us", "duration_us")
+    duration = pick("span.duration.us", "transaction.duration.us", "duration_us")
     if duration is None and pick("duration_ms") is not None:
         duration = _safe_number(pick("duration_ms")) * 1000
     if duration is None and pick("duration_nano") is not None:
@@ -432,12 +503,12 @@ def normalize_otel_record(raw: dict[str, Any], source_label: str = "import") -> 
 
     # Span Kind & Networking
     event_type = str(pick("processor.event", "event.type", default="transaction"))
-    kind_raw = str(pick("span.kind", "span_kind", "kind", default="server" if event_type == "transaction" else "internal")).lower()
+    kind_raw = str(pick("span.kind", "span_kind", "span.type", "kind", default="server" if event_type == "transaction" else "internal")).lower()
     if kind_raw in {"span_kind_server", "server"}: span_kind = "server"
-    elif kind_raw in {"span_kind_client", "client", "producer"}: span_kind = "client"
+    elif kind_raw in {"span_kind_client", "client", "producer", "external"}: span_kind = "client"
     else: span_kind = "internal"
 
-    peer_service = str(pick("peer.service.name", "peer.service", "destination.service.resource", "parent.service.name", "labels.caller_service", "labels.net_peer_service", "caller.service", "caller_service", default=""))[:200] or None
+    peer_service = str(pick("labels.service_peer_name", "service_peer_name", "peer.service.name", "peer.service", "destination.service.resource", "parent.service.name", "labels.caller_service", "labels.net_peer_service", "caller.service", "caller_service", default=""))[:200] or None
     peer_address = str(pick("labels.net_sock_peer_addr", "net.peer.name", "destination.address", "peer.address", default=""))[:250] or None
     host_address = str(pick("labels.net_sock_host_addr", "server_address", "labels.server_address", "net.host.name", "server.address", "dst_ip", default=""))[:250] or None
     client_ip = str(pick("client.ip", "client_ip", "client.address", "client_address", "labels.client_address", "labels.network_peer_address", "network_peer_address", "source.ip", "source_ip", "caller", default=""))[:100] or None
@@ -458,8 +529,10 @@ def normalize_otel_record(raw: dict[str, Any], source_label: str = "import") -> 
         target_service = service_name
         if peer_service:
             caller_service = peer_service
-            caller_resolution_method = "trace_parent" if parent_span_id else "header"
-            caller_confidence = 1.0 if parent_span_id else 0.8
+            # A peer attribute is caller evidence; the parent span itself is not
+            # looked up here, so this is not a verified parent/child relationship.
+            caller_resolution_method = "header"
+            caller_confidence = 0.8
         elif peer_address or client_ip:
             caller_service = None
             caller_resolution_method = "network_ip"

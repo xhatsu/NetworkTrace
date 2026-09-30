@@ -55,6 +55,7 @@ type PerformancePoint = {
   rps?: number;
   tps?: number;
   baseline_rps?: number;
+  expected_tps?: number;
   baseline_error_rate?: number;
   baseline_p95?: number;
   errors?: number;
@@ -311,7 +312,7 @@ function PerformanceSection({
   };
   const tpsLines: ChartSeriesLine[] = [
     { dataKey: "observed_tps", label: t("Observed TPS"), color: "#5794f2", width: 2.4 },
-    { dataKey: "baseline_tps", label: t("Baseline TPS"), color: "#7b7d80", dashed: true, width: 1.5 },
+    { dataKey: "expected_tps", label: t("Expected TPS"), color: "#a78bfa", dashed: true, width: 1.5 },
   ];
   const seriesMaximum = (lines: ChartSeriesLine[]) => series.reduce(
     (maximum, point) => lines.reduce((value, line) => Math.max(value, finite(point[line.dataKey])), maximum), 0,
@@ -411,7 +412,7 @@ function PerformanceSection({
       </div>
 
       <div className="grid gap-3 xl:grid-cols-[minmax(0,1.15fr)_minmax(300px,.85fr)]">
-        <Panel className="h-full min-w-0" title={t("TPS vs Baseline", "TPS so với Baseline")} subtitle={t("TPS on left · selected KPI on right", "TPS trục trái · KPI được chọn trục phải")}>
+        <Panel className="h-full min-w-0" title={t("TPS vs Expected", "TPS so với Expected")} subtitle={t("TPS on left · selected KPI on right", "TPS trục trái · KPI được chọn trục phải")}>
           {series.length ? (
             <div className="space-y-0">
               <div className="flex h-8 min-w-0 items-center gap-4 overflow-x-auto whitespace-nowrap px-3 text-[10px] text-[#a7a9ab]">
@@ -437,7 +438,7 @@ function PerformanceSection({
               <div className="border-t border-[#2a2d30] px-3 py-1.5 text-[10px] text-[#a7a9ab]">
                 <div className="flex flex-wrap gap-x-3 gap-y-0.5 font-mono">
                   <span>{inspectedPoint ? compactTime(inspectedPoint.timestamp_ms) : "—"}</span>
-                  <span>TPS {formatTps(finite(inspectedPoint?.observed_tps))} / {formatTps(finite(inspectedPoint?.baseline_tps))}</span>
+                  <span>TPS {formatTps(finite(inspectedPoint?.observed_tps))} / {formatTps(finite(inspectedPoint?.expected_tps))}</span>
                   <span>{t("Error rate")} {percent(finite(inspectedPoint?.error_rate))}</span>
                   <span>P50/P95/P99 {n(finite(inspectedPoint?.latency_p50), 0)}/{n(finite(inspectedPoint?.latency_p95), 0)}/{n(finite(inspectedPoint?.latency_p99), 0)} ms</span>
                   {hasBandwidth && <span>{t("Bandwidth")} ↑{formatRate(finite(inspectedPoint?.request_bytes_per_second))} ↓{formatRate(finite(inspectedPoint?.response_bytes_per_second))}</span>}
@@ -612,7 +613,7 @@ export function UserActivityWorkspace() {
       ...point,
       timestamp_ms: timestamp(point.timestamp_ms ?? point.bucket_start),
       observed_tps: finite(point.rps),
-      baseline_tps: finite(point.baseline_rps),
+      expected_tps: finite(point.baseline_rps),
       sparkline_tps: finite(point.rps),
       sparkline_error: finite(point.error_rate),
       sparkline_p95: finite(point.latency_p95),
@@ -714,7 +715,7 @@ export function UserActivityWorkspace() {
   const currentErrorRate = finite(latestTelemetryPoint?.error_rate);
   const currentP95 = finite(latestTelemetryPoint?.latency_p95);
   const hasBandwidth = series.some((point) => finite(point.request_bytes_samples) + finite(point.response_bytes_samples) > 0);
-  const baselineTps = finite(latestTelemetryPoint?.baseline_rps);
+  const baselineTps = finite(latestTelemetryPoint?.expected_tps);
   const baselineErrorRate = finite(latestTelemetryPoint?.baseline_error_rate);
   const baselineP95 = finite(latestTelemetryPoint?.baseline_p95);
   const bandwidthPoints = series.filter((point) => finite(point.request_bytes_samples) + finite(point.response_bytes_samples) > 0);

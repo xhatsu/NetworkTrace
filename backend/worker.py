@@ -10,6 +10,7 @@ import asyncio
 import hashlib
 import json
 import logging
+import os
 import resource
 import time
 import traceback
@@ -187,11 +188,10 @@ def _run_elasticsearch_sync(db_path=None) -> dict:
     if not reader.url:
         return {"status": "skipped", "message": "OTEL_ES_URL not configured"}
     # One Elasticsearch stage owns the window and checkpoint. In agent-only
-    # deployments no application document is read into ClickHouse.
-    sync_result = (reader.sync(db_path=db_path) if not settings.clickhouse_only_agent_traces
+    sync_enabled = settings.elasticsearch_sync_enabled
+    sync_result = (reader.sync(db_path=db_path) if (not settings.clickhouse_only_agent_traces or sync_enabled)
                    else {"status": "aggregate_only", "read": 0, "inserted": 0})
-    metrics = (_run_elasticsearch_metrics(db_path) if settings.clickhouse_only_agent_traces
-               else {"status": "clickhouse_trace_aggregation"})
+    metrics = _run_elasticsearch_metrics(db_path)
     retention = reader.prune_expired_documents()
     state = _checkpoint("worker_elasticsearch_sync", db_path)
     _save_stage_checkpoint("worker_elasticsearch_sync", {**state,
@@ -287,9 +287,18 @@ def _run_elasticsearch_metrics(db_path=None) -> dict:
     # Byte fields and canonical API operation dimensions were added after earlier
     # transaction buckets may already have been marked live. Revisit the retained
     # window once so they are replaced without a separate bandwidth index/worker.
+    # Version 3: callers resolved from traces (trace_edges) replace attribute-only
+    # callers, so retained buckets and IP rollups are rebuilt once.
     bytes_schema_version = 2
     if state.get("bytes_schema_version") != bytes_schema_version:
-        AggregateRepository(db_path).delete_window(historical_start // 1000, complete_end // 1000)
+        # Rebuild only what Elasticsearch still retains; older buckets cannot be
+        # rematerialized and are kept as they are.
+        oldest = repository.earliest_timestamp_ms()
+        rebuild_start = complete_end if oldest is None else max(
+            historical_start, -(-oldest // bucket_ms) * bucket_ms,
+        )
+        AggregateRepository(db_path).delete_window(rebuild_start // 1000, complete_end // 1000)
+        repository.delete_ip_window(rebuild_start, complete_end)
         state = {
             "mode": "backfill",
             "cursor_ms": complete_end,
@@ -318,6 +327,45 @@ def _run_elasticsearch_metrics(db_path=None) -> dict:
         live_pending = {}
         state.pop("live_pending", None)
 
+    # Keep fresh 5m topology principal IP data synchronized
+    live_ip_pending = state.get("live_ip_pending") or {}
+    live_ip_start = int(live_ip_pending.get("start_ms") or live_start)
+    live_ip_end = int(live_ip_pending.get("end_ms") or live_end)
+    ip_result = repository.materialize_ip_window(
+        live_ip_start, live_ip_end,
+        live_ip_pending.get("after_key") if live_ip_pending else None,
+    )
+    if not ip_result["complete"]:
+        state["live_ip_pending"] = {
+            "start_ms": live_ip_start, "end_ms": live_ip_end,
+            "after_key": ip_result["after_key"],
+        }
+        _save_stage_checkpoint(source, {**stage_state, "metrics": state}, db_path)
+        return {**ip_result, "status": "continuing_recent_ip_window"}
+    state.pop("live_ip_pending", None)
+
+    # Backfill retained 2-day historical IP data in 24h slices if not already done
+    ip_floor_ms = max(historical_start, complete_end - 2 * 86400 * 1000)
+    if not state.get("ip_bootstrap_complete"):
+        ip_cursor = int(state.get("ip_bootstrap_cursor_ms") or complete_end)
+        b_end = min(ip_cursor, complete_end)
+        b_start = max(ip_floor_ms, b_end - 24 * 3600 * 1000)
+        if b_start >= b_end or b_end <= ip_floor_ms:
+            state["ip_bootstrap_complete"] = True
+            state.pop("ip_bootstrap_cursor_ms", None)
+            state.pop("ip_bootstrap_after_key", None)
+        else:
+            b_after = state.get("ip_bootstrap_after_key")
+            b_res = repository.materialize_ip_window(b_start, b_end, b_after)
+            if b_res["complete"]:
+                state["ip_bootstrap_cursor_ms"] = b_start
+                state.pop("ip_bootstrap_after_key", None)
+                if b_start <= ip_floor_ms:
+                    state["ip_bootstrap_complete"] = True
+                    state.pop("ip_bootstrap_cursor_ms", None)
+            else:
+                state["ip_bootstrap_after_key"] = b_res["after_key"]
+
     anomaly_windows_marked = _mark_elasticsearch_metric_windows(
         db_path, historical_start, complete_end,
     )
@@ -344,6 +392,7 @@ def _run_elasticsearch_metrics(db_path=None) -> dict:
     }
     if result["complete"]:
         if grain == 300:
+            repository.materialize_ip_window(start_ms, end_ms)
             next_state["grain"] = 60
         else:
             next_state["grain"] = 300

@@ -114,7 +114,8 @@ class TopologyDetailResponse(BaseModel):
 class PrincipalIpPageResponse(BaseModel):
     model_config = ConfigDict(extra="allow")
 
-    principal: str
+    principal: Optional[str] = ""
+    service: Optional[str] = None
     items: List[Dict[str, Any]] = Field(default_factory=list)
     next_cursor: Optional[str] = None
     page_size: int

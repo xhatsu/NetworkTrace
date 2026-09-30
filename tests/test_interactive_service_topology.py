@@ -364,6 +364,7 @@ def test_topology_api_surface_is_bounded_and_backward_compatible():
         "/api/v1/topology/users/partner-a/ips?window=5m&page_size=1",
         "/api/v1/services/payment/bandwidth?from=1789700000000&to=1789700300000",
         "/api/v1/topology/principals/partner-a/ips?window=5m&page_size=1",
+        "/api/v1/topology/services/payment/ips?window=5m&page_size=1",
     ]
 
     async def request():
@@ -383,5 +384,6 @@ def test_topology_api_surface_is_bounded_and_backward_compatible():
             "bandwidth_bytes_per_second",
             "bandwidth_bits_per_second",
         } <= response.json()["metrics"].keys()
-    assert {"metrics", "series", "window", "backend"} <= responses[-2].json().keys()
-    assert {"items", "next_cursor", "window"} <= responses[-1].json().keys()
+    assert {"metrics", "series", "window", "backend"} <= responses[15].json().keys()
+    assert {"items", "next_cursor", "window"} <= responses[16].json().keys()
+    assert {"items", "next_cursor", "window", "service"} <= responses[17].json().keys()

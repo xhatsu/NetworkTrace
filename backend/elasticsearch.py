@@ -118,6 +118,15 @@ class ElasticsearchReader:
             with httpx.Client(base_url=self.url, verify=self.verify, timeout=30, headers=headers, auth=auth) as client:
                 r1 = client.put(f"/_ilm/policy/{policy_name}", json=policy_body)
                 results["policy"] = r1.status_code == 200
+                try:
+                    tmpl_res = client.get("/_index_template/tracescope-*")
+                    if tmpl_res.status_code == 200:
+                        for item in tmpl_res.json().get("index_templates", []):
+                            t_name = item.get("name")
+                            if t_name and t_name != f"{policy_name}-template":
+                                client.delete(f"/_index_template/{t_name}")
+                except Exception:
+                    pass
                 r2 = client.put(f"/_index_template/{policy_name}-template", json=template_body)
                 results["template"] = r2.status_code == 200
                 r3 = client.put(f"/_ilm/policy/apm-rollover-30-days", json=policy_body)

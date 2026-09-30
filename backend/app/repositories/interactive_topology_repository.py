@@ -130,7 +130,7 @@ def decode_cursor(value: Optional[str]) -> Optional[List[str]]:
         decoded = json.loads(base64.urlsafe_b64decode(padded.encode("ascii")))
     except (ValueError, TypeError, UnicodeDecodeError, json.JSONDecodeError):
         raise ValueError("cursor is invalid") from None
-    if not isinstance(decoded, list) or len(decoded) != 4 or not all(isinstance(x, str) for x in decoded):
+    if not isinstance(decoded, list) or len(decoded) not in (4, 5) or not all(isinstance(x, str) for x in decoded):
         raise ValueError("cursor is invalid")
     return decoded
 
@@ -759,8 +759,40 @@ class InteractiveTopologyRepository:
                 "if (v != null) { String caller=v.toString().trim(); if (caller.length() > 0) emit(caller); }"
             )}},
             "topology.target": {"type": "keyword", "script": {"source": "def v=params['_source']['target_service']; if (v == null) { def s=params['_source']['service']; if (s instanceof Map) { v=s['name']; } } if (v != null) emit(v.toString());"}},
-            "topology.api": {"type": "keyword", "script": {"source": "def v=params['_source']['operation_key']; if (v == null) { def t=params['_source']['transaction']; if (t instanceof Map) { v=t['name']; } } if (v == null) { v=params['_source']['name']; } if (v != null) emit(v.toString());"}},
-            "topology.principal": {"type": "keyword", "script": {"source": "def s=params['_source']; def v=s['principal_name']; if (v == null) v=s['enduser.id']; if (v == null) v=s['user.id']; if (v == null) v=s['labels.enduser.id']; if (v == null) { def u=s['enduser']; if (u instanceof Map) v=u['id']; } if (v == null) { def u=s['user']; if (u instanceof Map) { v=u['id']; if (v == null) v=u['name']; } } if (v == null) { def l=s['labels']; if (l instanceof Map) { v=l['enduser.id']; if (v == null) v=l['enduser_id']; } } if (v == null || v.toString().length() == 0) { emit('-anonymous-'); } else { emit(v.toString()); }"}},
+            "topology.api": {"type": "keyword", "script": {"source": (
+                "def s=params['_source']; def target=s['target_service']; "
+                "if (target == null) { def svc=s['service']; if (svc instanceof Map) target=svc['name']; } "
+                "def v=s['operation_key']; if (v == null || v.toString().length() == 0 || v.toString() == 'unknown') { "
+                "def t=s['transaction']; if (t instanceof Map) v=t['name']; } "
+                "if (v == null) v=s['name']; if (v != null) { String op=v.toString().trim(); "
+                "op=op.replaceAll(/\\/[0-9a-fA-F-]{16,}/, m -> '/{id}'); op=op.replaceAll(/\\/[0-9]+/, m -> '/{id}'); "
+                "if (op.length() > 0) emit(op); "
+                "else if (target != null && target.toString() != 'unknown') emit(target.toString() + '/unknown'); "
+                "else emit('unknown'); } "
+                "else if (target != null && target.toString() != 'unknown') emit(target.toString() + '/unknown'); "
+                "else emit('unknown');"
+            )}},
+            "topology.principal": {"type": "keyword", "script": {"source": (
+                "def s=params['_source']; def v=s['principal_name']; if (v == null) v=s['enduser.id']; if (v == null) v=s['user.id']; if (v == null) v=s['labels.enduser.id']; "
+                "if (v == null) { def u=s['enduser']; if (u instanceof Map) v=u['id']; } "
+                "if (v == null) { def u=s['user']; if (u instanceof Map) { v=u['id']; if (v == null) v=u['name']; } } "
+                "if (v == null) { def l=s['labels']; if (l instanceof Map) { "
+                "v=l['enduser.id']; if (v == null) v=l['enduser_id']; "
+                "if (v == null) v=l['wsse_username']; if (v == null) v=l['wsse_user']; if (v == null) v=l['user_name']; "
+                "} } "
+                "if (v == null || v.toString().length() == 0) { emit('-anonymous-'); } else { emit(v.toString()); }"
+            )}},
+            "topology.source_ip": {"type": "keyword", "script": {"source": (
+                "def s=params['_source']; def ip=null; def l=s['labels']; "
+                "if (l instanceof Map) { "
+                "def rip=l['x_real_ip']; if (rip instanceof List && rip.size() > 0) ip=rip[0]; else if (rip != null) ip=rip; "
+                "if (ip == null) { def fwd=l['x_forwarded_for']; if (fwd instanceof List && fwd.size() > 0) ip=fwd[0]; else if (fwd != null) ip=fwd; } "
+                "if (ip == null) ip=l['client_ip']; if (ip == null) ip=l['net_sock_peer_addr']; if (ip == null) ip=l['network_peer_address']; "
+                "} "
+                "if (ip == null) { def c=s['client']; if (c instanceof Map) ip=c['ip']; } "
+                "if (ip == null) ip=s['client_ip']; if (ip == null) ip=s['client.ip']; "
+                "if (ip != null) { String str=ip.toString().trim(); if (str.length() > 0 && str != 'unavailable' && str != 'unknown') emit(str); }"
+            )}},
             "topology.duration_ms": {"type": "double", "script": {"source": "def v=params['_source']['duration_ms']; if (v == null) { def t=params['_source']['transaction']; if (t instanceof Map && t['duration'] instanceof Map) { v=t['duration']['us']; if (v != null) v=Double.parseDouble(v.toString())/1000.0; } } if (v != null) emit(Double.parseDouble(v.toString()));"}},
             "topology.request_bytes": {"type": "long", "script": {"source": "def s=params['_source']; def v=s['request_bytes']; if (v == null) v=s['labels.http_request_content_length']; if (v == null) v=s['http.request.body.size']; if (v == null) { def l=s['labels']; if (l instanceof Map) { v=l['http_request_content_length']; if (v == null) v=l['http.request.body.size']; } } if (v == null) { def h=s['http']; if (h instanceof Map) { def r=h['request']; if (r instanceof Map) { v=r['bytes']; if (v == null && r['body'] instanceof Map) v=r['body']['size']; } } } if (v != null) { try { emit((long)Double.parseDouble(v.toString())); } catch (Exception ignored) {} }"}},
             "topology.response_bytes": {"type": "long", "script": {"source": "def s=params['_source']; def v=s['response_bytes']; if (v == null) v=s['labels.http_response_content_length']; if (v == null) v=s['http.response.body.size']; if (v == null) { def l=s['labels']; if (l instanceof Map) { v=l['http_response_content_length']; if (v == null) v=l['http.response.body.size']; } } if (v == null) { def h=s['http']; if (h instanceof Map) { def r=h['response']; if (r instanceof Map) { v=r['bytes']; if (v == null && r['body'] instanceof Map) v=r['body']['size']; } } } if (v != null) { try { emit((long)Double.parseDouble(v.toString())); } catch (Exception ignored) {} }"}},
@@ -1237,10 +1269,12 @@ class InteractiveTopologyRepository:
         }
 
     def principal_ips(self, principal: str, window: Dict[str, Any], page_size: int, cursor: Optional[str], service: Optional[str] = None, api: Optional[str] = None, filter_name: str = "all") -> Dict[str, Any]:
-        principal = canonical_principal(principal)
         decoded = decode_cursor(cursor)
-        clauses = ["bucket_start >= ?", "bucket_start < ?", "principal = ?"]
-        args: List[Any] = [window["start_ms"] // 1000, window["end_ms"] // 1000, principal]
+        clauses = ["bucket_start >= ?", "bucket_start < ?"]
+        args: List[Any] = [window["start_ms"] // 1000, window["end_ms"] // 1000]
+        if principal and str(principal).strip().lower() not in ("all", "*", "", "none"):
+            clauses.append("principal = ?")
+            args.append(canonical_principal(principal))
         if service:
             clauses.append("service = ?")
             args.append(canonical_service(service))
@@ -1248,24 +1282,34 @@ class InteractiveTopologyRepository:
             clauses.append("api = ?")
             args.append(canonical_api(api, service or ""))
         if decoded:
-            clauses.append("(source_ip > ? OR (source_ip = ? AND service > ?) OR (source_ip = ? AND service = ? AND api > ?) OR (source_ip = ? AND service = ? AND api = ? AND caller_service > ?))")
-            args.extend([decoded[0], decoded[0], decoded[1], decoded[0], decoded[1], decoded[2], decoded[0], decoded[1], decoded[2], decoded[3]])
+            if len(decoded) >= 5:
+                clauses.append("(source_ip > ? OR (source_ip = ? AND service > ?) OR (source_ip = ? AND service = ? AND api > ?) OR (source_ip = ? AND service = ? AND api = ? AND caller_service > ?) OR (source_ip = ? AND service = ? AND api = ? AND caller_service = ? AND principal > ?))")
+                args.extend([
+                    decoded[0],
+                    decoded[0], decoded[1],
+                    decoded[0], decoded[1], decoded[2],
+                    decoded[0], decoded[1], decoded[2], decoded[3],
+                    decoded[0], decoded[1], decoded[2], decoded[3], decoded[4],
+                ])
+            else:
+                clauses.append("(source_ip > ? OR (source_ip = ? AND service > ?) OR (source_ip = ? AND service = ? AND api > ?) OR (source_ip = ? AND service = ? AND api = ? AND caller_service > ?))")
+                args.extend([decoded[0], decoded[0], decoded[1], decoded[0], decoded[1], decoded[2], decoded[0], decoded[1], decoded[2], decoded[3]])
         having = ""
         if filter_name == "lb":
-            having = " HAVING max(is_load_balancer) = 1"
+            having = " HAVING is_load_balancer = 1"
         elif filter_name == "direct":
-            having = " HAVING max(is_load_balancer) = 0"
+            having = " HAVING is_load_balancer = 0"
         elif filter_name == "new_ip":
-            having = " HAVING max(is_new_ip) = 1"
+            having = " HAVING is_new_ip = 1"
         elif filter_name == "high_error":
-            having = " HAVING sum(error_count) / greatest(1, sum(request_count)) >= 0.1"
+            having = " HAVING error_count / greatest(1, request_count) >= 0.1"
         elif filter_name == "inactive":
-            having = " HAVING max(last_seen_ms) < ?"
+            having = " HAVING last_seen_ms < ?"
             args.append(window["end_ms"] - max(300000, (window["end_ms"] - window["start_ms"])))
         elif filter_name != "all":
             raise ValueError("filter must be one of all, direct, lb, new_ip, high_error, inactive")
         sql = f"""
-            SELECT source_ip, service, api, caller_service,
+            SELECT source_ip, service, api, caller_service, principal,
               sum(request_count) request_count, sum(error_count) error_count,
               max(p95_latency_ms) p95_latency_ms, sum(request_bytes) request_bytes,
               sum(response_bytes) response_bytes, min(first_seen_ms) first_seen_ms,
@@ -1273,9 +1317,9 @@ class InteractiveTopologyRepository:
               any(source_ip_role) source_ip_role, any(role_label) role_label,
               any(attribution_confidence) attribution_confidence, max(is_new_ip) is_new_ip
             FROM topology_principal_ip_5m FINAL WHERE {' AND '.join(clauses)}
-            GROUP BY source_ip, service, api, caller_service
+            GROUP BY source_ip, service, api, caller_service, principal
             {having}
-            ORDER BY source_ip, service, api, caller_service
+            ORDER BY source_ip, service, api, caller_service, principal
             LIMIT ?
         """
         args.append(page_size + 1)
@@ -1286,7 +1330,15 @@ class InteractiveTopologyRepository:
         next_cursor = None
         if has_more and rows:
             row = rows[-1]
-            next_cursor = encode_cursor([str(row.get("source_ip") or ""), str(row.get("service") or ""), str(row.get("api") or ""), str(row.get("caller_service") or "")])
+            next_cursor = encode_cursor([
+                str(row.get("source_ip") or ""),
+                str(row.get("service") or ""),
+                str(row.get("api") or ""),
+                str(row.get("caller_service") or ""),
+                str(row.get("principal") or ""),
+            ])
+        if not rows and self._es_repo.is_configured():
+            rows, next_cursor = self._es_principal_ips(principal, window, page_size, cursor, service, api, filter_name)
         items = []
         for row in rows:
             requests = _safe_int(row.get("request_count"))
@@ -1299,7 +1351,191 @@ class InteractiveTopologyRepository:
                 "is_load_balancer": bool(row.get("is_load_balancer")),
                 "is_new_ip": bool(row.get("is_new_ip")),
             })
-        return {"principal": principal, "items": items, "next_cursor": next_cursor, "page_size": page_size, "window": window, "filters": {"service": service, "api": api, "filter": filter_name}, "backend": self.backend}
+        clean_p = principal if (principal and str(principal).lower() not in ("all", "*", "")) else ""
+        return {"principal": clean_p, "service": service, "items": items, "next_cursor": next_cursor, "page_size": page_size, "window": window, "filters": {"service": service, "api": api, "filter": filter_name}, "backend": self.backend}
+
+    def _es_principal_ips(
+        self,
+        principal: str,
+        window: Dict[str, Any],
+        page_size: int,
+        cursor: Optional[str] = None,
+        service: Optional[str] = None,
+        api: Optional[str] = None,
+        filter_name: str = "all",
+    ) -> Tuple[List[Dict[str, Any]], Optional[str]]:
+        if not self._es_repo.url:
+            return [], None
+        runtime = self._es_runtime()
+        start_ms = window.get("start_ms") or (int(time.time() * 1000) - 86400000)
+        end_ms = window.get("end_ms") or int(time.time() * 1000)
+
+        filters: List[Dict[str, Any]] = [
+            {"range": {"@timestamp": {"gte": start_ms, "lt": end_ms}}},
+            {"term": {"processor.event": "transaction"}},
+        ]
+        if service:
+            filters.append({"term": {"topology.target": canonical_service(service)}})
+        if principal and str(principal).strip().lower() not in ("all", "*", "", "none"):
+            filters.append({"term": {"topology.principal": canonical_principal(principal)}})
+        if api:
+            filters.append({"term": {"topology.api": canonical_api(api, service or "")}})
+
+        after_key = None
+        decoded = decode_cursor(cursor)
+        if decoded:
+            after_key = {
+                "source_ip": decoded[0],
+                "service": decoded[1] if len(decoded) > 1 else "",
+                "api": decoded[2] if len(decoded) > 2 else "",
+                "caller_service": decoded[3] if len(decoded) > 3 else None,
+                "principal": decoded[4] if len(decoded) > 4 else "",
+            }
+
+        composite: Dict[str, Any] = {
+            "size": min(page_size, 500),
+            "sources": [
+                {"source_ip": {"terms": {"field": "topology.source_ip", "missing_bucket": False}}},
+                {"service": {"terms": {"field": "topology.target", "missing_bucket": True}}},
+                {"api": {"terms": {"field": "topology.api", "missing_bucket": True}}},
+                {"caller_service": {"terms": {"field": "topology.caller", "missing_bucket": True}}},
+                {"principal": {"terms": {"field": "topology.principal", "missing_bucket": True}}},
+            ],
+        }
+        if after_key:
+            composite["after"] = after_key
+
+        body = {
+            "size": 0,
+            "runtime_mappings": runtime,
+            "query": {"bool": {"filter": filters}},
+            "aggs": {
+                "ips": {
+                    "composite": composite,
+                    "aggs": {
+                        "p95_latency": {"percentiles": {"field": "topology.duration_ms", "percents": [95]}},
+                        "request_bytes": {"sum": {"field": "topology.request_bytes"}},
+                        "response_bytes": {"sum": {"field": "topology.response_bytes"}},
+                        "errors": {
+                            "filter": {
+                                "bool": {
+                                    "should": [
+                                        {"range": {"http.response.status_code": {"gte": 400}}},
+                                        {"range": {"http_status": {"gte": 400}}},
+                                        {"term": {"event.outcome": "failure"}},
+                                    ],
+                                    "minimum_should_match": 1,
+                                }
+                            }
+                        },
+                    },
+                }
+            },
+        }
+
+        try:
+            with httpx.Client(
+                base_url=self._es_repo.url,
+                verify=self._es_repo.verify_tls,
+                timeout=self._es_repo.timeout,
+                headers=self._es_repo._get_headers(),
+                auth=self._es_repo._get_auth(),
+            ) as client:
+                res = client.post(f"/{self._es_repo.index}/_search", json=body)
+                if res.status_code != 200:
+                    log.warning("Elasticsearch IP aggregation failed: %d %s", res.status_code, res.text[:200])
+                    return [], None
+                data = res.json()
+        except Exception as exc:
+            log.warning("Elasticsearch IP aggregation error: %s", exc)
+            return [], None
+
+        agg = data.get("aggregations", {}).get("ips", {})
+        buckets = agg.get("buckets", [])
+        after = agg.get("after_key")
+        next_cursor = None
+        if after and len(buckets) >= page_size:
+            next_cursor = encode_cursor([
+                str(after.get("source_ip") or ""),
+                str(after.get("service") or ""),
+                str(after.get("api") or ""),
+                str(after.get("caller_service") or ""),
+                str(after.get("principal") or ""),
+            ])
+
+        rows = []
+        rows_to_cache = []
+        now_ms = int(time.time() * 1000)
+        bucket_start = (start_ms // 300000) * 300
+
+        for b in buckets:
+            key = b.get("key") or {}
+            source_ip = str(key.get("source_ip") or "").strip()
+            if not source_ip or source_ip in ("unavailable", "unknown"):
+                continue
+            row_service = str(key.get("service") or "unknown").strip()
+            row_api = str(key.get("api") or "unknown").strip()
+            row_caller = str(key.get("caller_service") or "").strip()
+            row_principal = str(key.get("principal") or "-anonymous-").strip()
+            requests = int(b.get("doc_count") or 0)
+            errors = int((b.get("errors") or {}).get("doc_count") or 0)
+            p95 = float((b.get("p95_latency") or {}).get("values", {}).get("95.0") or 0.0)
+            req_b = int((b.get("request_bytes") or {}).get("value") or 0)
+            resp_b = int((b.get("response_bytes") or {}).get("value") or 0)
+
+            role, label, confidence = classify_source_ip_role(source_ip)
+            is_lb = 1 if role == "load_balancer" else 0
+
+            if filter_name == "lb" and not is_lb:
+                continue
+            if filter_name == "direct" and is_lb:
+                continue
+            if filter_name == "high_error" and (requests == 0 or errors / requests < 0.1):
+                continue
+
+            row_dict = {
+                "source_ip": source_ip,
+                "service": row_service,
+                "api": row_api,
+                "caller_service": row_caller,
+                "principal": row_principal,
+                "request_count": requests,
+                "error_count": errors,
+                "p95_latency_ms": p95,
+                "request_bytes": req_b,
+                "response_bytes": resp_b,
+                "first_seen_ms": start_ms,
+                "last_seen_ms": end_ms,
+                "is_load_balancer": is_lb,
+                "source_ip_role": role,
+                "role_label": label,
+                "attribution_confidence": confidence,
+                "is_new_ip": 0,
+            }
+            rows.append(row_dict)
+
+            rows_to_cache.append([
+                bucket_start, row_principal, source_ip, row_service, row_api, row_caller,
+                requests, errors, 0, 0, 0, 0, p95, req_b, resp_b,
+                start_ms, end_ms, is_lb, role, label, confidence, 0, now_ms,
+            ])
+
+        if rows_to_cache and self.db_path is None:
+            try:
+                with get_connection(self.db_path) as db:
+                    cols = [
+                        "bucket_start", "principal", "source_ip", "service", "api", "caller_service",
+                        "request_count", "error_count", "auth_failure_count", "http_4xx_count",
+                        "http_5xx_count", "timeout_count", "p95_latency_ms", "request_bytes",
+                        "response_bytes", "first_seen_ms", "last_seen_ms", "is_load_balancer",
+                        "source_ip_role", "role_label", "attribution_confidence", "is_new_ip",
+                        "updated_at_ms",
+                    ]
+                    db.client.insert("topology_principal_ip_5m", rows_to_cache, column_names=cols)
+            except Exception as e:
+                log.debug("Caching ES IP rollups to ClickHouse skipped: %s", e)
+
+        return rows, next_cursor
 
     # ------------------------------------------------------------------
     # Elasticsearch server-side aggregation path

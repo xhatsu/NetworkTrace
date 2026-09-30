@@ -33,7 +33,7 @@ type TopologyEdge = { id:string; source:string; target:string; source_name:strin
 type Relation = {id:string; caller_id:string|null; target_id:string; api_id:string|null; principal_id:string|null; edge_id:string|null};
 type IpEvidence = { relationship_id:string; source_ip:string; role:string; first_seen_ms:number; last_seen_ms:number; observed_windows:number; strength:number };
 type TopologyResponse = {status:string; source:string; environment:string; environments:string[]; version:string|null; through_ms:number|null; nodes:TopologyNode[]; edges:TopologyEdge[]; entities:TopologyNode[]; relations:Relation[]; ip_associations:IpEvidence[]; backend:string; truncated:boolean; total_services:number; total_edges:number; total_relations:number};
-type DetailResponse = {entity:TopologyNode|null; metrics:Metrics; series:Array<{timestamp_ms:number;tps:number}>; version:string};
+type DetailResponse = {entity:TopologyNode|null; metrics:Metrics; series:Array<{timestamp_ms:number;tps:number;expected_tps?:number|null}>; version:string};
 
 type Selection =
   | { kind: "node"; node: TopologyNode }
@@ -56,6 +56,8 @@ function formatCompactTps(value: number): string {
   return n(value,value<1?4:2);
 }
 
+const LEARNED_WINDOW_MS=300_000;
+
 function LearningState({metrics}:{metrics:Metrics}) {
   const {t}=useI18n();
   const stale=!metrics.last_seen_ms||Date.now()-metrics.last_seen_ms>30*60_000;
@@ -63,11 +65,13 @@ function LearningState({metrics}:{metrics:Metrics}) {
   return <span className={elevated?'text-[#ff9830]':'text-[#a7a9ab]'}>{stale?t('No recent observation','Chưa có quan sát gần đây'):elevated?t('TPS above expected','TPS cao hơn dự kiến'):metrics.learning.ready?t('Pattern learned','Đã học mẫu hành vi'):t('Learning traffic','Đang học lưu lượng')}</span>;
 }
 
+/** Learned timestamps mark the start of a five-minute window; age counts from its end. */
 function ObservationAge({at}:{at?:number|null}) {
   const {t}=useI18n();
-  const minutes=Math.max(0,Math.floor((Date.now()-(at||0))/60000));
+  const end=at?Math.min(Date.now(),at+LEARNED_WINDOW_MS):0;
+  const minutes=Math.max(0,Math.floor((Date.now()-end)/60000));
   const label=!at?t('Not available','Chưa có'):minutes<1?t('Just now','Vừa xong'):minutes<60?`${minutes} ${t('min ago','phút trước')}`:minutes<1440?`${Math.floor(minutes/60)} ${t('h ago','giờ trước')}`:`${Math.floor(minutes/1440)} ${t('days ago','ngày trước')}`;
-  return <span title={formatTime(at)}>{label}</span>;
+  return <span title={at?`${formatTime(at)} – ${formatTime(end)}`:undefined}>{label}</span>;
 }
 
 function edgePath(source: Position, target: Position): string {
@@ -169,14 +173,15 @@ function ServiceNodeCard({
   );
 }
 
-function TpsLineGraph({ data, compact = false }: { data: Array<{ timestamp_ms: number; tps: number }>; compact?: boolean }) {
+function TpsLineGraph({ data, compact = false }: { data: Array<{ timestamp_ms: number; tps: number; expected_tps?: number | null }>; compact?: boolean }) {
+  const { t } = useI18n();
   const width = 320;
   const height = 128;
   const left = 34;
   const right = 8;
   const top = 8;
   const bottom = 22;
-  const maxTps = (Math.max(0, ...data.map((point) => point.tps)) || 1);
+  const maxTps = (Math.max(0, ...data.flatMap((point) => [point.tps, point.expected_tps ?? 0])) || 1);
   const plotWidth = width - left - right;
   const plotHeight = height - top - bottom;
   const coordinates = data.map((point) => {
@@ -185,19 +190,29 @@ function TpsLineGraph({ data, compact = false }: { data: Array<{ timestamp_ms: n
     return { x, y };
   });
   const smoothPath=coordinates.map((point,index)=>`${index===0||data[index].timestamp_ms-data[index-1].timestamp_ms>FIVE_MINUTE_MS?'M':'L'} ${point.x.toFixed(1)} ${point.y.toFixed(1)}`).join(' ');
+  const expectedCoordinates = data.map((point) => ({
+    x: left + ((point.timestamp_ms-data[0].timestamp_ms) / Math.max(1,data[data.length-1].timestamp_ms-data[0].timestamp_ms)) * plotWidth,
+    y: top + plotHeight - ((point.expected_tps ?? 0) / maxTps) * plotHeight,
+  }));
+  const expectedPath = expectedCoordinates.map((point,index)=>`${index===0||data[index].timestamp_ms-data[index-1].timestamp_ms>FIVE_MINUTE_MS?'M':'L'} ${point.x.toFixed(1)} ${point.y.toFixed(1)}`).join(' ');
   const firstTime = data[0]?.timestamp_ms;
   const lastTime = data[data.length - 1]?.timestamp_ms;
   const shortTime = (value: number) => new Date(value).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
 
   return (
     <div className={`${compact ? "h-32" : "h-44"} rounded border border-[#303449] bg-[#10121c] px-2 pb-2 pt-3`} data-testid="topology-tps-chart">
+      <div className="mb-1 flex items-center justify-end gap-3 text-[9px] text-[#94a3b8]" aria-label={t('TPS chart legend','Chú giải biểu đồ TPS')}>
+        <span className="inline-flex items-center gap-1"><i className="h-px w-4 bg-sky-400" />{t('Observed','Quan sát')}</span>
+        {data.some((point) => point.expected_tps != null) && <span className="inline-flex items-center gap-1"><i className="w-4 border-t border-dashed border-purple-400" />{t('Expected','Dự kiến')}</span>}
+      </div>
       <svg className="h-full w-full" viewBox={`0 0 ${width} ${height}`} role="img" aria-label="TPS time-series line graph" preserveAspectRatio="none">
         {[0, 0.5, 1].map((ratio) => {
           const y = top + plotHeight * ratio;
           const value = maxTps * (1 - ratio);
           return <g key={ratio}><line x1={left} y1={y} x2={width - right} y2={y} stroke="#25293a" strokeWidth="1" /><text x={left - 5} y={y + 3} fill="#64748b" fontSize="10" textAnchor="end">{n(value, maxTps < 1 ? 3 : 1)}</text></g>;
         })}
-        {coordinates.length > 1 && <path className="time-series-curve" d={smoothPath} fill="none" stroke="#38bdf8" strokeLinejoin="round" strokeLinecap="round" vectorEffect="non-scaling-stroke" />}
+        {expectedCoordinates.length > 1 && data.some((point) => point.expected_tps != null) && <path d={expectedPath} fill="none" stroke="#c084fc" strokeDasharray="6 4" strokeOpacity="0.95" strokeWidth="1.8" strokeLinejoin="round" strokeLinecap="round" vectorEffect="non-scaling-stroke"><title>{t('Expected TPS','TPS dự kiến')}</title></path>}
+        {coordinates.length > 1 && <path className="time-series-curve" d={smoothPath} fill="none" stroke="#38bdf8" strokeWidth="1.5" strokeLinejoin="round" strokeLinecap="round" vectorEffect="non-scaling-stroke"><title>{t('Observed TPS','TPS quan sát')}</title></path>}
         {data.map((point, index) => {
           const coordinate = coordinates[index];
           return <circle key={`${point.timestamp_ms}-${index}`} cx={coordinate.x} cy={coordinate.y} r="2" fill="#38bdf8"><title>{`${formatTime(point.timestamp_ms)} · ${n(point.tps, 2)} TPS · 5m bucket`}</title></circle>;
@@ -219,6 +234,7 @@ function GraphSurface({
   onClearSelection,
   onMoveNode,
   onToggleExpand,
+  onDoubleClickNode,
   expanded,
   expandEnabled,
   focusRequest,
@@ -235,6 +251,7 @@ function GraphSurface({
   expanded: Set<string>;
   expandEnabled: boolean;
   focusRequest?: { nodeId: string; token: number };
+  onDoubleClickNode: (node: TopologyNode) => void;
 }) {
   const { t } = useI18n();
   const [zoom, setZoom] = useState(1);
@@ -274,7 +291,7 @@ function GraphSurface({
   return (
     <div
       ref={surfaceRef}
-      className="absolute inset-0 touch-none overflow-hidden bg-[#0c0d14] cursor-grab active:cursor-grabbing"
+      className="absolute inset-0 touch-none select-none overflow-hidden bg-[#0c0d14] cursor-grab active:cursor-grabbing"
       aria-label={t("Interactive service topology")}
       onWheel={(event) => { event.preventDefault(); changeZoom(event.deltaY < 0 ? 0.1 : -0.1); }}
       onPointerDown={(event) => {
@@ -345,10 +362,11 @@ function GraphSurface({
             data-topology-object="true"
             data-topology-node="true"
             data-topology-node-type={node.type}
-            className={`absolute ${node.type === "service" ? "" : "w-44"} -translate-x-1/2 -translate-y-1/2 cursor-move`}
+            className={`absolute select-none ${node.type === "service" ? "" : "w-44"} -translate-x-1/2 -translate-y-1/2 cursor-move`}
             style={{ left: `${pos.x / 10}%`, top: `${pos.y / 6.2}%`, width: node.type === "service" ? SERVICE_NODE_WIDTH : undefined, zIndex: isSelected ? 30 : 10 }}
             onPointerDown={(event) => {
               if (event.button !== 0 || (event.target as Element).closest("a, [data-node-drag-ignore='true']")) return;
+              event.preventDefault();
               nodeDrag.current = { nodeId: node.id, startX: event.clientX, startY: event.clientY, origin: pos, moved: false };
             }}
             onPointerMove={(event) => {
@@ -380,6 +398,7 @@ function GraphSurface({
             }}
             onPointerCancel={() => { nodeDrag.current = null; suppressCanvasClick.current = false; }}
             onLostPointerCapture={() => { nodeDrag.current = null; }}
+            onDoubleClick={(event) => { event.preventDefault(); event.stopPropagation(); onDoubleClickNode(node); }}
           >
             {node.type === "service" ? (
               <ServiceNodeCard
@@ -708,6 +727,23 @@ export function InteractiveTopologyPage() {
     setDirectoryOpen(nextMode === "user-first");
   }
 
+  function doubleClickNode(node: TopologyNode) {
+    if (node.type === 'service') toggleExpand(node);
+    else if (node.type === 'api') {
+      const service = services.find((item) => item.name === node.service);
+      if (service) {
+        setMode('service-first');
+        setExpandedServiceId(service.id);
+        setPathSelection((current) => ({ ...current, service }));
+      }
+      chooseApi(node);
+    } else {
+      setMode('user-first');
+      setDirectoryOpen(true);
+      chooseDirectoryPrincipal(node);
+    }
+  }
+
   function toggleExpand(node: TopologyNode) {
     if (expandedServiceId === node.id) {
       setExpandedServiceId(undefined);
@@ -813,6 +849,7 @@ export function InteractiveTopologyPage() {
           onClearSelection={clearNavigation}
           onMoveNode={(nodeId, position) => setPositions((current) => ({ ...current, [nodeId]: position }))}
           onToggleExpand={toggleExpand}
+          onDoubleClickNode={doubleClickNode}
           expanded={new Set(expandedServiceId ? [expandedServiceId] : [])}
           expandEnabled={mode === "service-first"}
           focusRequest={focusRequest}

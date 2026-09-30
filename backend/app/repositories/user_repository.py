@@ -1168,14 +1168,14 @@ class UserRepository:
                     "attribution_confidence": confidence, "is_load_balancer": role == "load_balancer",
                 })
             recent_rows = db.execute(f"""
-                SELECT bucket_start*1000 timestamp_ms, caller_service, target_service, api operation,
+                SELECT bucket_start*1000 timestamp_ms, caller_service, service AS target_service, api operation,
                        source_ip, sum(request_count) requests, sum(error_count) errors,
                        sum(auth_failure_count) auth_failure_count,
                        sum(http_4xx_count) http_4xx_count, sum(http_5xx_count) http_5xx_count,
                        max(p95_latency_ms) duration_ms
                 FROM topology_principal_ip_5m FINAL
                 WHERE principal IN ('unknown','-anonymous-','') AND bucket_start>=? AND bucket_start<?
-                GROUP BY bucket_start,caller_service,target_service,api,source_ip
+                GROUP BY bucket_start,caller_service,service,api,source_ip
                 ORDER BY timestamp_ms DESC LIMIT ?
             """, (start_sec, end_sec, max(1, min(limit, 200)))).fetchall()
             recent_rollups = [{**dict(row), "caller_ip": row["source_ip"],

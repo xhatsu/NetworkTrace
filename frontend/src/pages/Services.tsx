@@ -117,6 +117,7 @@ type Detail = {
 
 type ServiceSeriesPoint = SeriesPoint & {
   requests: number;
+  expected_tps?: number;
   request_bytes_per_second?: number;
   response_bytes_per_second?: number;
   bandwidth_bytes_per_second?: number;
@@ -165,7 +166,7 @@ function normalizeServiceBandwidth(rows: unknown) {
 
 function mergeServiceBandwidth(series: ServiceSeriesPoint[], bandwidthSeries: ReturnType<typeof normalizeServiceBandwidth>) {
   const points = new Map<number, Record<string, number>>();
-  series.forEach((point) => points.set(point.timestamp_ms, { ...point, observed_tps: point.tps, baseline_tps: point.baseline_rps }));
+  series.forEach((point) => points.set(point.timestamp_ms, { ...point, observed_tps: point.tps, expected_tps: point.baseline_rps }));
   bandwidthSeries.forEach((point) => {
     points.set(point.timestamp_ms, { ...(points.get(point.timestamp_ms) || { timestamp_ms: point.timestamp_ms }), ...point });
   });
@@ -208,6 +209,7 @@ function normalizeServiceSeries(rows: unknown): ServiceSeriesPoint[] {
         tps,
         requests,
         baseline_rps: Number(row.baseline_rps ?? 0),
+        expected_tps: Number(row.baseline_rps ?? row.baseline_tps ?? 0),
         p50_ms: Number(row.p50_ms ?? row.latency_p50 ?? row.latency_avg ?? 0),
         p95_ms: Number(row.p95_ms ?? row.latency_p95 ?? 0),
         p99_ms: Number(row.p99_ms ?? row.latency_p99 ?? 0),
@@ -256,11 +258,11 @@ function ServicePerformancePanel({
   const currentResponseRate = serviceNumber(bandwidthMetrics.response_bytes_per_second);
   const currentBandwidth = serviceNumber(bandwidthMetrics.bandwidth_bytes_per_second);
   const hasBandwidth = bandwidthSeries.some((point) => point.bandwidth_available > 0 || point.request_bytes_samples + point.response_bytes_samples > 0);
-  const hasBaselineTps = series.some((point) => serviceNumber(point.baseline_rps) > 0);
+  const hasExpectedTps = series.some((point) => serviceNumber(point.expected_tps) > 0);
 
   const tpsLines: ServiceChartLine[] = [
     { dataKey: "observed_tps", label: t("Observed TPS"), color: "#5794f2", width: 2.4 },
-    ...(hasBaselineTps ? [{ dataKey: "baseline_tps", label: t("Baseline TPS"), color: "#7b7d80", dashed: true, width: 1.5 }] : []),
+    ...(hasExpectedTps ? [{ dataKey: "expected_tps", label: t("Expected TPS"), color: "#a78bfa", dashed: true, width: 1.5 }] : []),
   ];
   const seriesMaximum = (lines: ServiceChartLine[]) => chartSeries.reduce(
     (maximum, point) => lines.reduce((value, line) => Math.max(value, serviceNumber(point[line.dataKey])), maximum), 0,
@@ -371,7 +373,7 @@ function ServicePerformancePanel({
       </div>
 
       {!series.length && <p className="text-xs text-[#a7a9ab]">{t("No telemetry points in the selected window")}</p>}
-      <Panel title={hasBaselineTps ? t("TPS vs Baseline") : t("TPS")} subtitle={t("TPS on left · selected KPI on right")}>
+      <Panel title={hasExpectedTps ? t("TPS vs Expected") : t("TPS")} subtitle={t("TPS on left · selected KPI on right")}>
         <div className="space-y-0">
           <div className="flex h-8 min-w-0 items-center gap-4 overflow-x-auto whitespace-nowrap px-3 text-[10px] text-[#a7a9ab]">
             {chartLegend.map(({ label, color, dashed }) => <span key={label}><span className={`mr-1 inline-block w-3 border-t-2 align-middle ${dashed ? "border-dashed" : ""}`} style={{ borderColor: color }} />{label}</span>)}
@@ -555,7 +557,7 @@ export function ServiceDetailPage() {
         )}
       </Panel>
 
-        <ServiceAccessBoard key={`${name}:${qs}`} service={name} accounts={accounts} filters={filters} />
+        <ServiceAccessBoard key={`${name}:${qs}`} service={name} accounts={accounts} operations={operations} filters={filters} />
       </div>
       <div className="mt-5 flex flex-wrap gap-2 border-b border-[#2a2d30] pb-3" role="group" aria-label={t("Service detail views", "Góc nhìn Service")}>
         {[["operations", "APIs", operations.length], ["users", t("Users"), serviceUsers.data?.total ?? "—"], ["instances", t("Instances", "Instance"), instances.length], ["traces", t("Traces"), traces.length]].map(([value, label, count]) => <button key={value} aria-pressed={detailTab === value} className={`rounded border px-3 py-2 text-xs ${detailTab === value ? "border-[#5794f2] bg-[#5794f2]/10 text-[#5794f2]" : "border-[#34373b] text-[#a7a9ab] hover:text-white"}`} onClick={() => setDetailTab(String(value))}>{label} <span className="ml-2 font-mono">{count}</span></button>)}

@@ -77,12 +77,12 @@ export function ChangeVisualEvidence({ episode, filters }: { episode: Episode; f
       subtitle={`${metricLabel} · ${t("one hour before and after", "một giờ trước và sau")}`}
       action={<span className="font-mono text-[11px] text-[#a7a9ab]">{filters.timezone}</span>}>
       <div className="grid grid-cols-2 border-b border-[#2a2d30] text-xs">
-        <div className="border-r border-[#2a2d30] px-3 py-2"><div className="text-[10px] uppercase text-[#a7a9ab]">{t("Detector reference", "Tham chiếu detector")}</div><div className="mt-1 font-mono text-[#d8d9da]">{comparisonBefore}</div></div>
-        <div className="px-3 py-2"><div className="text-[10px] uppercase text-[#a7a9ab]">{t("Observed value", "Giá trị quan sát")}</div><div className="mt-1 font-mono text-[#56b9a8]">{comparisonAfter}</div></div>
+        <div className="border-r border-[#2a2d30] px-3 py-2"><div className="text-[10px] uppercase text-[#a7a9ab]">{t("Baseline", "Baseline")}</div><div className="mt-1 font-mono text-[#d8d9da]">{comparisonBefore}</div></div>
+        <div className="px-3 py-2"><div className="text-[10px] uppercase text-[#a7a9ab]">{t("Observed", "Quan sát được")}</div><div className="mt-1 font-mono text-[#56b9a8]">{comparisonAfter}</div></div>
       </div>
       {graphQuery.isLoading ? <div className="grid h-48 place-items-center text-xs text-[#a7a9ab]">{t("Loading…", "Đang tải…")}</div>
         : graphQuery.isError ? <div className="grid h-48 place-items-center text-xs text-[#a7a9ab]">{t("Metric series unavailable", "Chưa có chuỗi metric")}</div>
-          : chartPoints.length ? <div className="h-52 px-2 py-2" role="img" aria-label={`${metricLabel}: ${comparisonBefore} ${t("Detector reference", "Tham chiếu detector")}, ${comparisonAfter} ${t("Observed value", "Giá trị quan sát")}`}>
+          : chartPoints.length ? <div className="h-52 px-2 py-2" role="img" aria-label={`${metricLabel}: ${comparisonBefore} ${t("Baseline", "Baseline")}, ${comparisonAfter} ${t("Observed", "Quan sát được")}`}>
             <ResponsiveContainer width="100%" height="100%"><LineChart data={chartPoints} margin={{ top: 6, right: 12, bottom: 2, left: 0 }}>
               <CartesianGrid stroke="#303236" vertical={false} />
               <XAxis dataKey="timestamp_ms" type="number" domain={[start, end]} tickFormatter={(value) => formatClock(Number(value), filters.timezone)} tick={{ fill: "#a7a9ab", fontSize: 11 }} tickLine={false} axisLine={false} minTickGap={36} />
@@ -90,7 +90,7 @@ export function ChangeVisualEvidence({ episode, filters }: { episode: Episode; f
               <Tooltip {...chartTooltip} labelFormatter={(value) => formatClock(Number(value), filters.timezone)} formatter={(value: unknown, name: unknown) => [formatMetric(Number(value)), String(name)]} />
               <ReferenceLine x={pivot} stroke="#ff9830" strokeWidth={1.5} strokeDasharray="4 3" label={{ value: t("Latest signal", "Tín hiệu mới nhất"), fill: "#ff9830", fontSize: 10, position: "insideTopRight" }} />
               <Line type="linear" dataKey="observed" name={metricLabel} stroke="#5794f2" strokeWidth={2} dot={false} isAnimationActive={false} connectNulls={false} />
-              {metric === "tps" && <Line type="linear" dataKey="baseline" name={t("Current reference", "Tham chiếu hiện tại")} stroke="#a7a9ab" strokeDasharray="4 4" dot={false} isAnimationActive={false} />}
+              {metric === "tps" && <Line type="linear" dataKey="baseline" name={t("Expected TPS", "TPS dự kiến")} stroke="#a7a9ab" strokeDasharray="4 4" dot={false} isAnimationActive={false} />}
             </LineChart></ResponsiveContainer>
           </div> : <div className="grid h-48 place-items-center text-xs text-[#a7a9ab]">{t("No metric samples around this change", "Không có mẫu metric quanh thay đổi này")}</div>}
       {chartPoints.length > 0 && <div className="flex flex-wrap items-center gap-3 px-3 pb-2 text-[10px] text-[#a7a9ab]">
@@ -100,7 +100,7 @@ export function ChangeVisualEvidence({ episode, filters }: { episode: Episode; f
       </div>}
       <p className="border-t border-[#2a2d30] px-3 py-2 text-[10px] leading-4 text-[#a7a9ab]">
         {observedPath || subject} · {t("The values above match the saved detector comparison below. The chart shows one-minute buckets around the latest signal; service traffic detection uses five-minute windows.", "Các giá trị phía trên khớp với so sánh detector đã lưu bên dưới. Biểu đồ hiển thị bucket một phút quanh tín hiệu mới nhất; phát hiện lưu lượng Service dùng cửa sổ năm phút.")}
-        {metric === "tps" && <> {t("The reference line uses the current baseline or a fallback estimate; it is not the baseline saved at detection. TPS and RPS both mean requests per second here.", "Đường tham chiếu dùng Baseline hiện tại hoặc giá trị ước tính thay thế; không phải Baseline đã lưu lúc phát hiện. TPS và RPS ở đây đều là số request mỗi giây.")}</>}
+        {metric === "tps" && <> {t("The expected line uses the current learned/historical expectation or a fallback estimate; it is not the baseline saved at detection. TPS and RPS both mean requests per second here.", "Đường tham chiếu dùng Baseline hiện tại hoặc giá trị ước tính thay thế; không phải Baseline đã lưu lúc phát hiện. TPS và RPS ở đây đều là số request mỗi giây.")}</>}
       </p>
     </Panel>
 

@@ -1,3 +1,4 @@
+import { changeTypes, changeTypeLabel } from "../components/EpisodePrimitives";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Activity, ArrowLeft, ArrowRight, BrainCircuit, Search } from "lucide-react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -31,26 +32,6 @@ import { useI18n } from "../i18n";
 import { ChangeVisualEvidence } from "../components/ChangeVisualEvidence";
 import { EntityLink } from "../components/EntityLink";
 import { entityPath } from "../entityRoutes";
-
-function changeTypes(episode: Episode): string[] {
-  return [...new Set([...(episode.signals || []).map((signal) => signal.type), ...episode.evidence.map((evidence) => evidence.detector)].filter(Boolean).map((type) => type.toLowerCase()))];
-}
-
-function changeTypeLabel(type: string, t: (key: string, fallback?: string) => string) {
-  const labels: Record<string, [string, string]> = {
-    traffic_spike: ["Traffic spike", "Lưu lượng tăng đột biến"], traffic_drop: ["Traffic drop", "Lưu lượng giảm"],
-    latency: ["Latency shift", "Biến động latency"], error_rate: ["Error rate increase", "Tỷ lệ lỗi tăng"],
-    unusual_access: ["Unusual access", "Truy cập bất thường"], unusual_time: ["Unusual execution time", "Thời gian thực thi bất thường"],
-    new_service_edge: ["New service relationship", "Quan hệ Service mới"], new_principal_edge: ["New credential relationship", "Quan hệ tài khoản mới"],
-    user_new_source_ip: ["New source IP", "IP nguồn mới"], ip_new_user: ["New user on IP", "User mới trên IP"],
-    operation_mix_shift: ["Operation mix shift", "Thay đổi cơ cấu API"], caller_principal_switch: ["Credential switch", "Thay đổi tài khoản gọi"],
-    target_fanout_surge: ["Target fanout surge", "Số đích truy cập tăng"], source_fanout_surge: ["Source fanout surge", "Số nguồn truy cập tăng"],
-    principal_rate_surge: ["User traffic surge", "Lưu lượng User tăng"], auth_failure_burst: ["Authentication failures", "Lỗi xác thực tăng"],
-    failure_then_success: ["Failure then success", "Thành công sau nhiều lần lỗi"], source_identity_fanout: ["Multiple source identities", "Nhiều danh tính từ một nguồn"],
-  };
-  const label = labels[type];
-  return label ? t(...label) : t(type, type.replace(/_/g, " "));
-}
 
 function compactValue(value: unknown, unit?: string | null) {
   if (value == null || value === "") return "—";
@@ -181,10 +162,10 @@ export function ChangeDetailPage() {
     [t("API / Operation", "API / Operation"), episode.context.operation || "—"],
   ];
   return (
-    <Page eyebrow={t("Change detail", "Chi tiết thay đổi")} title={episodeTitle(episode, t)} description={episode.summary} actions={<div className="flex flex-wrap gap-2"><button type="button" onClick={() => aiSectionRef.current?.scrollIntoView({ behavior: "smooth", block: "start" })} className="btn border-[#b877d9]/50 text-[#b877d9]"><BrainCircuit size={13} />{t("Investigate", "Điều tra")}</button><button type="button" onClick={() => nav(`/changes?${queryString(filters, { view: searchParams.get("view") || "attention" })}`)} className="btn"><ArrowLeft size={13} />{t("All changes", "Tất cả thay đổi")}</button></div>}>
+    <Page eyebrow={t("Change detail", "Chi tiết thay đổi")} title={episodeTitle(episode, t)} description={t("Review the detected signals, assessment and observed changes.", "Xem tín hiệu đã phát hiện, đánh giá và thay đổi quan sát được.")} actions={<div className="flex flex-wrap gap-2"><button type="button" onClick={() => aiSectionRef.current?.scrollIntoView({ behavior: "smooth", block: "start" })} className="btn border-[#b877d9]/50 text-[#b877d9]"><BrainCircuit size={13} />{t("Investigate", "Điều tra")}</button><button type="button" onClick={() => nav(`/changes?${queryString(filters, { view: searchParams.get("view") || "attention" })}`)} className="btn"><ArrowLeft size={13} />{t("All changes", "Tất cả thay đổi")}</button></div>}>
       <section className={`border-l-4 ${episode.state === "critical" ? "border-[#f2495c]" : episode.state === "needs_attention" ? "border-[#ff9830]" : "border-[#5794f2]"} panel p-4 md:p-5`} aria-label={t("Change summary", "Tóm tắt thay đổi")}>
         <div className="flex flex-wrap items-center gap-2"><EpisodeStatusBadge episode={episode} /><EpisodeWorkflowBadge episode={episode} /><span className="text-[11px] text-[#a7a9ab]">{formatEpisodeTime(episode.last_seen_at, true, filters.timezone)}</span></div>
-        <h2 className="mt-4 max-w-4xl text-xl font-semibold leading-7 text-[#f1f3f5]">{episode.summary || episodeTitle(episode, t)}</h2>
+        <h2 className="mt-4 max-w-4xl text-xl font-semibold leading-7 text-[#f1f3f5]">{episodeTitle(episode, t)}</h2>
         <p className="mt-2 max-w-4xl text-sm leading-6 text-[#c2c6cc]">{episode.explanation}</p>
         <div className="mt-4"><EpisodePath episode={episode} compact /></div>
         <div className="mt-5 grid gap-px overflow-hidden border border-[#2a2d30] bg-[#2a2d30] sm:grid-cols-3">{contextItems.map(([label, value]) => <div key={label} className="bg-[#111217] px-3 py-2.5"><div className="text-[10px] font-semibold uppercase tracking-wide text-[#7b7d80]">{label}</div><div className="mt-1 truncate font-mono text-xs text-[#d8d9da]">{value}</div></div>)}</div>
@@ -193,16 +174,16 @@ export function ChangeDetailPage() {
       <ChangeVisualEvidence episode={episode} filters={filters} />
 
       <section className="mt-4 grid gap-4 lg:grid-cols-[minmax(0,1.4fr)_minmax(280px,.6fr)]">
-        <Panel title={t("The changed pattern", "Mẫu đã thay đổi")} subtitle={t("Saved detector comparison. Service traffic uses a five-minute observation and a learned baseline; merged episodes retain the latest detector values.", "So sánh detector đã lưu. Lưu lượng Service dùng quan sát năm phút và Baseline đã học; episode gộp giữ giá trị detector mới nhất.")}>
-          {primaryHighlight ? <div className="grid gap-4 p-4 sm:grid-cols-[1fr_auto_1fr] sm:items-center"><div><div className="text-[10px] font-semibold uppercase tracking-wide text-[#7b7d80]">{t("Detector reference", "Tham chiếu detector")}</div><div className="mt-2 font-mono text-2xl text-[#a7a9ab]">{compactValue(primaryHighlight.before, primaryHighlight.unit)}</div></div><div className="text-center text-2xl text-[#ff9830]">→</div><div><div className="text-[10px] font-semibold uppercase tracking-wide text-[#ff9830]">{t("Observed value", "Giá trị quan sát")}</div><div className="mt-2 font-mono text-2xl font-semibold text-[#f1f3f5]">{compactValue(primaryHighlight.after, primaryHighlight.unit)}</div>{primaryHighlight.delta != null && <div className="mt-1 font-mono text-xs text-[#ff9830]">{formatHighlightDelta(primaryHighlight, t)}</div>}</div></div> : <div className="p-4 text-sm text-[#a7a9ab]">{t("No primary metric is available. Use the evidence below.", "Chưa có chỉ số chính. Xem bằng chứng bên dưới.")}</div>}
+        <Panel title={t("Observed changes", "Thay đổi quan sát được")} subtitle={t("Saved detector comparison. Service traffic uses a five-minute observation and a learned baseline; merged episodes retain the latest detector values.", "So sánh detector đã lưu. Lưu lượng Service dùng quan sát năm phút và Baseline đã học; episode gộp giữ giá trị detector mới nhất.")}>
+          {primaryHighlight ? <div className="grid gap-4 p-4 sm:grid-cols-[1fr_auto_1fr] sm:items-center"><div><div className="text-[10px] font-semibold uppercase tracking-wide text-[#7b7d80]">{t("Baseline", "Baseline")}</div><div className="mt-2 font-mono text-2xl text-[#a7a9ab]">{compactValue(primaryHighlight.before, primaryHighlight.unit)}</div></div><div className="text-center text-2xl text-[#ff9830]">→</div><div><div className="text-[10px] font-semibold uppercase tracking-wide text-[#ff9830]">{t("Observed", "Quan sát được")}</div><div className="mt-2 font-mono text-2xl font-semibold text-[#f1f3f5]">{compactValue(primaryHighlight.after, primaryHighlight.unit)}</div>{primaryHighlight.delta != null && <div className="mt-1 font-mono text-xs text-[#ff9830]">{formatHighlightDelta(primaryHighlight, t)}</div>}</div></div> : <div className="p-4 text-sm text-[#a7a9ab]">{t("No primary metric is available. Use the evidence below.", "Chưa có chỉ số chính. Xem bằng chứng bên dưới.")}</div>}
           <EpisodeMetricTable episode={episode} />
         </Panel>
-        <Panel title={t("When it happened", "Thời điểm xảy ra")}><div className="space-y-3 p-4 text-xs"><div><div className="text-[10px] uppercase tracking-wide text-[#7b7d80]">{t("Started", "Bắt đầu")}</div><div className="mt-1 font-mono text-[#d8d9da]">{formatEpisodeTime(episode.started_at, true, filters.timezone)}</div></div><div><div className="text-[10px] uppercase tracking-wide text-[#7b7d80]">{t("Last observed", "Quan sát gần nhất")}</div><div className="mt-1 font-mono text-[#d8d9da]">{formatEpisodeTime(episode.last_seen_at, true, filters.timezone)}</div></div><div><div className="text-[10px] uppercase tracking-wide text-[#7b7d80]">{t("Signals grouped", "Tín hiệu đã nhóm")}</div><div className="mt-1 font-mono text-xl text-[#5794f2]">{episode.signal_count}</div></div></div></Panel>
+        <Panel title={t("When it happened", "Thời điểm xảy ra")}><div className="space-y-3 p-4 text-xs"><div><div className="text-[10px] uppercase tracking-wide text-[#7b7d80]">{t("Started", "Bắt đầu")}</div><div className="mt-1 font-mono text-[#d8d9da]">{formatEpisodeTime(episode.started_at, true, filters.timezone)}</div></div><div><div className="text-[10px] uppercase tracking-wide text-[#7b7d80]">{t("Last observed", "Quan sát gần nhất")}</div><div className="mt-1 font-mono text-[#d8d9da]">{formatEpisodeTime(episode.last_seen_at, true, filters.timezone)}</div></div><div><div className="text-[10px] uppercase tracking-wide text-[#7b7d80]">{t("Detected signals", "Tín hiệu đã phát hiện")}</div><div className="mt-1 font-mono text-xl text-[#5794f2]">{episode.signal_count}</div></div></div></Panel>
       </section>
 
       <div className="mt-4 grid gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(300px,.7fr)]">
         <div className="space-y-4"><Panel title={t("Signal timeline", "Dòng thời gian tín hiệu")} subtitle={t("What was observed, in order.", "Những gì được quan sát theo thứ tự.")}><EpisodeTimeline episode={episode} timezone={filters.timezone} /></Panel><Panel title={t("Relationship path", "Đường quan hệ")}><div className="p-4"><EpisodePath episode={episode} /></div></Panel></div>
-        <div className="space-y-4"><Panel title={t("Why this is a change", "Vì sao đây là thay đổi")}><div className="space-y-3 p-4">{(episode.abnormality?.reasons || [episode.explanation]).map((reason) => <div key={reason} className="border-l-2 border-[#5794f2] pl-3 text-xs leading-5 text-[#d8d9da]">{reason}</div>)}</div></Panel><Panel title={t("Supporting evidence", "Bằng chứng hỗ trợ")}><EpisodeEvidence episode={episode} /></Panel><EpisodeBaselineNote episode={episode} /></div>
+        <div className="space-y-4"><Panel title={t("Why this is a change", "Vì sao đây là thay đổi")}><div className="space-y-3 p-4">{(episode.abnormality?.reasons || [episode.explanation]).map((reason) => <div key={reason} className="border-l-2 border-[#5794f2] pl-3 text-xs leading-5 text-[#d8d9da]">{reason}</div>)}</div></Panel><Panel title={t("Detected signals", "Tín hiệu đã phát hiện")}><EpisodeEvidence episode={episode} /></Panel><EpisodeBaselineNote episode={episode} /></div>
       </div>
 
       <Panel title={t("Next action", "Thao tác tiếp theo")} subtitle={t("Choose the operator outcome for this change.", "Chọn cách xử lý cho thay đổi này.")} className="mt-4"><div className="flex flex-wrap gap-2 p-3"><button type="button" onClick={() => nav(`/traces?${queryString(filters, { principal: episode.subject.type === "user" ? episode.subject.name : undefined, service: episode.context.target || undefined })}`)} className="btn"><Activity size={13} />{t("View related traces", "Xem Trace liên quan")}</button><EntityLink entity={episode.subject.type === "user" ? { kind: "user", principal: episode.subject.name } : { kind: "service", name: episode.subject.name }} className="btn"><ArrowRight size={13} />{t(`Open ${episode.subject.type}`, `Mở ${episode.subject.type}`)}</EntityLink><button type="button" disabled={decision.isPending} onClick={() => decision.mutate("expected")} className="btn text-[#73bf69]">{canMarkEpisodeExpected(episode) ? t("Mark expected", "Đánh dấu dự kiến") : t("Suppress", "Ẩn finding")}</button><button type="button" disabled={decision.isPending} onClick={() => decision.mutate("investigate")} className="btn text-[#ff9830]">{t("Keep monitoring", "Tiếp tục theo dõi")}</button><button type="button" disabled={decision.isPending} onClick={() => decision.mutate("resolve")} className="btn">{t("Resolve", "Đã xử lý")}</button></div>{decision.isError && <div className="border-t border-[#2a2d30] p-3 text-xs text-[#f2495c]">{decision.error instanceof Error ? decision.error.message : t("Decision could not be saved", "Không thể lưu quyết định")}</div>}{decision.isSuccess && <div className="border-t border-[#2a2d30] p-3 text-xs text-[#73bf69]">{t("Decision saved", "Đã lưu quyết định")}</div>}</Panel>

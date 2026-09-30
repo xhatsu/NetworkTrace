@@ -6,16 +6,21 @@ learning agent. Scores express observation surprise, never authorization.
 from __future__ import annotations
 import copy
 import math
+import statistics
 from collections import defaultdict
 from backend.app.services.learned_behavior import DAY, BUCKET, digest, UNKNOWN
 
-ALGORITHM = 'online-behavior-graph-v3'
+ALGORITHM = 'online-behavior-graph-v4'
 HALF_LIFE_MS = 7 * DAY
 ALPHA = 0.05
 MIN_RATE_SAMPLES = 12
 MAX_NODES = 40000
 MAX_EDGES = 50000
 MAX_RELATIONS = 5000
+# A sustained new level is accepted as the reference after this many recent
+# eligible windows, most of them material surges (3 hours of observed windows).
+LEVEL_SHIFT_WINDOWS = 36
+LEVEL_SHIFT_FRACTION = 0.75
 
 
 def decayed_support(state: dict | None, at: int) -> float:
@@ -109,12 +114,14 @@ def reinforce(state,at,requests,metadata=None,eligible=True):
     state['last_score']={'at':at,'observed_tps':rate,'expected_tps':expected,'stddev_tps':sigma,
         'tps_ready':ready,'tps_z':z,'tps_surprise':1-math.exp(-z/6) if ready else None,
         'structural_surprise':structural,'new':before is None,'material_tps_surge':material,
-        'prior_windows':before['observed_windows'] if before else 0}
+        'prior_windows':before['observed_windows'] if before else 0,'level_shift':False}
     state['last_tps']=rate
     state['surge_streak']=(before.get('surge_streak',0)+1 if before and before['last_seen']==at-BUCKET else 1) if material else 0
     # Familiarity always reflects observations. A surprising or ineligible window
     # cannot train the traffic reference used to score that same event.
-    if eligible and not material:
+    # A persistent new level replaces the reference instead of being withheld forever.
+    shifted=eligible and adapt_level(state,rate,material,at)
+    if eligible and not material and not shifted:
         if not state['rate_samples']:
             state['mean_tps']=rate;state['variance_tps']=0.0
         else:
@@ -125,8 +132,34 @@ def reinforce(state,at,requests,metadata=None,eligible=True):
             state['mean_tps']+=ALPHA*delta
             state['variance_tps']=(1-ALPHA)*(state['variance_tps']+ALPHA*delta*delta)
         state['rate_samples']+=1
-    else:state['withheld_rate_windows']+=1
+    elif not shifted:state['withheld_rate_windows']+=1
     return state
+
+
+def adapt_level(state,rate,material,at):
+    """Accept a persistent new traffic level instead of withholding it forever.
+
+    Only eligible windows count. The buffer exists only while recent material
+    surges are present, so normal entities carry no extra state.
+    """
+    recent=(state.get('shift_buffer') or [])+[[rate,material]]
+    recent=recent[-LEVEL_SHIFT_WINDOWS:]
+    surges=sum(1 for _,m in recent if m)
+    if not surges:
+        state.pop('shift_buffer',None);return False
+    if len(recent)<LEVEL_SHIFT_WINDOWS or surges<LEVEL_SHIFT_FRACTION*LEVEL_SHIFT_WINDOWS:
+        state['shift_buffer']=recent;return False
+    rates=[r for r,_ in recent]
+    level=statistics.median(rates)
+    spread=1.4826*statistics.median(abs(r-level) for r in rates)
+    state['level_shift']={'at':at,'from_tps':state['mean_tps'],'to_tps':level,'windows':len(rates)}
+    state['level_shifts']=state.get('level_shifts',0)+1
+    state['mean_tps']=level;state['variance_tps']=spread*spread
+    state['rate_samples']+=1
+    state['surge_streak']=0
+    state['last_score']['level_shift']=True
+    state.pop('shift_buffer',None)
+    return True
 
 
 def advance_graph(previous: dict | None, days: list[dict], source: str) -> dict:
@@ -172,6 +205,12 @@ def advance_graph(previous: dict | None, days: list[dict], source: str) -> dict:
     return state
 
 
+def level_shift_starts(graph):
+    """Relationship ID -> window where its accepted new traffic level began."""
+    return {rid:r['level_shift']['at']-(r['level_shift']['windows']-1)*BUCKET
+            for rid,r in graph['relations'].items() if r.get('level_shift')}
+
+
 def relationship_view(graph,profile,as_of=None):
     relation=graph['relations'].get(profile['id'])
     if not relation:return None
@@ -181,6 +220,7 @@ def relationship_view(graph,profile,as_of=None):
             'effective_windows':decayed_support(relation,at),'observed_windows':relation['observed_windows'],
             'expected_tps':relation['mean_tps'],'rate_samples':relation['rate_samples'],
             'withheld_rate_windows':relation['withheld_rate_windows'],
+            'level_shift':relation.get('level_shift'),
             'last_score':relation['last_score'],'surge_streak':relation['surge_streak'],
             'emergence':relation['emergence'],
             'through_ms':graph['through_ms']}

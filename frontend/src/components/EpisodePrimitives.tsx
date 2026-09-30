@@ -142,8 +142,8 @@ export function episodeStatusLabel(state: Episode["state"], t: (key: string, fal
   if (state === "expected") return t("Expected", "Đã xác nhận");
   if (state === "critical") return t("Critical", "Nghiêm trọng");
   if (state === "needs_attention") return t("Needs attention", "Cần chú ý");
-  if (state === "watch") return t("Watch", "Theo dõi thêm");
-  return t("Informational change", "Thay đổi thông tin");
+  if (state === "watch") return t("Watch", "Theo dõi");
+  return t("Informational", "Thông tin");
 }
 
 export function episodeStatusClass(state: Episode["state"]) {
@@ -164,22 +164,46 @@ export function episodeCategory(episode: Episode) {
   return "access";
 }
 
-function changeTitle(episode: Episode, t: (key: string, fallback?: string) => string) {
-  const type = [episode.signals?.[0]?.type, ...episode.evidence.map((item) => item.detector)].join(" ").toLowerCase();
-  const operation = episode.context.operation;
-  const target = episode.context.target;
-  if (type.includes("new_operation") && operation) return `${t("Started using", "Bắt đầu sử dụng")} ${operation}`;
-  if ((type.includes("new_target") || type.includes("new_service")) && target) return `${t("Started accessing", "Bắt đầu truy cập")} ${target}`;
-  if (type.includes("latency")) return t("Response latency increased above normal", "Độ trễ phản hồi tăng cao hơn mức bình thường");
-  if (type.includes("error") || type.includes("failure")) return t("HTTP errors increased significantly", "Lỗi HTTP tăng đáng kể");
-  if (type.includes("drop")) return t("Traffic dropped below normal", "Lưu lượng giảm dưới mức bình thường");
-  if (type.includes("spike") || type.includes("surge") || type.includes("rate")) return t("Traffic increased significantly above normal", "Lưu lượng tăng đáng kể so với mức bình thường");
-  if (type.includes("new_source_ip")) return t("A new source address appeared", "Xuất hiện địa chỉ nguồn mới");
-  return t("Behavior changed compared with normal", "Hành vi thay đổi so với mức bình thường");
+export function changeTypes(episode: Episode): string[] {
+  return [...new Set([...(episode.signals || []).map((signal) => signal.type), ...episode.evidence.map((evidence) => evidence.detector)].filter(Boolean).map((type) => type.toLowerCase()))];
+}
+
+export function changeTypeLabel(type: string, t: (key: string, fallback?: string) => string) {
+  const labels: Record<string, [string, string]> = {
+    traffic_spike: ["Traffic spike", "Lưu lượng tăng đột biến"], traffic_drop: ["Traffic drop", "Lưu lượng giảm"],
+    latency: ["Latency increase", "Latency tăng"], error_rate: ["Error rate increase", "Tỷ lệ lỗi tăng"],
+    unusual_access: ["Unusual access", "Truy cập bất thường"], unusual_time: ["Unusual activity time", "Thời điểm hoạt động bất thường"],
+    new_service_edge: ["New service relationship", "Quan hệ Service mới"], new_principal_edge: ["New credential relationship", "Quan hệ tài khoản mới"],
+    user_new_source_ip: ["New source IP", "IP nguồn mới"], ip_new_user: ["New user on IP", "User mới trên IP"],
+    operation_mix_shift: ["Operation mix shift", "Thay đổi cơ cấu API"], caller_principal_switch: ["Credential switch", "Thay đổi tài khoản gọi"],
+    target_fanout_surge: ["Target fanout surge", "Số đích truy cập tăng"], source_fanout_surge: ["Source fanout surge", "Số nguồn truy cập tăng"],
+    principal_rate_surge: ["User traffic surge", "Lưu lượng User tăng"], auth_failure_burst: ["Authentication failures", "Lỗi xác thực tăng"],
+    failure_then_success: ["Failure then success", "Thành công sau nhiều lần lỗi"], source_identity_fanout: ["Multiple source identities", "Nhiều danh tính từ một nguồn"],
+    new_caller: ["New caller", "Service gọi mới"],
+    new_source_ip: ["New source IP", "IP nguồn mới"],
+    source_ip_distribution_shift: ["Source IP distribution changed", "Phân bố IP nguồn thay đổi"],
+    new_ip_caller_pair: ["New IP and caller relationship", "Quan hệ IP và Service gọi mới"],
+    new_principal_on_source: ["New credential on source", "Tài khoản mới tại nguồn"],
+    new_target: ["New target service", "Service đích mới"],
+    new_operation: ["New API operation", "API mới"],
+    new_relationship: ["New access relationship", "Quan hệ truy cập mới"],
+    dormant_reactivated: ["Activity resumed after inactivity", "Hoạt động trở lại sau thời gian ngừng"],
+    username_first_seen: ["Credential first observed", "Tài khoản được quan sát lần đầu"],
+    relationship_disappeared: ["Relationship no longer observed", "Không còn quan sát thấy quan hệ"],
+    relationship_reappeared: ["Relationship observed again", "Quan sát thấy quan hệ trở lại"],
+    identity_failure_rate_shift: ["Credential failure rate changed", "Tỷ lệ lỗi tài khoản thay đổi"],
+    data_quality_gap: ["Telemetry gap", "Thiếu telemetry"],
+    data_quality_extraction_drop: ["Identity extraction decreased", "Khả năng trích xuất danh tính giảm"],
+    graph_tps_shift: ["Learned traffic pattern changed", "Mô hình lưu lượng đã học thay đổi"],
+    graph_edge_novelty: ["Unfamiliar service relationship", "Quan hệ Service chưa quen thuộc"],
+  };
+  const label = labels[type.toLowerCase()];
+  return label ? t(...label) : type.replace(/_/g, " ").toLowerCase();
 }
 
 export function episodeTitle(episode: Episode, t: (key: string, fallback?: string) => string) {
-  return changeTitle(episode, t);
+  const labels = [...new Set(changeTypes(episode).sort().map((type) => changeTypeLabel(type, t)))];
+  return `${episode.subject.name}: ${labels.length ? labels.join(" · ") : t("Behavior changed", "Hành vi thay đổi")}`;
 }
 
 export function formatEpisodeTime(value: number, withDate = true, timezone = "local") {
@@ -222,7 +246,7 @@ export function EpisodeStatusBadge({ episode }: { episode: Episode }) {
   const Icon = episode.state === "expected" ? CheckCircle2 : episode.state === "critical" ? AlertTriangle : episode.state === "needs_attention" ? Activity : Clock3;
   return (
     <span className={`inline-flex items-center gap-1.5 border px-2 py-1 text-[10px] font-bold uppercase tracking-wide ${episodeStatusClass(episode.state)}`}>
-      <Icon size={11} /> {episodeStatusLabel(episode.state, t)}
+      <Icon size={11} /> {t("Priority", "Ưu tiên")}: {episodeStatusLabel(episode.state, t)}
     </span>
   );
 }
@@ -233,7 +257,7 @@ export function EpisodeWorkflowBadge({ episode }: { episode: Episode }) {
   const monitoring = ["acknowledged", "investigating"].includes(episode.status);
   const label = resolved ? t("Resolved", "Đã xử lý") : monitoring ? t("Monitoring", "Đang theo dõi") : t("Open", "Đang mở");
   const tone = resolved ? "text-[#73bf69]" : monitoring ? "text-[#ff9830]" : "text-[#a7a9ab]";
-  return <span className={`inline-flex items-center gap-1 text-[10px] font-semibold uppercase tracking-wide ${tone}`}><CircleDot size={10} />{label}</span>;
+  return <span className={`inline-flex items-center gap-1 text-[10px] font-semibold uppercase tracking-wide ${tone}`}><CircleDot size={10} />{t("Review status", "Trạng thái xử lý")}: {label}</span>;
 }
 
 function assessmentCategoryLabel(category: NonNullable<SemanticAssessment["category"]>, t: (key: string, fallback?: string) => string) {
@@ -257,8 +281,8 @@ function assessmentPriorityLabel(priority: NonNullable<SemanticAssessment["prior
   const labels: Record<NonNullable<SemanticAssessment["priority"]>, [string, string]> = {
     informational: ["Informational", "Thông tin"],
     watch: ["Watch", "Theo dõi"],
-    investigate: ["Investigate", "Điều tra"],
-    urgent: ["Urgent", "Khẩn cấp"],
+    investigate: ["Needs attention", "Cần chú ý"],
+    urgent: ["Critical", "Nghiêm trọng"],
   };
   const [english, vietnamese] = labels[priority];
   return t(english, vietnamese);
@@ -306,14 +330,14 @@ export function SemanticAssessmentSummary({ episode, full = false, timezone = "l
   if (!full) {
     if (status !== "succeeded" || !assessment) return null;
     return <div className="mt-2 border-l-2 border-[#b877d9]/60 pl-2">
-      <div className="text-[10px] font-semibold uppercase tracking-[.12em] text-[#b877d9]">{t("L4 assessment", "Đánh giá L4")}{assessment.category ? ` · ${assessmentCategoryLabel(assessment.category, t)}` : ""}{assessment.priority ? ` · ${assessmentPriorityLabel(assessment.priority, t)}` : ""}</div>
+      <div className="text-[10px] font-semibold uppercase tracking-[.12em] text-[#b877d9]">{t("Assessment", "Đánh giá")}{assessment.category ? ` · ${assessmentCategoryLabel(assessment.category, t)}` : ""}{assessment.priority ? ` · ${assessmentPriorityLabel(assessment.priority, t)}` : ""}</div>
       <p className="mt-0.5 line-clamp-2 text-[11px] leading-4 text-[#c9c1d1]">{(assessment.recommendation ? recommendationLabel(assessment.recommendation, t) : assessment.summary) || t("Typed decision from Jev; see the detail panel for category and priority probabilities.", "Jev trả về quyết định có kiểu dữ liệu; xem bảng chi tiết để biết xác suất danh mục và ưu tiên.")}</p>
     </div>;
   }
 
   return <section aria-labelledby={`semantic-assessment-${episode.id}`} className="min-w-0 h-full border border-[#34373b] bg-[#111217]">
     <div className="flex flex-wrap items-center justify-between gap-2 border-b border-[#2a2d30] px-3 py-2.5">
-      <h2 id={`semantic-assessment-${episode.id}`} className="flex items-center gap-2 text-[11px] font-semibold uppercase tracking-[.12em] text-[#d9b4ea]"><Sparkles size={13} aria-hidden="true" />{t("Jev AI result", "Kết quả Jev AI")}</h2>
+      <h2 id={`semantic-assessment-${episode.id}`} className="flex items-center gap-2 text-[11px] font-semibold uppercase tracking-[.12em] text-[#d9b4ea]"><Sparkles size={13} aria-hidden="true" />{t("Assessment", "Đánh giá")}</h2>
       <SemanticAssessmentBadge assessment={assessment} />
     </div>
     {succeeded && assessment ? <div className="space-y-3 p-3">
@@ -324,7 +348,7 @@ export function SemanticAssessmentSummary({ episode, full = false, timezone = "l
         {assessment.priority && <div><div className="text-[10px] uppercase tracking-wide text-[#7b7d80]">{t("Priority · confidence", "Ưu tiên · độ tin cậy")}</div><div className="mt-1 text-xs text-[#d8d9da]">{assessmentPriorityLabel(assessment.priority, t)}{assessment.priority_confidence != null ? ` · ${Math.round(assessment.priority_confidence * 100)}%` : ""}</div></div>}
       </div>
       {assessment.recommendation && <div className="space-y-1 text-xs leading-5 text-[#d8d9da]">
-        <div className="font-semibold">{stale ? t("Previous advisory recommendation", "Khuyến nghị tham khảo trước đây") : t("Advisory recommendation", "Khuyến nghị tham khảo")}{assessment.recommendation_confidence != null ? ` · ${Math.round(assessment.recommendation_confidence * 100)}%` : ""}</div>
+        <div className="font-semibold">{stale ? t("Previous next step", "Bước tiếp theo trước đây") : t("Next step", "Bước tiếp theo")}{assessment.recommendation_confidence != null ? ` · ${Math.round(assessment.recommendation_confidence * 100)}%` : ""}</div>
         <p>{recommendationLabel(assessment.recommendation, t)}</p>
         <p className="text-[11px] text-[#a7a9ab]">{t("Advisory only. TraceScope state and severity remain authoritative; no action is executed.", "Chỉ mang tính tham khảo. Trạng thái và mức độ nghiêm trọng của TraceScope vẫn là căn cứ chính; không có hành động tự động.")}</p>
         {!!assessment.input_signal_ids?.length && <details className="text-[11px] text-[#a7a9ab]"><summary className="cursor-pointer">{t("Submitted evidence", "Bằng chứng đã gửi")} ({assessment.input_signal_ids.length})</summary><p className="mt-1 break-words">{assessment.input_signal_ids.join(", ")}</p></details>}
@@ -342,7 +366,7 @@ export function SemanticAssessmentSummary({ episode, full = false, timezone = "l
       </div>}
       <p className="max-w-4xl border-l-2 border-[#5794f2]/50 pl-2 text-[10px] leading-4 text-[#a7a9ab]">{t("Jev returns typed decisions and probabilities, not a generated explanation or per-signal attribution. Use the L3 evidence and rationale for the underlying facts.", "Jev trả về quyết định và xác suất có kiểu dữ liệu, không tạo giải thích bằng văn bản hoặc gán theo từng tín hiệu. Xem bằng chứng và lý do L3 để biết các dữ kiện nền.")}</p>
       {!!assessment.caveats?.length && <div><div className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-[#7b7d80]">{t("Caveats", "Lưu ý")}</div><ul className="space-y-1">{assessment.caveats.map((caveat, index) => <li key={`${caveat}-${index}`} className="border-l-2 border-[#ff9830]/60 pl-2 text-[11px] leading-4 text-[#c4bdd9]">{caveat}</li>)}</ul></div>}
-      <div className="border-t border-[#2a2d30] pt-2 text-[10px] text-[#7b7d80]">{assessment.provider === "jev" ? "Jev" : t("Semantic provider", "Nhà cung cấp ngữ nghĩa")} · {assessment.provider_model || assessment.assessment_version}{assessment.evaluated_at ? ` · ${formatEpisodeTime(assessment.evaluated_at, true, timezone)}` : ""}{assessment.input_tokens != null ? ` · ${assessment.input_tokens} ${t("input tokens", "token đầu vào")}` : ""}{assessment.cost_usd != null ? ` · $${assessment.cost_usd.toFixed(6)}` : ""}</div>
+      <div className="border-t border-[#2a2d30] pt-2 text-[10px] text-[#7b7d80]">{t("Assessed by", "Đánh giá bởi")}: {assessment.provider === "jev" ? "Jev" : t("Semantic provider", "Nhà cung cấp ngữ nghĩa")} · {assessment.provider_model || assessment.assessment_version}{assessment.evaluated_at ? ` · ${formatEpisodeTime(assessment.evaluated_at, true, timezone)}` : ""}{assessment.input_tokens != null ? ` · ${assessment.input_tokens} ${t("input tokens", "token đầu vào")}` : ""}{assessment.cost_usd != null ? ` · $${assessment.cost_usd.toFixed(6)}` : ""}</div>
     </div> : <div className="p-3 text-[11px] leading-4 text-[#a7a9ab]">
       {status === "pending" ? t("An automatic semantic assessment is in progress.", "Đang thực hiện đánh giá ngữ nghĩa tự động.")
         : status === "failed" ? t("The semantic assessment could not be completed. Deterministic L3 state remains authoritative.", "Không thể hoàn tất đánh giá ngữ nghĩa. Trạng thái L3 xác định vẫn là căn cứ chính.")
@@ -480,7 +504,7 @@ export function EpisodeCard({ episode, onInvestigate, detailSearch = "", timezon
         </div>
       )}
       <div className="mt-3 flex flex-wrap items-center gap-3 text-[10px] text-[#7b7d80]">
-        <span>{episode.signal_count} {t("supporting signals", "tín hiệu hỗ trợ")}</span>
+        <span>{episode.signal_count} {t("detected signals", "tín hiệu đã phát hiện")}</span>
       </div>
     </article>
   );
@@ -493,7 +517,7 @@ export function EpisodeMetricTable({ episode }: { episode: Episode }) {
   return (
     <div className="overflow-x-auto">
       <table className="w-full min-w-[560px] text-left text-xs">
-        <thead><tr className="border-b border-[#2a2d30] text-[10px] uppercase tracking-wide text-[#7b7d80]"><th className="px-3 py-2">{t("Metric", "Chỉ số")}</th><th className="px-3 py-2">{t("Detector reference", "Tham chiếu detector")}</th><th className="px-3 py-2">{t("Observed value", "Giá trị quan sát")}</th><th className="px-3 py-2 text-right">{t("Difference", "Chênh lệch")}</th></tr></thead>
+        <thead><tr className="border-b border-[#2a2d30] text-[10px] uppercase tracking-wide text-[#7b7d80]"><th className="px-3 py-2">{t("Metric", "Chỉ số")}</th><th className="px-3 py-2">{t("Baseline", "Baseline")}</th><th className="px-3 py-2">{t("Observed", "Quan sát được")}</th><th className="px-3 py-2 text-right">{t("Difference", "Chênh lệch")}</th></tr></thead>
         <tbody className="divide-y divide-[#2a2d30]">
           {highlights.map((highlight) => <tr key={`${highlight.label}-${highlight.unit || ""}`}><td className="px-3 py-2 font-semibold text-[#d8d9da]">{t(highlight.label, highlight.label)}</td><td className="px-3 py-2 font-mono text-[#a7a9ab]">{displayValue(highlight.before, highlight.unit)}</td><td className="px-3 py-2 font-mono text-[#d8d9da]">{displayValue(highlight.after, highlight.unit)}{highlight.before == null && highlight.after != null && <span className="ml-2 text-[10px] font-sans font-semibold uppercase text-[#5794f2]">{t("Added", "Mới")}</span>}</td><td className="px-3 py-2 text-right font-mono text-[#a7a9ab]">{formatHighlightDelta(highlight, t)}</td></tr>)}
         </tbody>
@@ -507,7 +531,7 @@ export function EpisodeTimeline({ episode, timezone = "local" }: { episode: Epis
   const timeline = episode.timeline || (episode.signals || []).map((signal) => ({ at: signal.detected_at, type: signal.type, source: signal.source }));
   return (
     <div className="divide-y divide-[#2a2d30]">
-      {timeline.length ? timeline.map((item, index) => <div key={`${item.type}-${item.at}-${index}`} className="flex items-center gap-3 px-3 py-2.5 text-[11px]"><span className="w-32 shrink-0 font-mono text-[#7b7d80]">{formatEpisodeTime(item.at, true, timezone)}</span><span className="h-1.5 w-1.5 rounded-full bg-[#5794f2]" /><span className="text-[#d8d9da]">{t(item.type, item.type.replaceAll("_", " "))}</span><span className="ml-auto text-[10px] uppercase text-[#7b7d80]">{item.source}</span></div>) : <div className="p-4 text-xs text-[#7b7d80]">{t("No timeline evidence available", "Chưa có bằng chứng dòng thời gian")}</div>}
+      {timeline.length ? timeline.map((item, index) => <div key={`${item.type}-${item.at}-${index}`} className="flex items-center gap-3 px-3 py-2.5 text-[11px]"><span className="w-32 shrink-0 font-mono text-[#7b7d80]">{formatEpisodeTime(item.at, true, timezone)}</span><span className="h-1.5 w-1.5 rounded-full bg-[#5794f2]" /><span className="text-[#d8d9da]">{changeTypeLabel(item.type, t)}</span><span className="ml-auto text-[10px] uppercase text-[#7b7d80]">{item.source}</span></div>) : <div className="p-4 text-xs text-[#7b7d80]">{t("No timeline evidence available", "Chưa có bằng chứng dòng thời gian")}</div>}
     </div>
   );
 }
@@ -516,7 +540,7 @@ export function EpisodeEvidence({ episode }: { episode: Episode }) {
   const { t } = useI18n();
   return (
     <div className="divide-y divide-[#2a2d30]">
-      {episode.evidence.length ? episode.evidence.map((item) => <div key={`${item.detector}-${item.label}`} className="flex gap-2.5 p-3"><CircleDot size={14} className="mt-0.5 shrink-0 text-[#5794f2]" /><div className="min-w-0"><div className="text-xs font-semibold text-[#d8d9da]">{t(item.label, item.label)}</div><div className="mt-1 text-[11px] text-[#a7a9ab]">{item.detail}</div><details className="mt-1"><summary className="cursor-pointer text-[10px] text-[#7b7d80]">{t("Technical detector detail", "Chi tiết detector kỹ thuật")}</summary><div className="mt-1 font-mono text-[10px] text-[#7b7d80]">{item.detector}</div></details></div></div>) : <div className="p-4 text-xs text-[#7b7d80]">{t("No evidence available", "Chưa có bằng chứng")}</div>}
+      {episode.evidence.length ? episode.evidence.map((item) => <div key={`${item.detector}-${item.label}`} className="flex gap-2.5 p-3"><CircleDot size={14} className="mt-0.5 shrink-0 text-[#5794f2]" /><div className="min-w-0"><div className="text-xs font-semibold text-[#d8d9da]">{changeTypeLabel(item.detector, t)}</div><div className="mt-1 text-[11px] text-[#a7a9ab]">{item.detail}</div><details className="mt-1"><summary className="cursor-pointer text-[10px] text-[#7b7d80]">{t("Technical detector detail", "Chi tiết detector kỹ thuật")}</summary><div className="mt-1 font-mono text-[10px] text-[#7b7d80]">{item.detector}</div></details></div></div>) : <div className="p-4 text-xs text-[#7b7d80]">{t("No evidence available", "Chưa có bằng chứng")}</div>}
     </div>
   );
 }

@@ -6,10 +6,9 @@ import sys
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
 
-import urllib.request
+from backend.config import settings
 from backend.app.repositories.db_context import get_connection
-
-ES_URL = "http://127.0.0.1:32073"
+from backend.app.repositories.elasticsearch_metric_repository import ElasticsearchMetricRepository
 
 def wipe_clickhouse():
     print("Wiping ClickHouse analytical tables...")
@@ -28,13 +27,20 @@ def wipe_clickhouse():
 
 def wipe_elasticsearch():
     print("Wiping Elasticsearch APM and TraceScope indices...")
-    for pattern in ("apm-*", "traces-apm*", "tracescope-*"):
-        try:
-            req = urllib.request.Request(f"{ES_URL}/{pattern}", method="DELETE")
-            with urllib.request.urlopen(req, timeout=10) as resp:
-                print(f"  Elasticsearch {pattern} indices deleted.")
-        except Exception as e:
-            print(f"  Note on Elasticsearch wipe ({pattern}): {e}")
+    try:
+        repo = ElasticsearchMetricRepository()
+        if not repo.url:
+            print("  Elasticsearch not configured, skipping.")
+            return
+        for pattern in ("apm-*", "traces-apm*", "tracescope-*"):
+            try:
+                with repo._client() as client:
+                    resp = client.delete(f"/{pattern}")
+                    print(f"  Elasticsearch {pattern} delete response: {resp.status_code}")
+            except Exception as e:
+                print(f"  Note on Elasticsearch wipe ({pattern}): {e}")
+    except Exception as e:
+        print(f"  Elasticsearch client initialization note: {e}")
 
 from backend.app.repositories.clickhouse_migrator import truncate_system_logs
 

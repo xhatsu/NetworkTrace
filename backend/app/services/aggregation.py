@@ -28,7 +28,7 @@ SELECT
   COALESCE(caller_service, '') AS caller_service,
   target_service,
   COALESCE(principal_name, 'unknown') AS principal_name,
-  COALESCE(nullIf(operation_key, ''), operation) AS operation_dimension,
+  COALESCE(nullIf(operation, ''), nullIf(operation_key, ''), 'unknown') AS operation_dimension,
   count() AS request_count,
   countIf(http_status >= 400 OR outcome = 'failure') AS error_count,
   sum(duration_ms) AS latency_sum,

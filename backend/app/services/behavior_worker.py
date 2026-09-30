@@ -25,11 +25,55 @@ def semantic_episode(item):
                        'persistent':item['persistent'],'material_impact':False,'level':'watch'}]}}
 
 
+def graph_deviations(profiles, deviations, now):
+    """Online-graph candidates for profiles already annotated with graph_learning."""
+    known={(d['relationship_id'],d['kind']) for d in deviations}
+    found=[]
+    for profile in profiles:
+        learned=profile.get('graph_learning')
+        if not learned or now-profile['last_seen']>30*60_000:continue
+        kind=None
+        if learned['surge_streak']>=3 and (profile['id'],'traffic_surge') not in known:
+            kind='graph_tps_shift'
+        elif (learned['emergence']['known_credential_context'] and learned['observed_windows']>=3
+              and learned['strength']<0.8 and (profile['id'],'access_expansion') not in known):
+            kind='graph_edge_novelty'
+        if kind:
+            found.append({**profile,'relationship_id':profile['id'],
+                'id':digest([profile['id'],kind,learned['emergence']['at']]),'kind':kind,
+                'observed_contract':profile['contract'],'status':'unreviewed','persistent':True,
+                'baseline_ready':True,'severity':'watch','reference_cutoff':learned['last_score']['at'],
+                'novelty_scope':'online_graph','prohibited_windows':0})
+    return found
+
+
+def learnable_end(repo, now, grace_ms=None):
+    """End of the newest five-minute window that is safe to learn.
+
+    The metric stage runs earlier in the same worker cycle, writes only completed
+    windows and re-materializes the two newest ones every cycle. Once the grace
+    has elapsed and the window's one-minute buckets exist (written after its
+    five-minute buckets), late arrivals are rare; any that do change a learned
+    window trigger the graph's deterministic replay. Otherwise (idle window, or
+    the metric stage has not reached it yet) keep the former one-window lag.
+    """
+    grace_ms=settings.behavior_learn_grace_seconds*1000 if grace_ms is None else grace_ms
+    fallback=(now//BUCKET-1)*BUCKET
+    candidate=(now-grace_ms)//BUCKET*BUCKET
+    if candidate<=fallback:
+        return fallback
+    rows=repo.query('SELECT count() AS n FROM metric_buckets WHERE bucket_size=60 '
+                    'AND bucket_start>={start:Int64} AND bucket_start<{end:Int64}',
+                    {'start':(candidate-BUCKET)//1000,'end':candidate//1000})
+    return candidate if rows and rows[0]['n'] else fallback
+
+
 def run_source(repo, source, now):
     if source != 'legacy_metrics':
         raise ValueError('behavior learning accepts metric_buckets only')
     state=repo.state(source)
-    complete_end=(now//BUCKET-1)*BUCKET  # allow one full bucket for ingestion lag
+    # Never move backwards: dropping a learned window would force a full replay.
+    complete_end=max(learnable_end(repo,now),int(state.get('through_ms') or 0))
     today=complete_end//DAY*DAY
     pending=state.get('pending')
     if not pending:
@@ -37,7 +81,7 @@ def run_source(repo, source, now):
             return {'status':'current','through_ms':complete_end}
         retention=30
         earliest=(now-retention*DAY+DAY-1)//DAY*DAY
-        if source=='legacy_metrics' and not state.get('next_day'):
+        if source=='legacy_metrics':
             existing=repo.query('SELECT min(bucket_start)*1000 AS first FROM metric_buckets FINAL WHERE bucket_size=300')
             if existing and existing[0]['first']:
                 earliest=max(earliest,int(existing[0]['first'])//DAY*DAY)
@@ -63,29 +107,14 @@ def run_source(repo, source, now):
     next_state={**state,'pending':None,'next_day':min(today,day+DAY),'through_ms':end,
                 'mode':'live' if end>=today else 'backfill','last_success_ms':now}
     days=repo.days(source)
-    profiles,deviations=build_profiles(days,repo.contracts(),now)
-    from .behavior_graph import advance_graph, relationship_view
+    from .behavior_graph import advance_graph, relationship_view, level_shift_starts
     graph=advance_graph(repo.graph_state(source),days,source)
+    profiles,deviations=build_profiles(days,repo.contracts(),now,level_shift_starts(graph))
     for item in profiles:
         item['graph_learning']=relationship_view(graph,item,now)
     for item in deviations:
         item['graph_learning']=relationship_view(graph,{'id':item['relationship_id']},now)
-    known={(d['relationship_id'],d['kind']) for d in deviations}
-    for profile in profiles:
-        learned=profile['graph_learning']
-        if not learned or now-profile['last_seen']>30*60_000:continue
-        kind=None
-        if learned['surge_streak']>=3 and (profile['id'],'traffic_surge') not in known:
-            kind='graph_tps_shift'
-        elif (learned['emergence']['known_credential_context'] and learned['observed_windows']>=3
-              and learned['strength']<0.8 and (profile['id'],'access_expansion') not in known):
-            kind='graph_edge_novelty'
-        if kind:
-            deviations.append({**profile,'relationship_id':profile['id'],
-                'id':digest([profile['id'],kind,learned['emergence']['at']]),'kind':kind,
-                'observed_contract':profile['contract'],'status':'unreviewed','persistent':True,
-                'baseline_ready':True,'severity':'watch','reference_cutoff':learned['last_score']['at'],
-                'novelty_scope':'online_graph','prohibited_windows':0})
+    deviations.extend(graph_deviations(profiles,deviations,now))
     repo.save_graph(graph)
     next_state['graph_version']=graph['version']
     next_state['graph_metrics']=graph['metrics']

@@ -346,3 +346,22 @@ def interactive_principal_ips(
         return repo.principal_ips(principal, resolved, page_size, cursor, service, api, filter_name)
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from None
+
+
+@router.get("/topology/services/{service}/ips", response_model=PrincipalIpPageResponse)
+def interactive_service_ips(
+    service: str,
+    principal: Optional[str] = Query(None, max_length=200),
+    api: Optional[str] = Query(None, max_length=500),
+    window: str = Query("1h"),
+    page_size: int = Query(500, ge=1, le=1000),
+    cursor: Optional[str] = Query(None, max_length=1024),
+    filter_name: str = Query("all", alias="filter"),
+    from_time: Optional[str] = Query(None, alias="from"),
+    to_time: Optional[str] = Query(None, alias="to"),
+) -> Dict[str, Any]:
+    repo, resolved = _interactive_window(window, from_time, to_time)
+    try:
+        return repo.principal_ips(principal or "all", resolved, page_size, cursor, service=service, api=api, filter_name=filter_name)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from None

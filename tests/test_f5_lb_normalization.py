@@ -110,3 +110,42 @@ def test_anonymous_and_f5_unresolved_quality_ladder():
     assert normalized.traffic_class == "anonymous"
     assert normalized.context_quality == "very_low"
 
+
+def test_kubernetes_pod_ip_not_blindly_marked_lb():
+    """Kubernetes internal Pod IPs (e.g. 10.244.1.203) should NOT be blindly marked as LB."""
+    raw = {
+        "service": {"name": "order-service"},
+        "client": {"ip": "10.244.1.203"},
+        "http": {
+            "request": {"method": "POST"},
+            "response": {"status_code": 200},
+        },
+    }
+    normalized = normalize_otel_record(raw)
+    assert normalized.observed_ip == "10.244.1.203"
+    assert normalized.effective_client_ip == "10.244.1.203"
+    assert normalized.ip_resolution == "direct"
+    assert normalized.client_identity_quality == "high"
+
+    role, label, confidence = classify_source_ip_role("10.244.1.203")
+    assert role == "client"
+    assert label == "Internal client address"
+    assert confidence == "high"
+
+
+def test_cidr_matching_in_trusted_proxies(monkeypatch):
+    """CIDR subnets configured in OTEL_TRUSTED_PROXIES are correctly identified."""
+    from dataclasses import replace
+    from backend import config
+    from backend.app.services import normalization
+
+    # Monkeypatch settings with a CIDR
+    monkeypatch.setattr(config, "settings", replace(config.settings, trusted_proxies=("10.99.0.0/16",)))
+    normalization._is_trusted_proxy_cached.cache_clear()
+
+    # 10.99.1.5 is inside 10.99.0.0/16
+    assert normalization._is_ip_in_configured_targets("10.99.1.5", ("10.99.0.0/16",)) is True
+    # 10.244.1.203 is NOT inside 10.99.0.0/16
+    assert normalization._is_ip_in_configured_targets("10.244.1.203", ("10.99.0.0/16",)) is False
+    assert normalization._is_trusted_proxy("10.99.1.5") is True
+    assert normalization._is_trusted_proxy("10.244.1.203") is False

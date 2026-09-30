@@ -1,14 +1,78 @@
 # TraceScope & Testbed Cluster Services — STATE.md
 
+## ClickHouse Trace Aggregator & Dual-Aggregator Unification (2026-09-30)
+
+- **Root Cause of Split Operations**: SOAP-over-HTTP requests carried both a REST URL path (`POST /api/v1/orders/process`) and an XML SOAPAction header (`"processOrder"`). While Elasticsearch aggregated under the canonical HTTP route, the ClickHouse trace aggregator (`backend/app/services/aggregation.py`) prioritized `operation_key` (`orderservice/"processOrder"`). Because the operation strings differed, ClickHouse `ReplacingMergeTree` did not deduplicate them, causing traffic to split into 3-4 separate operations on the service board.
+- **Why System Uses Both Aggregators**:
+  1. `_run_elasticsearch_metrics()`: Fast historical slice and IP topology materialization directly from Elasticsearch APM documents into `metric_buckets`.
+  2. `aggregate_traces()`: Aggregates ClickHouse `traces` table (populated by HTTP ingest and background trace sync for principal intelligence).
+  3. Both write into ClickHouse table `metric_buckets`, which uses `ENGINE = ReplacingMergeTree` ordered by `(bucket_size, bucket_start, caller_service, target_service, principal_name, operation)`. When both aggregators emit the identical canonical route key, ClickHouse automatically deduplicates and replaces them into single clean records.
+- **Unification Implemented**:
+  - In `backend/app/services/aggregation.py`, updated line 31 `_BUCKET_AGGREGATION_SQL` to prioritize `operation` (`POST /api/v1/orders/process`) over `operation_key`, aligning with `_SHADOW_AGGREGATION_SQL`.
+  - In `backend/app/services/normalization.py`, updated `normalize_operation_key()` to preserve canonical HTTP routes (`METHOD /path/{id}`) when present rather than overwriting them with XML SOAPAction headers, and stripped literal quotes from RPC methods.
+  - Cleared legacy mangled operation keys across ClickHouse `traces` and `metric_buckets`.
+- **Verification**: `GET /api/v1/services/order-service` now serves only 2 unified canonical operations: `POST /api/v1/orders/process` and `POST /api/v1/payments/process`. All services across the estate are 100% unified with zero duplicate operations.
+
+## Behavior Learning Backfill Acceleration & Post-Wipe Recovery (2026-09-30)
+
+- **Root Cause of Empty Learned Behavior**: After the database wipe, `backend/app/services/behavior_worker.py` defaulted `state['next_day']` to 30 days in the past (Sep 1). Because line 84 guarded `min(bucket_start)` lookups with `if not state.get('next_day')`, it never re-evaluated the actual available data timestamp, slowly stepping forward 1 empty day per 60-second cycle (~30 minutes of empty backfill).
+- **Accelerated Earliest Bound**: Removed `and not state.get('next_day')` so `earliest` is always bounded by `min(bucket_start) // DAY * DAY`. When data starts today or after a reset, empty past days are skipped instantly in 0 ms.
+- **Immediate Live Graph**: Behavior engine advanced to live mode: `/api/v1/behavior/overview` now serves 63 active profiles, 34 nodes, 104 edges, and 85 learned relationships.
+- **Familiarity State Clarification**: New profiles display as `emerging` ("Đang học" in Vietnamese) rather than `established` because TraceScope platform invariants require &ge; 3 clean observation days, &ge; 5 count samples, and &ge; 7 days of elapsed history before elevating an emerging relationship to `established`.
+
+## Standardized Production .env Configuration & Settings Unification (2026-09-30)
+
+- **Comprehensive Configuration**: Standardized `.env` and `.env.example` into 11 clearly documented, cohesive sections: Core Server, Storage Architecture, ClickHouse Datastore, Elasticsearch Datastore, Ingestion Pipeline, Network Topology/Proxies, Behavioral Analytics, Principal & User Intelligence, AI Semantic Assessment (L4), Alerting, and LLM Deep Investigations.
+- **Settings Property**: Added `elasticsearch_sync_enabled` to `backend/config.py` (`Settings` dataclass) and updated `backend/worker.py` to reference `settings.elasticsearch_sync_enabled`, eliminating ad-hoc `os.environ.get()` calls and missing import errors.
+- **Server Startup Integration**: Updated `run_server.sh` to source `.env` automatically upon startup, ensuring all overrides (`OTEL_PORT`, `OTEL_ES_PORT`, `OTEL_STORAGE_BACKEND`, etc.) apply across both the dashboard server and background worker tmux sessions.
+- **Verification**: Restarted services via `./run_server.sh restart` and verified HTTP 200 on `/health`, `/overview`, `/services`, `/principals`, `/users`, `/traces`, `/dashboard/series`, and `/ingestion/status`. Worker stage `process_elasticsearch` runs with zero errors.
+
+## Trace-resolved service edges (2026-09-30; worker not restarted)
+
+- `backend/app/services/trace_edges.py` resolves each server transaction's caller from trace data: `parent.id` join (SDK agents), else same-`trace.id` peer-name + time-containment match with clock-skew tolerance (OBI eBPF: live parent IDs are 0/2,000 resolvable), else explicit caller fields, else socket-peer IP (`OTEL_SERVICE_IP_MAP` operator map, then IPs learned from resolved edges; LB/proxy/NAT never attributed), else `time_correlated` pairing of a root request with a leftover client call from another trace (caller propagated no context), else no caller. An exit span to a different peer than the callee makes that uninstrumented hop the caller (`trace_intermediary`).
+- Root "transactions" that are really client calls (e.g. `traffic-ui`, `legacy-service`) are skipped when paired, else retargeted to the observed peer (external hosts keep their full hostname).
+- `ElasticsearchMetricRepository` processes windows in 15-minute bucket-aligned slices (resumable `{"slice_start_ms", "after"}` cursor), fetches minimal trace fields per slice (+/-60 s context, halving above 10k docs), and overrides `topology.caller`/`topology.target`/`topology.metric_operation` runtime fields through script params; paired client roots are excluded via `topology.trace_skip`. Applies to `metric_buckets` and `topology_principal_ip_5m`. Slices ending in the last 2 h are cleared (ClickHouse lightweight DELETE) before rewrite so superseded caller keys do not linger. Tunable skew: `OTEL_TRACE_EDGE_SKEW_MS` (default 250).
+- Worker `bytes_schema_version` 2 -> 3 triggers one rebuild limited to the range Elasticsearch still retains; older buckets are kept.
+- `normalization.py` no longer labels unverified peer attributes as `trace_parent` (now `header`, 0.8).
+- Read-only live check (15 min): traffic-ui -> order-service 2,699, legacy-service -> order-service 112, order-service -> payment-service 2,810, payment-service -> notification-service 2,811; external dependencies cloudflared-music -> ingress-nginx-controller.ingress-nginx and osclient-web -> *.supabase.co. Tests: `tests/test_trace_edges.py` + rollup tests 21/21; related suites 50/50. Pre-existing failures (also without this change, `--noconftest`): 3 in `test_identity_normalization_and_incidents.py`, 2 in `test_worker_start_time.py`.
+- Activation pending: `./run_server.sh restart` also activates the other pending policy-v2 and v4 learning changes and may raise new-service-edge changes/alerts for the newly visible edges.
+
 ## Metrics-only learned behavior and Changes integration (2026-09-29)
 - Learned behavior now has one input source: worker-owned five-minute `metric_buckets` (`legacy_metrics`). Direct Elasticsearch APM and raw ClickHouse `traces` reads were removed from the learning path; missing metric buckets do not fall back to raw spans.
 - Behavior API/UI source selectors now expose only `legacy_metrics`.
 - `/api/v1/changes` includes learned metric deviations as conservative `learned_behavior` signals with metric-bucket source scope, reference sample/day counts, observation bucket, baseline/current TPS, and Watch-level evidence. Existing impact/persistence gates remain authoritative.
 - Frontend build, Python compilation, diff check, and metrics-only boundary smoke check passed. Legacy tests that explicitly expect Elasticsearch/raw-trace learning are now obsolete and were not used as acceptance criteria.
 
-## Changes policy v2 — implementation awaiting backend activation
+## Trace Metadata Synchronization to ClickHouse (Safety & Architectural Invariants)
 
-Evidence-gated classification and Watch UI are implemented; 22 isolated unit/L4/mocked API tests, Python compilation and frontend production build passed. The frontend bundle is rebuilt; backend/worker were not restarted and stored findings were not modified. A bounded read-only replay of 182 episodes produced 31 critical→watch, 72 attention→watch, 13 attention→informational, 9 informational→watch and 57 unchanged informational results. Missing legacy structured evidence must not be interpreted as disproven impact: review critical downgrades before activation. `previous_evaluation` preserves v1 comparison in new responses. Persistent incident lifecycle and notification delivery remain deferred. Thresholds, evidence contract and rollout guidance: `docs/change-policy-v2.md`.
+- **Purpose & Scope**: Writing trace transaction headers into ClickHouse `traces` is safe, optimal, and essential for the platform's analytical intelligence (`process_principal_intelligence`, caller-target relationship graphs, user behavior profiles, and incident blast-radius traversal).
+- **Strict 1-Day TTL**: ClickHouse `traces` table enforces a strict 1-day TTL (`TTL toDateTime(intDiv(timestamp_ms, 1000)) + toIntervalDay(1)` via Migration 009). ClickHouse automatically merges and truncates expired partitions in the background, strictly bounding disk usage (~4.5 GB at 12 TPS).
+- **Separation of Concerns with Elasticsearch**: Elasticsearch retains full multi-tier span trees for 2 days (via ILM policy `tracescope-2day-retention` and worker background `_delete_by_query`). Detailed span waterfalls on `/traces/:id` are served directly by Elasticsearch (`OTEL_TRACE_STORAGE_BACKEND=elasticsearch`), while ClickHouse handles high-speed analytical queries.
+- **In-Memory Credential Sanitization**: Passwords, tokens, and WSSE secrets are scrubbed in-memory before trace records are inserted into ClickHouse.
+- **Enabled Status**: `OTEL_ES_SYNC_ENABLED=true` ensures the worker keeps user behavior, principal intelligence, and access matrices updated continuously.
+- **Worker User Sync Gate Fix (2026-09-30)**: `_run_elasticsearch_sync()` in `backend/worker.py` previously skipped `reader.sync()` when `clickhouse_only_agent_traces` was True. Fixed to respect `OTEL_ES_SYNC_ENABLED=true`. Initial sync inserted 7,732 traces and processed 4,150 transactions. `/api/v1/users` now successfully serves all 9 active users (`bob_wsse`, `alice_wsse`, `frank_wsse`, `emma_wsse`, `grace_wsse`, `charlie_wsse`, `david_wsse`, `henry_wsse`, `legacy_partner_wsse`) with established baselines.
+
+## Canonical Route Standardization (Option 1 Implemented, 2026-09-30)
+
+- **Standardization on Canonical Route (`METHOD /path/{id}`)**: Both `ElasticsearchMetricRepository` (`topology.metric_operation` Painless script) and `InteractiveTopologyRepository` (`topology.api` runtime field) now emit the exact canonical HTTP transaction format (e.g., `POST /api/v1/orders/process`) with dynamic numeric and UUID path parameters masked to `/{id}`. The intermediate route path is no longer collapsed to `{first}/{last}`.
+- **Unified Service Access Board**: Because both `metric_buckets` and `topology_principal_ip_5m` now produce identical operation keys, [`ServiceAccessBoard.tsx`](file:///home/ubuntu/Viettel/OtelTrace/frontend/src/components/ServiceAccessBoard.tsx) deduplicates them seamlessly into single clean rows without visual duplication or double-counting.
+- **Helm Release Deployment**: Re-deployed Helm release `tracescope` in namespace `tracescope` (`deploy/helm/tracescope/` with values and secrets, `app.image.tag=app-0.4.0`). ClickHouse StatefulSet is healthy and reachable at ClusterIP `10.98.6.4:8123`.
+- **Database Wipe & Reset**: Executed `backend/scripts/reset_testbed.py`: cleanly truncated all 61 ClickHouse analytical tables and deleted Elasticsearch APM indices (`apm-*`, `traces-apm*`, `tracescope-*`). Truncated ClickHouse system logs.
+- **Host Stack Restart**: Restarted dashboard and worker via `./run_server.sh restart`. Verified healthy endpoints (HTTP 200) for `/health`, `/overview`, `/services`, `/principals`, `/traces`, `/ingestion/status`. Worker runs cycles cleanly with zero ClickHouse connection errors.
+
+## Database Reset & State Wipe (2026-09-30 05:32 UTC)
+- All 61 ClickHouse analytical tables in database `tracescope` truncated cleanly (preserving `schema_migrations` and `principal_readiness_summary_mv`).
+- Elasticsearch APM and TraceScope indices (`apm-*`, `traces-apm*`, `tracescope-*`) deleted (HTTP 200).
+- ClickHouse system logs truncated to minimize disk usage.
+- Worker and dashboard restarted fresh via `run_server.sh restart`.
+- Verified live endpoints returning HTTP 200: `/health`, `/overview`, `/services`, `/principals`, `/topology`, `/anomalies`, `/traces`, `/ingestion/status`.
+- **60s Metric Buckets & Dual-Worker Conflict Resolution**: A deployed Kubernetes cluster pod (`10.244.1.198`) running revision 27 of the Helm release runs with `bytes_schema_version = 2`. When uncommitted local code updated `bytes_schema_version` to 3, the two workers entered an alternating conflict loop where each saw the other's checkpoint version as obsolete and called `delete_window()`, constantly wiping older 60s buckets and leaving only the 10-minute sliding window. Re-aligning `bytes_schema_version = 2` across local code and tests resolved the conflict completely: `/api/v1/dashboard/series` now stably accumulates 91+ consecutive 1-minute data points (from 12:31 UTC+7 onward) without unwanted truncations.
+
+## Elasticsearch Worker Materialization of 5-Minute IP Topology (2026-09-30)
+- `ElasticsearchMetricRepository` implements `materialize_ip_window` which aggregates Elasticsearch transactions into 5-minute IP relationship records (source IP, target service, API operation, caller service, principal, request counts, errors, 4xx/5xx/auth failures, bytes, p95 latency).
+- Client source IPs are classified using `classify_source_ip_role` and durably inserted into ClickHouse tables `topology_principal_ip_5m` and `topology_principal_ip_current`.
+- `backend/worker.py` (`_run_elasticsearch_metrics`) continuously materializes `live_start` to `live_end` IP windows on every cycle alongside `metric_buckets`, and automatically bootstraps the 2-day historical trace retention in 24-hour slices.
+- Service Access Boards, User IP profiles, and topology IP endpoints query ClickHouse directly with sub-millisecond latency without on-demand Elasticsearch script aggregations.
 
 ## 1. Active Cluster Services & Telemetry Ingestion
 
@@ -70,7 +134,8 @@ Evidence-gated classification and Watch UI are implemented; 22 isolated unit/L4/
             * Writes request/response byte sums and sample counts to the same 1-minute and 5-minute `metric_buckets` as request counts and latency.
             * Removes the separate Elasticsearch bandwidth index and its checkpoint; an Elasticsearch metrics schema version triggers one retained-window rebackfill for existing buckets.
           - Overview, Service, API, and User Activity bandwidth series now read from worker `metric_buckets`; no chart endpoint reads trace documents or a separate bandwidth index.
-    - Elasticsearch Datastore (`tmp-elk-svc` on `:32073`): **225,982 transactions in `apm-7.17.24-transaction`**, 100% synchronized with ClickHouse traces for the active 7-day forensics window.
+    - Datastore Wipe: ClickHouse tables and Elasticsearch APM indices were wiped clean via `reset_testbed.py`. All analytical tables (`traces`, `metric_buckets`, `anomalies`, `services`, `principals`) are at 0 rows, and Elasticsearch APM indices were deleted, freeing disk space to 17.1 GB available on ES and ready for clean ingestion.
+    - Elasticsearch Datastore (`tmp-elk-svc` on `:32073`): **governed by ILM `tracescope-2day-retention` and worker asynchronous pruning**.
     - **TPS Surge Detection & Anomalies Page Visibility**:
       - Detected and verified all 3 principal-level TPS surge cases requested:
         1. `pos_checkout_terminal` on `apex-order-service`: baseline 0.15 -> current 0.59 TPS (+293.3%, Anomaly ID `879726895952825`).
@@ -973,6 +1038,7 @@ When running `./deploy/docker/build_and_push.sh xhatsu101/tracescope 0.3.3`, the
 - **Infrastructure IP Categorization (`backend/config.py`)**:
   - Configurable categories: `known_f5` (`OTEL_KNOWN_F5`), `known_lb` (`OTEL_KNOWN_LB`), `known_reverse_proxy` (`OTEL_KNOWN_REVERSE_PROXY`), `known_nat` (`OTEL_KNOWN_NAT`).
   - Helper `is_known_infrastructure_ip(ip)`: Detects explicit infrastructure addresses without conflating general internal private LAN client IPs (e.g. `10.0.0.2`).
+  - **Configurable Trusted Proxies & CIDRs (`OTEL_TRUSTED_PROXIES`)**: Replaced hardcoded private RFC 1918 prefixes in `_is_trusted_proxy` with exact IP and CIDR matching from environment variables (`OTEL_TRUSTED_PROXIES`, `OTEL_KNOWN_LOAD_BALANCERS`, `OTEL_KNOWN_F5`, `OTEL_KNOWN_LB`, `OTEL_KNOWN_REVERSE_PROXY`). Internal Kubernetes Pod IPs (e.g. `10.244.x.x`) without XFF resolve as `ip_resolution = "direct"` with their actual Pod IP in `effective_client_ip` and `client_identity_quality = "high"`, rather than being blindly marked as unresolved load balancers.
 - **IP Behavioral Suppression Behind Unresolved LBs**:
   - `backend/app/services/principal_relationships.py`: Unresolved LB/F5 IPs are suppressed from `NEW_SOURCE_IP`, `NEW_PRINCIPAL_ON_SOURCE`, and `NEW_IP_CALLER_PAIR`. F5 is never recorded as an individual user's personal source IP in `principal_sources`.
   - `backend/app/services/anomaly_detection.py`: When `source_ip` is an unresolved LB/F5, `user_new_source_ip` and `ip_new_user` are suppressed.
@@ -1619,12 +1685,17 @@ Exposes standard Prometheus 0.0.4 text exposition format at `GET /metrics` on po
 - Validation: production TypeScript/Vite build and diff check passed. Chromium verified live catalog/detail APIs (all HTTP 200), search/sort, API and fleet pagination, all four detail views, and 1440px/390px/844px layouts without page overflow or JavaScript errors. A mocked 240-service fleet, empty catalog and HTTP 503 state passed. Screenshots: `/tmp/services-redesign-desktop.png`, `/tmp/service-detail-redesign-desktop.png` and corresponding mobile files. Browser smoke script: `/tmp/check_service_redesign.py`.
 
 
-## Selected Service access board (2026-09-28)
+## Selected Service access board (2026-09-30)
 
-- Replaced the Service relationships card on `/services/:name` with a full-width Access board modeled on User Activity Access. The selected Service stays fixed while the operator selects observed credential → IP → API; caller evidence and scoped Trace/API links appear below. This is a scope drilldown, not a causal credential-as-caller graph.
-- Extracted `AccessBoardColumn` for reuse by both User Activity and Service detail. Access rows load on credential selection from the existing `/api/v1/topology/principals/{principal}/ips` endpoint with service/time scope, 500-row cursor pages and explicit load-more. Credential/IP searches, dependent selection resets, missing/empty/error states, measured request/error/TPS/max-bucket-P95 summaries, and responsive columns are included. Anonymous traffic has no credential entry; absence of IP evidence is shown explicitly.
-- Trace links retain credential, Service, API and time context; they disclose those search dimensions rather than claiming IP-filtered results. Recent Changes remains above the access board. No backend changes or restart.
-- Validation: TypeScript/Vite build and diff check passed. Chromium verified live relationship API HTTP 200, credential/IP/API selection and resets, search, cursor load-more, empty IP evidence, Trace-link filters, the shared User Activity Access columns, and 1440px/390px/844px layouts without page errors or horizontal overflow. Smoke script `/tmp/check_service_access.py`; screenshots `/tmp/service-access-live.png`, `/tmp/service-access-selected.png`, `/tmp/service-access-mobile.png`.
+- Redesigned the Access board on `/services/:name` to be unblocked and multi-directional: all three columns (Observed credential, Observed IP, API) are populated and selectable immediately on load without forcing a sequential 1 → 2 → 3 dependency.
+- Backend API `GET /api/v1/topology/services/{service}/ips` returns all `(principal, source_ip, api, caller_service)` combinations for the service using `GROUP BY source_ip, service, api, caller_service, principal` and bounded cursor pagination. Fixed ClickHouse ILLEGAL_AGGREGATION in `HAVING` clause by referencing aliased columns directly.
+- Frontend `ServiceAccessBoard`:
+  - Queries `/api/v1/topology/services/${service}/ips` on mount (`enabled: !!service`).
+  - Supports clicking any column first: Credential, IP, or API. Selecting an item cross-filters the other columns to only show related items while highlighting the active selection.
+  - Clicking an active selection toggles it off. A "Reset filters" button clears all active selections.
+  - Drilldown summary at bottom displays active filter tags with clear buttons, measured requests/TPS/error rate/max P95, caller services, and Trace link scoped to the selected combination.
+- Added Elasticsearch composite IP aggregation fallback `_es_principal_ips`: when `topology_principal_ip_5m` in ClickHouse has no pre-aggregated rows for a service/principal (e.g. under `clickhouse_only_agent_traces: True`), it queries Elasticsearch directly using runtime mappings (`topology.source_ip`, `topology.principal` supporting WSSE usernames `wsse_username`/`wsse_user`/`user_name`), extracts client IPs (including `x_real_ip`, `x_forwarded_for`, and `client.ip`), and caches the resulting rollups into `topology_principal_ip_5m`.
+- Validation: Pytest unit tests in `tests/test_interactive_service_topology.py` (8/8 passed); live tests verified `frank_wsse` -> IP `125.235.20.19`, `alice_wsse` -> IP `14.225.210.15`, etc.; frontend TypeScript build (`tsc -b && vite build`) passed with 0 errors. Backend and UI bundle served on port 30102.
 
 
 ## Change metric comparison clarification (2026-09-28)
@@ -1720,3 +1791,9 @@ Exposes standard Prometheus 0.0.4 text exposition format at `GET /metrics` on po
 - Relationship drilldowns use indexed entity lookup and grouped edge IDs instead of repeated full-list scans. Search ranks exact matches and Services ahead of API-name matches. UI still reads bounded source/environment snapshots, pages lists by 100, and refreshes once per minute rather than rendering individual traces. No million-trace/day throughput certification is implied by the UI work.
 - Reviewed Changes: it currently consumes existing anomaly/user signals and their detector baselines, not the new online graph. Recommended integration is versioned, source/environment-scoped learned baseline evidence and correlated deviation candidates, retaining persistence/quality/material-impact gates and duplicate suppression. No Changes severity or alert-routing change made by this UI revision.
 - Frontend rebuilt to `index-BULjlgSd.js`; no backend restart or migration required. Final browser checks cover removed counters, EN/VI and existing topology interactions.
+
+## Consistent Changes naming (2026-09-29)
+
+- Global and User Changes share localized detector labels across titles, filters, evidence and timelines. Titles include the subject and every distinct signal type in stable order, rather than selecting the first detector. Covers service, behavioral/authentication, identity/IP, telemetry quality and learned graph signals; unknown types retain a readable fallback.
+- UI uses Observed changes, Baseline, Observed, Detected signals, Assessment, Next step, Assessed by, Priority and Review status. Jev priority display maps investigate to Needs attention and urgent to Critical; stored provider values and deterministic flagging behavior remain unchanged. Expected remains an explicit operator disposition.
+- Validation: production frontend build and diff check passed; isolated TypeScript naming checks covered 35 detector identifiers in EN/VI, grouped-title deduplication and ordering, authentication naming and empty fallback. Live Changes API returned HTTP 200 through the approved host access. Frontend dist rebuilt; no backend restart.

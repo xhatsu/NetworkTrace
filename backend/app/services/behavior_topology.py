@@ -4,6 +4,7 @@ Never joins sources/environments or invents missing callers/latency/error data.
 """
 from __future__ import annotations
 from collections import defaultdict
+from statistics import median
 import time
 from .behavior_graph import ALGORITHM, node_id, decayed_support, strength
 from .learned_behavior import DAY, BUCKET, digest
@@ -114,7 +115,19 @@ def topology_series(graph, days, object_id, environment):
         identities={caller,target,node_id(*args,'api',r['target']+' → '+r['operation']),node_id(*args,'credential',r['principal']),digest([caller,target,'service_call',''])}
         if object_id in identities:matching.add(rid)
     totals=defaultdict(int)
+    # Learn a seasonal shape from the retained, eligible five-minute history.
+    # Each day contributes at most one value per UTC time slot, so a busy day
+    # cannot dominate the profile merely because it has more raw rows.
+    profile=defaultdict(list)
     for day in days:
-        if day['id'] not in matching or day['day']!=start:continue
-        for at,count in zip(day['active_windows'],day['window_counts']):totals[at]+=count
-    return [{'timestamp_ms':at,'tps':count/(BUCKET/1000)} for at,count in sorted(totals.items())]
+        if day['id'] not in matching:continue
+        clean=set(day.get('clean_windows', []))
+        for at,count in zip(day['active_windows'],day['window_counts']):
+            if day['day']==start:totals[at]+=count
+            if at in clean:
+                profile[at % DAY].append(count/(BUCKET/1000))
+    expected_profile={slot:median(values) for slot,values in profile.items()}
+    fallback = entity.get('mean_tps') if entity.get('rate_samples') else None
+    return [{'timestamp_ms':at,'tps':count/(BUCKET/1000),
+             'expected_tps':expected_profile.get(at % DAY, fallback)}
+            for at,count in sorted(totals.items())]

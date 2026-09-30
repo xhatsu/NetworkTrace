@@ -7,7 +7,7 @@ import { useI18n } from "../i18n";
 
 echarts.use([LineChart, DataZoomComponent, GridComponent, LegendComponent, ToolboxComponent, TooltipComponent, CanvasRenderer]);
 
-type Point = { timestamp_ms: number; tps?: number; baseline_rps?: number; http_4xx_rate?: number; http_5xx_rate?: number };
+type Point = { timestamp_ms: number; tps?: number; expected_tps?: number; baseline_rps?: number; http_4xx_rate?: number; http_5xx_rate?: number };
 
 export function ZoomableDashboardChart({ data, timezone }: { data: Point[]; timezone: string }) {
   const { t } = useI18n();
@@ -20,7 +20,7 @@ export function ZoomableDashboardChart({ data, timezone }: { data: Point[]; time
       if (timezone !== "local") options.timeZone = timezone;
       return new Intl.DateTimeFormat([], options).format(new Date(value));
     };
-    const labels = [t("TPS"), t("Baseline"), "HTTP 4xx", "HTTP 5xx"];
+    const labels = [t("Observed TPS"), t("Expected TPS"), "HTTP 4xx", "HTTP 5xx"];
     chart.setOption({
       animation: false,
       color: ["#5794f2", "#a7a9ab", "#ff9830", "#f2495c"],
@@ -33,7 +33,7 @@ export function ZoomableDashboardChart({ data, timezone }: { data: Point[]; time
       toolbox: { right: 8, top: 0, itemSize: 13, iconStyle: { borderColor: "#a7a9ab" }, feature: { dataZoom: { yAxisIndex: "none", title: { zoom: t("Zoom"), back: t("Reset zoom") } }, restore: { title: t("Restore") } } },
       series: [
         { name: labels[0], type: "line", showSymbol: false, connectNulls: true, lineStyle: { width: 1.5 }, data: data.map(p => [p.timestamp_ms, Number(p.tps || 0)]) },
-        { name: labels[1], type: "line", showSymbol: false, connectNulls: true, lineStyle: { width: 1.3, type: "dashed" }, data: data.map(p => [p.timestamp_ms, Number(p.baseline_rps || 0)]) },
+        { name: labels[1], type: "line", showSymbol: false, connectNulls: true, lineStyle: { width: 1.3, type: "dashed" }, data: data.map(p => [p.timestamp_ms, Number(p.expected_tps ?? p.baseline_rps ?? 0)]) },
         { name: labels[2], type: "line", showSymbol: false, connectNulls: true, lineStyle: { width: 1.3 }, data: data.map(p => [p.timestamp_ms, Number(p.http_4xx_rate || 0)]) },
         { name: labels[3], type: "line", showSymbol: false, connectNulls: true, lineStyle: { width: 1.3 }, data: data.map(p => [p.timestamp_ms, Number(p.http_5xx_rate || 0)]) },
       ],

@@ -71,7 +71,11 @@ def active_contract(events: list[dict], at_ms: int) -> dict:
     return event
 
 
-def build_profiles(days: list[dict], contracts: list[dict], now: int) -> tuple[list[dict], list[dict]]:
+def build_profiles(days: list[dict], contracts: list[dict], now: int,
+                   reference_after: dict[str, int] | None = None) -> tuple[list[dict], list[dict]]:
+    """`reference_after` maps relationship IDs to an accepted level-shift time;
+    TPS references restart there instead of comparing against the old level."""
+    reference_after = reference_after or {}
     by_relation: dict[str, list[dict]] = defaultdict(list)
     by_parent: dict[tuple, list[dict]] = defaultdict(list)
     by_contract: dict[str, list[dict]] = defaultdict(list)
@@ -140,8 +144,9 @@ def build_profiles(days: list[dict], contracts: list[dict], now: int) -> tuple[l
         # same UTC hour. Current activity cannot contribute to this baseline.
         observed = sorted((w, count) for d in history for w, count in zip(d['active_windows'], d.get('window_counts', [])))
         latest = observed[-3:]
+        shift_at = reference_after.get(rid, 0)
         reference = [(w, count) for d in history for w, count in zip(d['clean_windows'], d['clean_counts'])
-                     if w < last // DAY * DAY and w // 3_600_000 % 24 == last // 3_600_000 % 24]
+                     if shift_at <= w < last // DAY * DAY and w // 3_600_000 % 24 == last // 3_600_000 % 24]
         reference_allowed = not ready or contract['state'] in {'approved','temporary'}
         if not reference_allowed:
             reference = []
@@ -157,14 +162,14 @@ def build_profiles(days: list[dict], contracts: list[dict], now: int) -> tuple[l
         hourly_baselines=[]
         for hour in range(24):
             samples=[v/300 for d in history for w,v in zip(d['clean_windows'],d['clean_counts'])
-                     if w < last//DAY*DAY and w//3_600_000%24==hour]
+                     if shift_at<=w < last//DAY*DAY and w//3_600_000%24==hour]
             hourly_baselines.append(statistics.median(samples) if reference_allowed and len(samples)>=12 else None)
         p['tps'] = {'hourly_baselines':hourly_baselines,'latest': observed[-1][1] / 300 if observed else None,
                     'latest_at': last, 'baseline': baseline, 'mad': rate_mad,
                     'ready': rate_ready, 'reference_windows': len(reference), 'reference_days': reference_days,
                     'threshold': rate_threshold, 'persistent_surge': surge, 'fresh': recent,
                     'basis': 'same_utc_hour_prior_days_active_windows',
-                    'reference_cutoff': last // DAY * DAY}
+                    'reference_cutoff': last // DAY * DAY, 'reference_start': shift_at or None}
         profiles.append(p)
         if surge:
             deviations.append({**p, 'id': digest([rid, 'traffic_surge', last // DAY]),

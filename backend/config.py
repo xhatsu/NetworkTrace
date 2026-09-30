@@ -18,7 +18,7 @@ def _detect_clickhouse_host() -> str:
     if env_host:
         return env_host
     import socket
-    for candidate in ("127.0.0.1", "10.105.101.253", "10.244.0.118"):
+    for candidate in ("127.0.0.1", "10.98.6.4", "10.105.101.253", "10.244.0.118"):
         try:
             with socket.create_connection((candidate, 8123), timeout=0.2):
                 return candidate
@@ -86,12 +86,20 @@ class Settings:
     elasticsearch_password: str = os.getenv("OTEL_ES_PASSWORD", "")
     elasticsearch_verify_tls: bool = os.getenv("OTEL_ES_VERIFY_TLS", "false").lower() == "true"
     elasticsearch_timeout: float = float(os.getenv("OTEL_ES_TIMEOUT", "15.0"))
-    elasticsearch_retention_days: int = max(1, int(os.getenv("OTEL_ES_RETENTION_DAYS", "7")))
+    elasticsearch_retention_days: int = max(1, int(os.getenv("OTEL_ES_RETENTION_DAYS", "2")))
+    elasticsearch_sync_enabled: bool = os.getenv("OTEL_ES_SYNC_ENABLED", "true").lower() in ("true", "1", "yes")
     demo_mode: bool = os.getenv("OTEL_DEMO_MODE", "true").lower() == "true"
     cors_origins: tuple[str, ...] = tuple(
         item.strip() for item in os.getenv(
             "OTEL_CORS_ORIGINS",
             "http://127.0.0.1:30102,http://localhost:30102,http://localhost:5173",
+        ).split(",") if item.strip()
+    )
+    # Configurable trusted proxies (supports IP addresses and CIDR subnets, e.g. "10.240.147.0/24,10.10.1.20")
+    trusted_proxies: tuple[str, ...] = tuple(
+        item.strip() for item in os.getenv(
+            "OTEL_TRUSTED_PROXIES",
+            "",
         ).split(",") if item.strip()
     )
     # Known infrastructure IP categories
@@ -198,6 +206,9 @@ class Settings:
 
     behavior_learning_enabled: bool = os.getenv("OTEL_BEHAVIOR_LEARNING_ENABLED", "true").lower() == "true"
     behavior_budget_seconds: int = max(5, min(60, int(os.getenv("OTEL_BEHAVIOR_BUDGET_SECONDS", "20"))))
+    # Seconds after a five-minute window closes before it may be learned (30-300).
+    # 300 restores the former fixed one-window lag.
+    behavior_learn_grace_seconds: int = max(30, min(300, int(os.getenv("OTEL_BEHAVIOR_LEARN_GRACE_SECONDS", "90"))))
 
     semantic_batch_size: int = int(os.getenv("OTEL_SEMANTIC_BATCH_SIZE", "2"))
     semantic_budget_seconds: int = int(os.getenv("OTEL_SEMANTIC_BUDGET_SECONDS", "20"))

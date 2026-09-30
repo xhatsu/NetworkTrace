@@ -367,7 +367,7 @@ export function TpsLineChart({
   label = "TPS",
   heightClassName = "h-44",
 }: {
-  data: Array<{ timestamp_ms: number; tps: number }>;
+  data: Array<{ timestamp_ms: number; tps: number; expected_tps?: number | null }>;
   label?: string;
   heightClassName?: string;
 }) {
