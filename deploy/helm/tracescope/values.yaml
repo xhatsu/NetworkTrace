@@ -13,7 +13,7 @@ global:
   # Configure this once (e.g. "0.3.3") so all components share the unified version.
   # Can be overridden per workload below (app.image.tag, ingest.image.tag, etc.).
   image:
-    tag: "0.4.1"
+    tag: "0.4.2"
 
 nameOverride: ""
 fullnameOverride: ""
@@ -52,13 +52,17 @@ clickhouse:
 # -----------------------------------------------------------------------------
 storage:
   backend: "clickhouse"
-  # Trace search/waterfalls read application APM spans from Elasticsearch.
-  # Worker metrics are materialized into ClickHouse while analytics stay there.
-  traceBackend: "elasticsearch"
-  clickhouseOnlyAgentTraces: true
+  # elk_to_clickhouse: copy ELK raw traces into ClickHouse, then process there.
+  # clickhouse: use existing ClickHouse traces and do not synchronize from ELK.
+  pipelineMode: "elk_to_clickhouse"
+  # All trace, metric, topology, user, and behavior reads use ClickHouse.
+  traceBackend: "clickhouse"
+  clickhouseOnlyAgentTraces: false
 
 elasticsearch:
   enabled: true
+  # ELK is a raw trace source only; it never writes metric/topology rollups.
+  syncEnabled: true
   # Existing ELK service in namespace tmp-elk.
   url: "http://tmp-elk-svc.tmp-elk.svc.cluster.local:9200"
   index: "traces-apm*,apm-*,traces-*"

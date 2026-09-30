@@ -6,6 +6,10 @@ metadata:
     {{- include "tracescope.labels" . | nindent 4 }}
 data:
   OTEL_RUN_MIGRATIONS: "false"
+  OTEL_TRACE_PIPELINE_MODE: {{ default "elk_to_clickhouse" .Values.storage.pipelineMode | quote }}
+  OTEL_STORAGE_BACKEND: "clickhouse"
+  OTEL_TRACE_STORAGE_BACKEND: "clickhouse"
+  OTEL_CLICKHOUSE_ONLY_AGENT_TRACES: {{ .Values.storage.clickhouseOnlyAgentTraces | quote }}
   OTEL_DEMO_MODE: {{ .Values.config.demoMode | quote }}
   OTEL_CORS_ORIGINS: {{ .Values.config.corsOrigins | quote }}
   OTEL_MAX_INGEST_BYTES: "10485760"
