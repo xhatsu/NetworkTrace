@@ -318,7 +318,7 @@ export function SemanticAssessmentBadge({ assessment }: { assessment?: SemanticA
       : status === "failed" ? t("AI unavailable", "AI không khả dụng")
         : status === "stale" ? t("AI stale", "AI đã cũ")
           : t("AI not evaluated", "AI chưa đánh giá");
-  const tone = status === "succeeded" ? "border-accent/40 bg-accent-soft text-accent"
+  const tone = status === "succeeded" ? "border-good/40 bg-good-bg text-good"
     : status === "pending" ? "border-info/40 bg-info-bg text-info"
       : status === "failed" || status === "stale" ? "border-warn/40 bg-warn-bg text-warn"
         : "border-line bg-surface-2 text-muted";
@@ -385,7 +385,7 @@ export function SemanticAssessmentSummary({ episode, full = false, timezone = "l
           <ul className="space-y-1">{priorityProbabilities.map(([priority, probability]) => <li key={priority} className="flex items-center justify-between gap-2 text-[10px] text-muted"><span>{assessmentPriorityLabel(priority as NonNullable<SemanticAssessment["priority"]>, t)}</span><span className="font-mono">{Math.round(probability * 100)}%</span></li>)}</ul>
         </div>}
       </div>}
-      <p className="max-w-4xl border-l-2 border-accent/50 pl-2 text-[10px] leading-4 text-muted">{t("Jev returns typed decisions and probabilities, not a generated explanation or per-signal attribution. Use the L3 evidence and rationale for the underlying facts.", "Jev trả về quyết định và xác suất có kiểu dữ liệu, không tạo giải thích bằng văn bản hoặc gán theo từng tín hiệu. Xem bằng chứng và lý do L3 để biết các dữ kiện nền.")}</p>
+      <p className="max-w-4xl border-l-2 border-line-strong pl-2 text-[10px] leading-4 text-muted">{t("Jev returns typed decisions and probabilities, not a generated explanation or per-signal attribution. Use the L3 evidence and rationale for the underlying facts.", "Jev trả về quyết định và xác suất có kiểu dữ liệu, không tạo giải thích bằng văn bản hoặc gán theo từng tín hiệu. Xem bằng chứng và lý do L3 để biết các dữ kiện nền.")}</p>
       {!!assessment.caveats?.length && <div><div className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-muted">{t("Caveats", "Lưu ý")}</div><ul className="space-y-1">{assessment.caveats.map((caveat, index) => <li key={`${caveat}-${index}`} className="border-l-2 border-warn/60 pl-2 text-[11px] leading-4 text-muted">{caveat}</li>)}</ul></div>}
       <div className="border-t border-line pt-2 text-[10px] text-muted">{t("Assessed by", "Đánh giá bởi")}: {assessment.provider === "jev" ? "Jev" : t("Semantic provider", "Nhà cung cấp ngữ nghĩa")} · {assessment.provider_model || assessment.assessment_version}{assessment.evaluated_at ? ` · ${formatEpisodeTime(assessment.evaluated_at, true, timezone)}` : ""}{assessment.input_tokens != null ? ` · ${assessment.input_tokens} ${t("input tokens", "token đầu vào")}` : ""}{assessment.cost_usd != null ? ` · $${assessment.cost_usd.toFixed(6)}` : ""}</div>
     </div> : <div className="p-3 text-[11px] leading-4 text-muted">
@@ -399,10 +399,10 @@ export function SemanticAssessmentSummary({ episode, full = false, timezone = "l
 export type EntityKind = "user" | "service" | "api" | "ip";
 
 export function entityTokenClass(kind: EntityKind) {
-  if (kind === "user") return "border-entity-user/55 bg-entity-user/10 text-entity-user";
-  if (kind === "service") return "border-entity-service/55 bg-accent-soft text-entity-service";
-  if (kind === "api") return "border-entity-api/55 bg-entity-api/10 text-entity-api";
-  return "border-line bg-surface-2 text-muted";
+  if (kind === "user") return "border-entity-user/40 bg-surface text-entity-user";
+  if (kind === "service") return "border-entity-service/40 bg-surface text-entity-service";
+  if (kind === "api") return "border-entity-api/40 bg-surface text-entity-api";
+  return "border-line bg-surface text-muted";
 }
 
 export function EntityToken({ kind, entity, children }: { kind: EntityKind; entity?: EntityRef; children: ReactNode }) {
@@ -499,7 +499,7 @@ export function EpisodeCard({ episode, onInvestigate, detailSearch = "", timezon
             <SemanticAssessmentBadge assessment={episode.semantic_assessment} />
             <span className="text-[10px] text-muted text-muted">{t("Last observed", "Quan sát gần nhất")} {formatEpisodeTime(episode.last_seen_at, true, timezone)}</span>
           </div>
-          <h3 className="mt-2 flex items-center gap-2 text-sm font-semibold text-ink"><Icon size={14} className="text-accent" />{episodeTitle(episode, t)}</h3>
+          <h3 className="mt-2 flex items-center gap-2 text-sm font-semibold text-ink"><Icon size={14} className="text-muted" />{episodeTitle(episode, t)}</h3>
           <div className="mt-2"><EpisodePath episode={episode} compact /></div>
           {episode.abnormality?.reasons?.[0] && <p className="mt-2 text-[11px] text-muted">{episode.abnormality.reasons[0]}</p>}
           <SemanticAssessmentSummary episode={episode} />
@@ -518,7 +518,7 @@ export function EpisodeCard({ episode, onInvestigate, detailSearch = "", timezon
               <div className="text-[10px] uppercase tracking-wide text-muted">{t(highlight.label, highlight.label)}</div>
               <div className="mt-1 font-mono text-xs text-ink">{displayValue(highlight.before, highlight.unit)} <span className="text-muted">→</span> {displayValue(highlight.after, highlight.unit)}</div>
               {highlight.before == null && highlight.after != null
-                ? <div className="mt-0.5 text-[10px] font-semibold uppercase text-accent">{t("Added", "Mới xuất hiện")}</div>
+                ? <div className="mt-0.5 text-[10px] font-semibold uppercase text-good">{t("Added", "Mới xuất hiện")}</div>
                 : highlight.delta != null && <div className="mt-0.5 font-mono text-[10px] text-muted">{Number(highlight.delta) >= 0 ? "+" : ""}{Number(highlight.delta).toFixed(1)}%</div>}
             </div>
           ))}
@@ -540,7 +540,7 @@ export function EpisodeMetricTable({ episode }: { episode: Episode }) {
       <table className="w-full min-w-[560px] text-left text-xs">
         <thead><tr className="border-b border-line text-[10px] uppercase tracking-wide text-muted"><th className="px-3 py-2">{t("Metric", "Chỉ số")}</th><th className="px-3 py-2">{t("Baseline", "Baseline")}</th><th className="px-3 py-2">{t("Observed", "Quan sát được")}</th><th className="px-3 py-2 text-right">{t("Difference", "Chênh lệch")}</th></tr></thead>
         <tbody className="divide-y divide-line">
-          {highlights.map((highlight) => <tr key={`${highlight.label}-${highlight.unit || ""}`}><td className="px-3 py-2 font-semibold text-ink">{t(highlight.label, highlight.label)}</td><td className="px-3 py-2 font-mono text-muted">{displayValue(highlight.before, highlight.unit)}</td><td className="px-3 py-2 font-mono text-ink">{displayValue(highlight.after, highlight.unit)}{highlight.before == null && highlight.after != null && <span className="ml-2 text-[10px] font-sans font-semibold uppercase text-accent">{t("Added", "Mới")}</span>}</td><td className="px-3 py-2 text-right font-mono text-muted">{formatHighlightDelta(highlight, t)}</td></tr>)}
+          {highlights.map((highlight) => <tr key={`${highlight.label}-${highlight.unit || ""}`}><td className="px-3 py-2 font-semibold text-ink">{t(highlight.label, highlight.label)}</td><td className="px-3 py-2 font-mono text-muted">{displayValue(highlight.before, highlight.unit)}</td><td className="px-3 py-2 font-mono text-ink">{displayValue(highlight.after, highlight.unit)}{highlight.before == null && highlight.after != null && <span className="ml-2 text-[10px] font-sans font-semibold uppercase text-good">{t("Added", "Mới")}</span>}</td><td className="px-3 py-2 text-right font-mono text-muted">{formatHighlightDelta(highlight, t)}</td></tr>)}
         </tbody>
       </table>
     </div>
@@ -552,7 +552,7 @@ export function EpisodeTimeline({ episode, timezone = "local" }: { episode: Epis
   const timeline = episode.timeline || (episode.signals || []).map((signal) => ({ at: signal.detected_at, type: signal.type, source: signal.source }));
   return (
     <div className="divide-y divide-line">
-      {timeline.length ? timeline.map((item, index) => <div key={`${item.type}-${item.at}-${index}`} className="flex items-center gap-3 px-3 py-2.5 text-[11px]"><span className="w-32 shrink-0 font-mono text-muted">{formatEpisodeTime(item.at, true, timezone)}</span><span className="h-1.5 w-1.5 rounded-full bg-accent" /><span className="text-ink">{changeTypeLabel(item.type, t)}</span><span className="ml-auto text-[10px] uppercase text-muted">{item.source}</span></div>) : <div className="p-4 text-xs text-muted">{t("No timeline evidence available", "Chưa có bằng chứng dòng thời gian")}</div>}
+      {timeline.length ? timeline.map((item, index) => <div key={`${item.type}-${item.at}-${index}`} className="flex items-center gap-3 px-3 py-2.5 text-[11px]"><span className="w-32 shrink-0 font-mono text-muted">{formatEpisodeTime(item.at, true, timezone)}</span><span className="h-1.5 w-1.5 rounded-full bg-muted" /><span className="text-ink">{changeTypeLabel(item.type, t)}</span><span className="ml-auto text-[10px] uppercase text-muted">{item.source}</span></div>) : <div className="p-4 text-xs text-muted">{t("No timeline evidence available", "Chưa có bằng chứng dòng thời gian")}</div>}
     </div>
   );
 }
@@ -561,12 +561,12 @@ export function EpisodeEvidence({ episode }: { episode: Episode }) {
   const { t } = useI18n();
   return (
     <div className="divide-y divide-line">
-      {episode.evidence.length ? episode.evidence.map((item) => <div key={`${item.detector}-${item.label}`} className="flex gap-2.5 p-3"><CircleDot size={14} className="mt-0.5 shrink-0 text-accent" /><div className="min-w-0"><div className="text-xs font-semibold text-ink">{changeTypeLabel(item.detector, t)}</div><div className="mt-1 text-[11px] text-muted">{item.detail}</div><details className="mt-1"><summary className="cursor-pointer text-[10px] text-muted">{t("Technical detector detail", "Chi tiết detector kỹ thuật")}</summary><div className="mt-1 font-mono text-[10px] text-muted">{item.detector}</div></details></div></div>) : <div className="p-4 text-xs text-muted">{t("No evidence available", "Chưa có bằng chứng")}</div>}
+      {episode.evidence.length ? episode.evidence.map((item) => <div key={`${item.detector}-${item.label}`} className="flex gap-2.5 p-3"><CircleDot size={14} className="mt-0.5 shrink-0 text-muted" /><div className="min-w-0"><div className="text-xs font-semibold text-ink">{changeTypeLabel(item.detector, t)}</div><div className="mt-1 text-[11px] text-muted">{item.detail}</div><details className="mt-1"><summary className="cursor-pointer text-[10px] text-muted">{t("Technical detector detail", "Chi tiết detector kỹ thuật")}</summary><div className="mt-1 font-mono text-[10px] text-muted">{item.detector}</div></details></div></div>) : <div className="p-4 text-xs text-muted">{t("No evidence available", "Chưa có bằng chứng")}</div>}
     </div>
   );
 }
 
 export function EpisodeBaselineNote({ episode }: { episode: Episode }) {
   const { t } = useI18n();
-  return <div className="border border-line-strong bg-surface-2 p-3 text-[11px] text-muted"><span className="font-semibold text-ink">{t("Baseline context", "Ngữ cảnh baseline")}: </span>{episode.explanation || t("Compared with the established operating pattern.", "So với mô hình vận hành đã thiết lập.")}</div>;
+  return <div className="border border-structure-line bg-structure p-3 text-[11px] text-muted"><span className="font-semibold text-ink">{t("Baseline context", "Ngữ cảnh baseline")}: </span>{episode.explanation || t("Compared with the established operating pattern.", "So với mô hình vận hành đã thiết lập.")}</div>;
 }

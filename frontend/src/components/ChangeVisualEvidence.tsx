@@ -155,7 +155,7 @@ export function ChangeVisualEvidence({ episode, filters }: { episode: Episode; f
           </div> : <div className="grid h-48 place-items-center text-xs text-muted">{t("No metric samples around this change", "Không có mẫu metric quanh thay đổi này")}</div>}
       {chartPoints.length > 0 && <div className="flex flex-wrap items-center gap-3 px-3 pb-2 text-[10px] text-muted">
         <span className="inline-flex items-center gap-1"><span className="w-4 border-t-2 border-accent" />{metricLabel}</span>
-        {metric === "tps" && <span className="inline-flex items-center gap-1"><span className="w-4 border-t-2 border-dashed border-accent-2" />{t("Current reference", "Tham chiếu hiện tại")}</span>}
+        {metric === "tps" && <span className="inline-flex items-center gap-1"><span className="w-4 border-t-2 border-dashed border-muted" />{t("Current reference", "Tham chiếu hiện tại")}</span>}
         <span className="inline-flex items-center gap-1"><span className="w-4 border-t-2 border-dashed border-warn" />{t("Latest signal", "Tín hiệu mới nhất")}</span>
       </div>}
       <p className="border-t border-line px-3 py-2 text-[10px] leading-4 text-muted">

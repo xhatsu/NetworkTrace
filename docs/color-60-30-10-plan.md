@@ -1,6 +1,6 @@
 # 60/30/10 Color Implementation Plan (frontend/)
 
-Status: ready to execute (written 2026-10-02). Not started.
+Status: implemented 2026-10-02; follow-ups in docs/color-60-30-10-fixes.md.
 Audience: an implementing agent with no prior context. Follow the steps in order; each phase ends with a checkpoint that must pass before the next one starts.
 
 ---

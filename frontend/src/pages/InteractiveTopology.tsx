@@ -96,9 +96,9 @@ function edgeStrokeWidth(_edge?: TopologyEdge, _basis?: "observed" | "baseline")
 }
 
 function statusTone(status?: string) {
-  if (status === "new") return "border-good bg-good-bg text-good";
-  if (status === "disappeared") return "border-bad bg-bad-bg text-bad";
-  if (status === "changed") return "border-warn bg-warn-bg text-warn";
+  if (status === "new") return "border-good text-good";
+  if (status === "disappeared") return "border-bad text-bad";
+  if (status === "changed") return "border-warn text-warn";
   return "border-line bg-surface-2 text-muted";
 }
 
@@ -119,7 +119,7 @@ function NodeIcon({ type }: { type: TopologyNode["type"] }) {
 }
 
 function MetricStrip({ metrics }: { metrics: Metrics; vertical?: boolean }) {
-  return <div className="flex flex-wrap items-center justify-between gap-2 pt-1 text-[10px]"><span className="text-accent font-medium">{formatCompactTps(metrics.tps)} TPS</span><span className="text-muted"><LearningState metrics={metrics}/></span></div>;
+  return <div className="flex flex-wrap items-center justify-between gap-2 pt-1 text-[10px]"><span className="text-ink font-medium">{formatCompactTps(metrics.tps)} TPS</span><span className="text-muted"><LearningState metrics={metrics}/></span></div>;
 }
 
 function ServiceNodeCard({
@@ -146,7 +146,7 @@ function ServiceNodeCard({
     <div
       className={`overflow-hidden rounded-inner border bg-surface shadow-card transition-colors ${
         historical
-          ? "border-line opacity-60"
+          ? "border-dashed border-line-strong bg-surface-2"
           : surprise
             ? "border-warn/60"
             : "border-line"
@@ -189,7 +189,7 @@ function ServiceNodeCard({
 
         <button type="button" onClick={(event) => { event.stopPropagation(); onSelect(); }} className="mt-0.5 flex w-full min-w-0 flex-col text-left focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent">
           <span className="flex w-full min-w-0 items-center whitespace-nowrap text-[10px] leading-4">
-            <span className="text-accent font-medium num" title={t('Last observed TPS','TPS quan sát cuối')}>{formatCompactTps(metrics.tps)} TPS</span><span className="mx-1 text-faint">·</span><span className="text-muted"><ObservationAge at={metrics.last_seen_ms}/></span>
+            <span className="text-ink font-medium num" title={t('Last observed TPS','TPS quan sát cuối')}>{formatCompactTps(metrics.tps)} TPS</span><span className="mx-1 text-faint">·</span><span className="text-muted"><ObservationAge at={metrics.last_seen_ms}/></span>
           </span>
           <span className="mt-0.5 h-3 w-full truncate text-[10px] leading-3 text-muted"><LearningState metrics={metrics}/>
           </span>
@@ -229,7 +229,7 @@ function TpsLineGraph({ data, compact = false }: { data: Array<{ timestamp_ms: n
     <div className={`${compact ? "h-32" : "h-44"} rounded-ctl border border-line bg-surface px-2 pb-2 pt-3 shadow-card`} data-testid="topology-tps-chart">
       <div className="mb-1 flex items-center justify-end gap-3 text-[10px] text-muted" aria-label={t('TPS chart legend','Chú giải biểu đồ TPS')}>
         <span className="inline-flex items-center gap-1"><i className="h-px w-4 bg-accent" />{t('Observed','Quan sát')}</span>
-        {data.some((point) => point.expected_tps != null) && <span className="inline-flex items-center gap-1"><i className="w-4 border-t border-dashed border-accent-2" />{t('Expected','Dự kiến')}</span>}
+        {data.some((point) => point.expected_tps != null) && <span className="inline-flex items-center gap-1"><i className="w-4 border-t border-dashed border-muted" />{t('Expected','Dự kiến')}</span>}
       </div>
       <svg className="h-full w-full" viewBox={`0 0 ${width} ${height}`} role="img" aria-label="TPS time-series line graph" preserveAspectRatio="none">
         {[0, 0.5, 1].map((ratio) => {
@@ -451,7 +451,7 @@ function GraphSurface({
               />
             ) : (
               <>
-                <div className={`group w-full rounded-ctl border border-l-4 bg-surface shadow-card px-3 py-2 text-left transition hover:border-accent ${tone.border} ${isSelected ? "border-accent ring-2 ring-accent" : node.metrics.change?.status === "new" ? "border-good" : node.metrics.change?.status === "changed" ? "border-warn" : "border-line"}`}>
+                <div className={`group w-full rounded-ctl border border-l-4 bg-surface shadow-card px-3 py-2 text-left transition hover:border-line-strong ${tone.border} ${isSelected ? "border-accent ring-2 ring-accent" : node.metrics.change?.status === "new" ? "border-good" : node.metrics.change?.status === "changed" ? "border-warn" : "border-line"}`}>
                   <button type="button" className={`flex items-center gap-2 text-xs font-semibold focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent ${tone.text}`} onClick={(event) => { event.stopPropagation(); onSelect({ kind: "node", node }); }} aria-label={`Inspect ${node.type} ${node.name}`}>
                     <NodeIcon type={node.type} /><span className="truncate">{node.name}</span>
                   </button>
@@ -471,13 +471,13 @@ function GraphSurface({
           <div className="text-xs text-muted">
             {t("Check the learning source and environment.", "Kiểm tra nguồn và môi trường học.")}
           </div>
-          <div className="text-xs text-accent font-medium">{t("Missing caller evidence never creates a service-call edge.", "Thiếu Caller không tạo cạnh lời gọi Service.")}</div>
+          <div className="text-xs text-muted font-medium">{t("Missing caller evidence never creates a service-call edge.", "Thiếu Caller không tạo cạnh lời gọi Service.")}</div>
         </div>
       )}
       </div>
       <div className="absolute bottom-24 left-3 z-20 flex flex-col overflow-hidden rounded-ctl border border-line bg-surface shadow-pop xl:bottom-14" data-topology-object="true" aria-label={t("Canvas navigation controls")}>
         <button type="button" data-testid="topology-zoom-in" className="grid h-7 w-8 place-items-center text-muted hover:bg-hover hover:text-ink" onClick={(event) => { event.stopPropagation(); changeZoom(0.1); }} aria-label={t("Zoom in")} title={t("Zoom in")}><ZoomIn size={14} /></button>
-        <button type="button" data-testid="topology-reset-view" className="border-y border-line px-1 py-1 font-mono text-[10px] font-semibold text-accent" onClick={(event) => { event.stopPropagation(); resetViewport(); }} aria-label={t("Reset canvas view")} title={t("Reset canvas view")}>{Math.round(zoom * 100)}%</button>
+        <button type="button" data-testid="topology-reset-view" className="border-y border-line px-1 py-1 font-mono text-[10px] font-semibold text-ink" onClick={(event) => { event.stopPropagation(); resetViewport(); }} aria-label={t("Reset canvas view")} title={t("Reset canvas view")}>{Math.round(zoom * 100)}%</button>
         <button type="button" data-testid="topology-zoom-out" className="grid h-7 w-8 place-items-center text-muted hover:bg-hover hover:text-ink" onClick={(event) => { event.stopPropagation(); changeZoom(-0.1); }} aria-label={t("Zoom out")} title={t("Zoom out")}><ZoomOut size={14} /></button>
       </div>
     </div>
@@ -570,14 +570,14 @@ function RelationshipListPanel({
         </div>
       </header>
       <div className="border-b border-line p-1.5">
-        <input type="search" value={search} onChange={(event) => onSearch(event.target.value)} placeholder={t("Search...")} aria-label={`${title} ${t("Search")}`} className="h-7 w-full rounded-ctl border border-line bg-surface-2 px-2 text-[11px] text-ink outline-none placeholder:text-muted focus:border-accent" />
+        <input type="search" value={search} onChange={(event) => onSearch(event.target.value)} placeholder={t("Search...")} aria-label={`${title} ${t("Search")}`} className="h-7 w-full rounded-ctl border border-line bg-surface-2 px-2 text-[11px] text-ink outline-none placeholder:text-muted focus:border-line-strong" />
       </div>
       <div className="min-h-0 overflow-y-auto p-1">
         {loading && <p className="px-2 py-3 text-xs text-muted">{t("Loading...")}</p>}
         {error && <p className="px-2 py-3 text-xs text-bad">{t("This list could not be loaded.")}</p>}
         {!loading && !error && items.length === 0 && <p className="px-2 py-3 text-xs text-muted">{t("No matching learned relationships.", "Không có quan hệ đã học phù hợp.")}</p>}
         {items.map((item) => (
-          <button key={item.id} type="button" data-testid="topology-drilldown-item" onClick={() => onSelect(item)} className={`mb-0.5 flex w-full items-center gap-1.5 rounded-ctl px-1.5 py-1 text-left transition focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent ${selectedId === item.id ? "bg-accent-soft border border-accent" : "hover:bg-hover"}`}>
+          <button key={item.id} type="button" data-testid="topology-drilldown-item" onClick={() => onSelect(item)} className={`mb-0.5 flex w-full items-center gap-1.5 rounded-ctl px-1.5 py-1 text-left transition focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent ${selectedId === item.id ? "bg-accent-soft border border-accent text-ink font-semibold" : "hover:bg-hover"}`}>
             <span className={`grid h-6 w-6 shrink-0 place-items-center rounded-ctl border border-line ${entityTone(item.type).soft} ${entityTone(item.type).text}`}><NodeIcon type={item.type} /></span>
             <span className="min-w-0 flex-1"><span className={`block truncate text-[11px] font-medium ${entityTone(item.type).text}`}>{item.name}</span><span className="block truncate font-mono text-[10px] text-muted">{formatCompactTps(item.metrics.tps)} TPS · <ObservationAge at={item.metrics.last_seen_ms}/></span></span>
             {item.type === "service" && item.metrics.api_count !== undefined && <span className="shrink-0 text-[10px] text-muted">{item.metrics.api_count} APIs</span>}
@@ -597,12 +597,12 @@ function DetailPanel({selection,detail,detailLoading,detailError,ips,onClose,onO
   const entityRef:EntityRef|undefined=selection.kind!=='node'?undefined:selection.node.type==='service'?{kind:'service',name:selection.node.name}:selection.node.type==='principal'?{kind:'user',principal:selection.node.principal||selection.node.name}:selection.node.service?{kind:'api',service:selection.node.service,operation:selection.node.api||selection.node.name}:undefined;
   const name=selection.kind==='edge'?`${selection.edge.source_name} → ${selection.edge.target_name}`:selection.node.name;
   return <aside className="absolute bottom-3 right-3 top-auto z-30 flex max-h-[72vh] w-[calc(100%-1.5rem)] flex-col overflow-hidden rounded-card border border-line-strong bg-surface shadow-pop sm:bottom-auto sm:top-16 sm:max-h-[min(74vh,580px)] sm:w-[328px]" aria-label={t('Topology object details')} data-testid="topology-inspector">
-    <div className="flex items-start justify-between gap-2 border-b border-line px-3 py-2.5"><div className="min-w-0"><p className="text-[10px] text-muted">{t('Learned observation','Quan sát đã học')} · {selection.kind==='edge'?t('Service call','Lời gọi Service'):selection.node.type==='principal'?t('Observed credential','Credential quan sát'):selection.node.type}</p><h3 className="mt-1 break-words text-sm font-semibold text-ink">{entityRef?<EntityLink entity={entityRef} className="text-accent hover:underline">{name} <ChevronRight size={13} className="inline"/></EntityLink>:name}</h3></div><button type="button" className="btn" onClick={onClose} aria-label={t('Close topology detail panel')}><X size={14}/></button></div>
+    <div className="flex items-start justify-between gap-2 border-b border-line px-3 py-2.5"><div className="min-w-0"><p className="text-[10px] text-muted">{t('Learned observation','Quan sát đã học')} · {selection.kind==='edge'?t('Service call','Lời gọi Service'):selection.node.type==='principal'?t('Observed credential','Credential quan sát'):selection.node.type}</p><h3 className="mt-1 break-words text-sm font-semibold text-ink">{entityRef?<EntityLink entity={entityRef} className="text-ink hover:underline">{name} <ChevronRight size={13} className="inline"/></EntityLink>:name}</h3></div><button type="button" className="btn" onClick={onClose} aria-label={t('Close topology detail panel')}><X size={14}/></button></div>
     <div className="min-h-0 space-y-3 overflow-y-auto p-3 text-xs text-muted">
       <button type="button" className="btn w-full justify-center" data-testid="open-access-flow" onClick={onOpenFlow}><GitBranch size={13}/> {t('Open access flow','Mở luồng truy cập')}</button>
       {detailLoading?<Loading/>:detailError?<ErrorState message={t('The selected topology detail could not be loaded.')}/>:<>
       <div className="flex flex-wrap items-center justify-between gap-2 rounded-ctl border border-line bg-surface-2 px-2.5 py-2"><LearningState metrics={metrics}/><ObservationAge at={metrics.last_seen_ms}/></div>
-      <div className="grid grid-cols-2 gap-3"><div><div className="label">{t('Observed TPS','TPS quan sát')}</div><strong className="font-mono text-xl text-accent">{formatCompactTps(metrics.tps)}</strong></div><div><div className="label">{t('Expected TPS','TPS dự kiến')}</div><strong className="font-mono text-xl text-ink">{learned.ready&&learned.expected_tps!=null?formatCompactTps(learned.expected_tps):'—'}</strong></div></div>
+      <div className="grid grid-cols-2 gap-3"><div><div className="label">{t('Observed TPS','TPS quan sát')}</div><strong className="font-mono text-xl text-ink">{formatCompactTps(metrics.tps)}</strong></div><div><div className="label">{t('Expected TPS','TPS dự kiến')}</div><strong className="font-mono text-xl text-ink">{learned.ready&&learned.expected_tps!=null?formatCompactTps(learned.expected_tps):'—'}</strong></div></div>
       {!learned.ready&&<p className="text-[11px] text-muted">{t('Building a traffic reference from completed observations.','Đang tạo tham chiếu lưu lượng từ các quan sát đã hoàn tất.')}</p>}
       {!!detail?.series.length&&<section><h4 className="label mb-1">{t('TPS · last observed day','TPS · ngày quan sát cuối')}</h4><TpsLineGraph data={detail.series} compact/></section>}
       {!detail?.series.length&&<p data-testid="topology-tps-empty" className="text-muted">{t('No retained TPS samples for this object.','Không còn mẫu TPS cho đối tượng này.')}</p>}
@@ -942,11 +942,11 @@ export function InteractiveTopologyPage() {
 
       <div className="pointer-events-none absolute left-3 right-3 top-3 z-30 flex flex-col items-start gap-2 sm:flex-row sm:justify-between">
         <div className="pointer-events-auto w-[min(300px,calc(100vw-1.5rem))] rounded-card border border-line bg-surface px-2.5 py-2 shadow-card">
-          <h1 className="flex items-center gap-1.5 text-[13px] font-semibold tracking-tight text-ink"><Network size={14} className="shrink-0 text-accent" />{t("Learned Service Topology", "Topology Service đã học")}</h1>
+          <h1 className="flex items-center gap-1.5 text-[13px] font-semibold tracking-tight text-ink"><Network size={14} className="shrink-0 text-muted" />{t("Learned Service Topology", "Topology Service đã học")}</h1>
           <p className="sr-only">{t("The graph shows services and their connections. Expand a service to browse APIs and users.")}</p>
           <div className="relative mt-1.5" onFocus={() => setSearchOpen(true)} onBlur={(event) => { if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setSearchOpen(false); }}>
             <Search size={13} className="pointer-events-none absolute left-2.5 top-2 text-muted" />
-            <input type="search" value={searchTerm} onChange={(event) => { setSearchTerm(event.target.value); setSearchOpen(true); }} placeholder={t("Find service, API, or credential...", "Tìm Service, API hoặc Credential...")} aria-label={t("Find service, API, or credential", "Tìm Service, API hoặc Credential")} data-testid="topology-search" className="h-7 w-full rounded-ctl border border-line bg-surface-2 pl-8 pr-2 text-[11px] text-ink outline-none placeholder:text-muted focus:border-accent" />
+            <input type="search" value={searchTerm} onChange={(event) => { setSearchTerm(event.target.value); setSearchOpen(true); }} placeholder={t("Find service, API, or credential...", "Tìm Service, API hoặc Credential...")} aria-label={t("Find service, API, or credential", "Tìm Service, API hoặc Credential")} data-testid="topology-search" className="h-7 w-full rounded-ctl border border-line bg-surface-2 pl-8 pr-2 text-[11px] text-ink outline-none placeholder:text-muted focus:border-line-strong" />
             {searchOpen && debouncedSearch.length >= 2 && (
               <div className="absolute left-0 top-8 z-40 max-h-56 w-full overflow-y-auto rounded-card border border-line-strong bg-surface p-1 shadow-pop" data-testid="topology-search-results">
                 {graphQuery.isLoading && <div className="px-3 py-3 text-xs text-muted">{t("Searching...")}</div>}
@@ -955,15 +955,15 @@ export function InteractiveTopologyPage() {
                   <button key={node.id + "-" + node.service + "-" + node.api} type="button" data-topology-search-result="true" className="flex w-full items-center gap-2 rounded-ctl px-2 py-1.5 text-left hover:bg-hover focus:bg-hover focus:outline-none" onMouseDown={(event) => event.preventDefault()} onClick={() => travelTo(node)}>
                     <span className={"grid h-6 w-6 shrink-0 place-items-center rounded-ctl border border-line " + entityTone(node.type).soft + " " + entityTone(node.type).text}><NodeIcon type={node.type} /></span>
                     <span className="min-w-0 flex-1"><span className={"block truncate text-[11px] font-semibold " + entityTone(node.type).text}>{node.name}</span><span className="block truncate text-[10px] uppercase tracking-wider text-muted">{node.type === "principal" ? t("Credential", "Credential") : t(node.type)}{node.service && node.type !== "service" ? " · " + node.service : ""}</span></span>
-                    <span className="font-mono text-[10px] text-accent">{n(node.metrics.tps, 2)} tps</span>
+                    <span className="font-mono text-[10px] text-muted">{n(node.metrics.tps, 2)} tps</span>
                   </button>
                 ))}
               </div>
             )}
           </div>
           <div className="mt-1.5 flex rounded-ctl border border-line bg-surface-2 p-0.5" role="group" aria-label={t("Topology navigation mode")}>
-            <button type="button" data-testid="topology-mode-service-first" onClick={() => changeMode("service-first")} className={"min-w-0 flex-1 rounded-ctl px-1 py-1 text-[10px] font-medium " + (mode === "service-first" ? "bg-surface text-accent shadow-xs" : "text-muted hover:text-ink")}>{t("Service → API → Credential", "Service → API → Credential")}</button>
-            <button type="button" data-testid="topology-mode-user-first" onClick={() => changeMode("user-first")} className={"min-w-0 flex-1 rounded-ctl px-1 py-1 text-[10px] font-medium " + (mode === "user-first" ? "bg-surface text-accent shadow-xs" : "text-muted hover:text-ink")}>{t("Credential → Service → API", "Credential → Service → API")}</button>
+            <button type="button" data-testid="topology-mode-service-first" onClick={() => changeMode("service-first")} className={"min-w-0 flex-1 rounded-ctl px-1 py-1 text-[10px] font-medium " + (mode === "service-first" ? "bg-surface text-ink font-semibold shadow-xs" : "text-muted hover:text-ink")}>{t("Service → API → Credential", "Service → API → Credential")}</button>
+            <button type="button" data-testid="topology-mode-user-first" onClick={() => changeMode("user-first")} className={"min-w-0 flex-1 rounded-ctl px-1 py-1 text-[10px] font-medium " + (mode === "user-first" ? "bg-surface text-ink font-semibold shadow-xs" : "text-muted hover:text-ink")}>{t("Credential → Service → API", "Credential → Service → API")}</button>
           </div>
         </div>
 
@@ -1015,7 +1015,7 @@ export function InteractiveTopologyPage() {
           <header className="sticky top-0 z-10 flex items-center justify-between gap-2 border-b border-line bg-surface-2 px-3 py-2">
             <h2 className="min-w-0 truncate text-xs font-semibold text-ink">{t("Access flow", "Luồng truy cập")}: <span className="font-mono">{flow.filters.caller ? flow.filters.caller + " → " : ""}{flow.focus}</span></h2>
             <div className="flex items-center gap-2">
-              <a className="text-[11px] text-accent underline font-medium" href={`/behavior?tab=flow&focus_type=${flow.type}&focus=${encodeURIComponent(flow.focus)}`}>{t("Open full view", "Mở toàn màn hình")}</a>
+              <a className="text-[11px] text-ink underline font-medium" href={`/behavior?tab=flow&focus_type=${flow.type}&focus=${encodeURIComponent(flow.focus)}`}>{t("Open full view", "Mở toàn màn hình")}</a>
               <button type="button" className="btn" onClick={() => setFlow(null)} aria-label={t("Close access flow", "Đóng luồng truy cập")}><X size={14} /></button>
             </div>
           </header>

@@ -70,14 +70,14 @@ export function UserDirectory() {
       <div className="rounded-2xl border border-line bg-surface p-6 shadow-sm">
         <div className="flex flex-wrap items-center justify-between gap-4">
           <div className="flex items-center gap-4">
-            <div className="grid h-14 w-14 place-items-center rounded-2xl bg-accent border border-line/40 text-white">
+            <div className="grid h-14 w-14 place-items-center rounded-2xl bg-structure border border-structure-line text-ink">
               <Users size={28} strokeWidth={2.2} />
             </div>
             <div>
               <span className="text-[11px] font-bold uppercase tracking-[0.15em] text-entity-api">
                 {t("User Intelligence & Identity Directory")}
               </span>
-              <h1 className="mt-0.5 text-2xl md:text-3xl font-bold tracking-tight text-white">
+              <h1 className="mt-0.5 text-2xl md:text-3xl font-bold tracking-tight text-ink">
                 {t("User Directory")}
               </h1>
               <p className="mt-1 text-xs text-secondary">
@@ -89,12 +89,12 @@ export function UserDirectory() {
           <div className="flex items-center gap-2">
             <Link
               to="/unknown-users"
-              className="flex items-center gap-1.5 rounded-full border border-warn/40 bg-warn/15 px-3 py-1 text-xs font-mono font-bold text-warn hover:bg-warn/25 hover:text-ink transition-all"
+              className="flex items-center gap-1.5 rounded-full border border-warn px-3 py-1 text-xs font-mono font-bold text-warn hover:text-ink transition-all"
             >
               <UserX size={13} />
               <span>{t("Unattributed Traffic", "Lưu Lượng Chưa Định Danh")}</span>
             </Link>
-            <span className="rounded-full border border-good/40 bg-good/15 px-3 py-1 text-xs font-mono font-bold text-good">
+            <span className="rounded-full border border-good px-3 py-1 text-xs font-mono font-bold text-good">
               ● {t("Active Behavioral Engine", "Động Cơ Hành Vi Đang Hoạt Động")}
             </span>
           </div>
@@ -104,7 +104,7 @@ export function UserDirectory() {
         <div className="mt-6 grid grid-cols-2 gap-3 sm:grid-cols-4">
           <div className="rounded-xl border border-line bg-surface p-3.5">
             <span className="text-[10px] font-bold uppercase tracking-wider text-faint">{t("Observed Identities")}</span>
-            <div className="mt-1 font-mono text-2xl font-bold text-white">
+            <div className="mt-1 font-mono text-2xl font-bold text-ink">
               {(summary?.observed_principals || users.length).toLocaleString()}
             </div>
           </div>
@@ -114,13 +114,13 @@ export function UserDirectory() {
               {(summary?.active_principals || 0).toLocaleString()}
             </div>
           </div>
-          <div className="rounded-xl border border-line bg-black/30 p-3.5">
+          <div className="rounded-xl border border-line bg-surface-2 p-3.5">
             <span className="text-[10px] font-bold uppercase tracking-wider text-faint">{t("Accounts with Changes", "Tài Khoản Có Thay Đổi")}</span>
             <div className="mt-1 font-mono text-2xl font-bold text-warn">
               {(summary?.principals_with_changes || 0).toLocaleString()}
             </div>
           </div>
-          <div className="rounded-xl border border-line bg-black/30 p-3.5">
+          <div className="rounded-xl border border-line bg-surface-2 p-3.5">
             <span className="text-[10px] font-bold uppercase tracking-wider text-faint">{t("Dormant Reactivated", "Tái Hoạt Động Sau Ngủ Đông")}</span>
             <div className="mt-1 font-mono text-2xl font-bold text-bad">
               {(summary?.dormant_reactivated || 0).toLocaleString()}
@@ -130,7 +130,7 @@ export function UserDirectory() {
       </div>
 
       {/* Filter and Search Bar */}
-      <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-[rgba(255,255,255,0.18)] bg-surface-2 p-3.5 shadow-md">
+      <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-line-strong bg-surface-2 p-3.5 shadow-md">
         <div className="relative flex-1 min-w-[240px] max-w-md">
           <Search className="absolute left-3 top-2.5 text-faint" size={14} />
           <input
@@ -138,13 +138,13 @@ export function UserDirectory() {
             placeholder={t("Search identities...")}
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            className="w-full rounded-lg border border-line-strong bg-black/40 pl-9 pr-3 py-1.5 text-xs text-white placeholder:text-muted focus:border-accent focus:outline-none"
+            className="w-full rounded-lg border border-line-strong bg-surface-2 pl-9 pr-3 py-1.5 text-xs text-ink placeholder:text-muted focus:border-line-strong focus:outline-none"
           />
         </div>
 
         <div className="flex flex-wrap items-center gap-2">
           {/* Active Filter */}
-          <div className="flex items-center rounded-lg border border-line bg-black/40 p-0.5 text-xs">
+          <div className="flex items-center rounded-lg border border-line bg-surface-2 p-0.5 text-xs">
             {[
               { id: "all", label: t("All Statuses") },
               { id: "active", label: t("Active (5m)") },
@@ -155,7 +155,7 @@ export function UserDirectory() {
                 onClick={() => setActiveFilter(af.id)}
                 className={`rounded px-2.5 py-1 font-semibold transition ${
                   activeFilter === af.id
-                    ? "bg-accent text-black font-bold shadow-sm"
+                    ? "bg-surface text-ink font-semibold shadow-sm border-b-2 border-accent"
                     : "text-secondary hover:text-ink"
                 }`}
               >
@@ -168,7 +168,7 @@ export function UserDirectory() {
           <select
             value={sortKey}
             onChange={(e) => setSortKey(e.target.value)}
-            className="rounded-lg border border-line-strong bg-surface px-2.5 py-1 text-xs font-semibold text-white focus:outline-none cursor-pointer"
+            className="rounded-lg border border-line-strong bg-surface px-2.5 py-1 text-xs font-semibold text-ink focus:outline-none cursor-pointer"
           >
             <option value="most_changed">{t("Sort: Most Changed", "Xếp theo: Thay đổi nhiều nhất")}</option>
             <option value="most_active">{t("Sort: Most Active", "Xếp theo: Hoạt động nhiều nhất")}</option>
@@ -181,7 +181,7 @@ export function UserDirectory() {
       </div>
 
       {/* Users Table */}
-      <div className="rounded-2xl border border-[rgba(255,255,255,0.18)] bg-surface-2 shadow-xl overflow-hidden">
+      <div className="rounded-2xl border border-line-strong bg-surface-2 shadow-xl overflow-hidden">
         <div className="overflow-x-auto">
           <table className="w-full text-left text-xs">
             <thead>
@@ -198,7 +198,7 @@ export function UserDirectory() {
                 <th className="px-5 py-3 text-right">{t("Actions")}</th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-white/10 font-mono">
+            <tbody className="divide-y divide-line font-mono">
               {isLoading ? (
                 <tr>
                   <td colSpan={10} className="py-12 text-center text-xs text-entity-api animate-pulse">
@@ -221,9 +221,9 @@ export function UserDirectory() {
                     <tr
                       key={u.principal_name}
                       onClick={() => nav(entityPath({ kind: "user", principal: u.principal_name }))}
-                      className="cursor-pointer hover:bg-white/[0.06] transition"
+                      className="cursor-pointer hover:bg-hover transition"
                     >
-                      <td className="px-5 py-3 font-bold text-white flex items-center gap-2.5">
+                      <td className="px-5 py-3 font-bold text-ink flex items-center gap-2.5">
                         <div className="grid h-7 w-7 place-items-center rounded-lg bg-surface-2 text-entity-api font-sans text-xs">
                           <User size={14} />
                         </div>
@@ -240,7 +240,7 @@ export function UserDirectory() {
                         <span
                           className={`inline-flex items-center gap-1.5 rounded-md px-2 py-0.5 text-[11px] font-bold ${
                             u.status === "Active"
-                              ? "bg-good/20 text-good border border-good/40"
+                              ? "border border-good text-good"
                               : "bg-surface-2 text-muted border border-line"
                           }`}
                         >
@@ -253,10 +253,10 @@ export function UserDirectory() {
                         <span
                           className={`inline-flex items-center gap-1.5 rounded-md px-2 py-0.5 text-[11px] font-bold border ${
                             isHigh
-                              ? "border-bad/50 bg-bad/15 text-bad"
+                              ? "border-bad text-bad"
                               : isMed
-                              ? "border-warn/50 bg-warn/15 text-warn"
-                              : "border-good/50 bg-good/15 text-good"
+                              ? "border-warn text-warn"
+                              : "border-good text-good"
                           }`}
                         >
                           {isHigh ? <ShieldAlert size={12} /> : <Shield size={12} />}
@@ -264,7 +264,7 @@ export function UserDirectory() {
                         </span>
                       </td>
 
-                      <td className="px-4 py-3 text-right font-bold text-white">
+                      <td className="px-4 py-3 text-right font-bold text-ink">
                         {(u.total_requests || 0).toLocaleString()}
                       </td>
 
@@ -284,7 +284,7 @@ export function UserDirectory() {
                         <span
                           className={`rounded px-2 py-0.5 text-[10px] font-bold ${
                             (u.recent_changes || 0) > 0
-                              ? "bg-warn/20 text-warn border border-warn/40"
+                              ? "border border-warn text-warn"
                               : "text-faint"
                           }`}
                         >
@@ -293,7 +293,7 @@ export function UserDirectory() {
                       </td>
 
                       <td className="px-5 py-3 text-right">
-                        <EntityLink entity={{ kind: "user", principal: u.principal_name }} className="inline-flex items-center gap-1 rounded-lg border border-line/50 bg-accent/15 px-2.5 py-1 text-xs font-bold text-accent hover:bg-accent/30 transition">
+                        <EntityLink entity={{ kind: "user", principal: u.principal_name }} className="inline-flex items-center gap-1 rounded-lg border border-structure-line bg-structure px-2.5 py-1 text-xs font-bold text-ink hover:bg-structure-2 transition">
                           <span>{t("Inspect Workspace")}</span>
                           <ArrowRight size={12} />
                         </EntityLink>

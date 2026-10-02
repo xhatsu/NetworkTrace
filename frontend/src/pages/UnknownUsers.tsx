@@ -89,7 +89,7 @@ export function UnknownUsersPage() {
       <div className="relative overflow-hidden rounded-2xl border border-line bg-surface p-6 shadow-card">
         <div className="flex flex-wrap items-center justify-between gap-4">
           <div className="flex items-center gap-3.5">
-            <div className="grid h-12 w-12 place-items-center rounded-2xl border border-warn/40 bg-warn/15 text-warn shadow-sm">
+            <div className="grid h-12 w-12 place-items-center rounded-2xl border border-warn bg-structure text-warn shadow-sm">
               <UserX size={24} strokeWidth={2.4} />
             </div>
             <div>
@@ -97,7 +97,7 @@ export function UnknownUsersPage() {
                 <h1 className="text-xl font-extrabold tracking-tight text-ink">
                   {t("Unattributed Request Monitor", "Giám Sát Lưu Lượng Chưa Định Danh")}
                 </h1>
-                <span className="rounded-md border border-warn/40 bg-warn/15 px-2 py-0.5 text-[10px] font-mono font-bold uppercase text-warn">
+                <span className="rounded-md border border-warn px-2 py-0.5 text-[10px] font-mono font-bold uppercase text-warn">
                   {t("Identity Attribution", "Định Danh Nguồn Gọi")}
                 </span>
               </div>
@@ -113,7 +113,7 @@ export function UnknownUsersPage() {
           <div className="flex items-center gap-2.5">
             <Link
               to="/users"
-              className="flex items-center gap-2 rounded-xl border border-line/40 bg-accent/15 px-3.5 py-2 text-xs font-bold text-entity-api transition-all hover:bg-accent/25 hover:text-ink"
+              className="flex items-center gap-2 rounded-xl border border-line bg-surface px-3.5 py-2 text-xs font-bold text-ink transition-all hover:bg-hover"
             >
               <span>{t("View Authenticated Users", "Xem Người Dùng Đã Xác Thực")}</span>
               <ArrowRight size={14} />
@@ -131,7 +131,7 @@ export function UnknownUsersPage() {
             <Radio size={16} className="text-entity-api" />
           </div>
           <div className="flex items-baseline justify-between">
-            <span className="text-2xl font-black font-mono text-white">
+            <span className="text-2xl font-black font-mono text-ink">
               {kpis.total_requests.toLocaleString()}
             </span>
             <span className="text-xs font-mono font-bold text-entity-api">
@@ -152,7 +152,7 @@ export function UnknownUsersPage() {
           <div className="flex items-baseline justify-between">
             <span
               className={`text-2xl font-black font-mono ${
-                kpis.auth_fail_rate > 5 ? "text-bad" : "text-white"
+                kpis.auth_fail_rate > 5 ? "text-bad" : "text-ink"
               }`}
             >
               {kpis.auth_fail_rate}%
@@ -208,9 +208,9 @@ export function UnknownUsersPage() {
 
       {/* SECTION 2: TIME-SERIES TRAFFIC & ERROR DYNAMICS */}
       <div className="rounded-2xl border border-line bg-surface p-5 shadow-lg space-y-3">
-        <div className="flex flex-wrap items-center justify-between gap-3 border-b border-white/5 pb-3">
+        <div className="flex flex-wrap items-center justify-between gap-3 border-b border-line pb-3">
           <div>
-            <h2 className="text-sm font-bold uppercase tracking-wider text-white flex items-center gap-2">
+            <h2 className="text-sm font-bold uppercase tracking-wider text-ink flex items-center gap-2">
               <Activity size={16} className="text-entity-api" />
               <span>{t("Unattributed Traffic & Error Dynamics", "Biến Động Lưu Lượng Chưa Định Danh & Tỷ Lệ Lỗi")}</span>
             </h2>
@@ -220,7 +220,7 @@ export function UnknownUsersPage() {
           </div>
           <div className="flex items-center gap-4 text-xs font-mono text-faint">
             <span className="flex items-center gap-1.5">
-              <span className="h-2 w-2 rounded-full bg-accent" />
+              <span className="h-2 w-2 rounded-full bg-muted" />
               <span>{t("Non-error requests", "Yêu cầu không lỗi")}</span>
             </span>
             <span className="flex items-center gap-1.5">
@@ -249,14 +249,14 @@ export function UnknownUsersPage() {
                 tickFormatter={(ts) =>
                   new Date(ts).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
                 }
-                stroke="var(--text-muted)"
+                stroke="var(--muted)"
                 fontSize={11}
               />
-              <YAxis stroke="var(--text-muted)" fontSize={11} allowDecimals={false} />
+              <YAxis stroke="var(--muted)" fontSize={11} allowDecimals={false} />
               <Tooltip
                 contentStyle={{
                   backgroundColor: "var(--surface)",
-                  borderColor: "var(--border-line)",
+                  borderColor: "var(--border)",
                   borderRadius: 4,
                   fontSize: 12,
                   color: "var(--text)",
@@ -289,8 +289,8 @@ export function UnknownUsersPage() {
         {/* Column 1: Top Target Services */}
         <div className="rounded-2xl border border-line bg-surface p-4 shadow-sm flex flex-col justify-between">
           <div>
-            <div className="flex items-center justify-between border-b border-white/5 pb-2.5 mb-3">
-              <h3 className="text-xs font-bold uppercase tracking-wider text-white flex items-center gap-1.5">
+            <div className="flex items-center justify-between border-b border-line pb-2.5 mb-3">
+              <h3 className="text-xs font-bold uppercase tracking-wider text-ink flex items-center gap-1.5">
                 <Server size={14} className="text-entity-user" />
                 <span>{t("Top Target Services", "Top Dịch Vụ Đích")}</span>
               </h3>
@@ -304,7 +304,7 @@ export function UnknownUsersPage() {
                 topTargets.slice(0, 6).map((svc) => (
                   <div key={svc.target_service} className="rounded-lg border border-line bg-surface p-2.5 space-y-1.5">
                     <div className="flex items-center justify-between text-xs">
-                      <span className="font-bold text-white font-mono truncate max-w-[170px]" title={svc.target_service}>
+                      <span className="font-bold text-ink font-mono truncate max-w-[170px]" title={svc.target_service}>
                         {svc.target_service}
                       </span>
                       <span className="font-mono text-entity-api font-bold">
@@ -332,8 +332,8 @@ export function UnknownUsersPage() {
         {/* Column 2: Top Operations / APIs */}
         <div className="rounded-2xl border border-line bg-surface p-4 shadow-sm flex flex-col justify-between">
           <div>
-            <div className="flex items-center justify-between border-b border-white/5 pb-2.5 mb-3">
-              <h3 className="text-xs font-bold uppercase tracking-wider text-white flex items-center gap-1.5">
+            <div className="flex items-center justify-between border-b border-line pb-2.5 mb-3">
+              <h3 className="text-xs font-bold uppercase tracking-wider text-ink flex items-center gap-1.5">
                 <Layers size={14} className="text-entity-api" />
                 <span>{t("Top Operations & APIs", "Top Thao Tác & APIs")}</span>
               </h3>
@@ -347,7 +347,7 @@ export function UnknownUsersPage() {
                 topOperations.slice(0, 6).map((op) => (
                   <div key={`${op.target_service}-${op.operation}`} className="rounded-lg border border-line bg-surface p-2.5 space-y-1.5">
                     <div className="flex items-center justify-between text-xs font-mono">
-                      <span className="font-bold text-white truncate max-w-[170px]" title={op.operation}>
+                      <span className="font-bold text-ink truncate max-w-[170px]" title={op.operation}>
                         {op.operation}
                       </span>
                       <span className="text-entity-api font-bold">
@@ -371,8 +371,8 @@ export function UnknownUsersPage() {
         {/* Column 3: Top Source IPs */}
         <div className="rounded-2xl border border-line bg-surface p-4 shadow-sm flex flex-col justify-between">
           <div>
-            <div className="flex items-center justify-between border-b border-white/5 pb-2.5 mb-3">
-              <h3 className="text-xs font-bold uppercase tracking-wider text-white flex items-center gap-1.5">
+            <div className="flex items-center justify-between border-b border-line pb-2.5 mb-3">
+              <h3 className="text-xs font-bold uppercase tracking-wider text-ink flex items-center gap-1.5">
                 <Globe size={14} className="text-warn" />
                 <span>{t("Top Source IPs & Infrastructure Role", "Top Địa Chỉ IP Nguồn")}</span>
               </h3>
@@ -386,14 +386,14 @@ export function UnknownUsersPage() {
                 topSources.slice(0, 6).map((src) => (
                   <div key={src.source_ip} className="rounded-lg border border-line bg-surface p-2.5 space-y-1.5">
                     <div className="flex items-center justify-between text-xs font-mono">
-                      <span className="font-bold text-white truncate max-w-[140px]" title={src.source_ip}>
+                      <span className="font-bold text-ink truncate max-w-[140px]" title={src.source_ip}>
                         {src.source_ip}
                       </span>
                       <span
                         className={`text-[10px] font-bold px-1.5 py-0.5 rounded border uppercase ${
                           src.is_load_balancer
-                            ? "bg-warn/15 border-warn/30 text-warn"
-                            : "bg-accent/15 border-line/30 text-entity-api"
+                            ? "border border-warn text-warn"
+                            : "bg-structure border-structure-line text-ink"
                         }`}
                       >
                         {src.role_label || (src.is_load_balancer ? "Load Balancer" : "Client IP")}
@@ -417,9 +417,9 @@ export function UnknownUsersPage() {
 
       {/* SECTION 4: RECENT UNIDENTIFIED TRACES TABLE */}
       <div className="rounded-2xl border border-line bg-surface p-5 shadow-lg space-y-4">
-        <div className="flex flex-wrap items-center justify-between gap-3 border-b border-white/5 pb-3">
+        <div className="flex flex-wrap items-center justify-between gap-3 border-b border-line pb-3">
           <div>
-            <h2 className="text-sm font-bold uppercase tracking-wider text-white flex items-center gap-2">
+            <h2 className="text-sm font-bold uppercase tracking-wider text-ink flex items-center gap-2">
               <Lock size={16} className="text-warn" />
               <span>{t("Recent Unattributed Traces", "Danh Sách Giao Dịch Chưa Định Danh Gần Nhất")}</span>
             </h2>
@@ -434,7 +434,7 @@ export function UnknownUsersPage() {
               <button
                 onClick={() => setSelectedTab("all")}
                 className={`rounded px-2.5 py-1 transition-all ${
-                  selectedTab === "all" ? "bg-accent text-black font-bold" : "text-faint hover:text-ink"
+                  selectedTab === "all" ? "bg-surface text-ink font-semibold shadow-sm border-b-2 border-accent" : "text-structure-ink hover:text-ink hover:bg-structure-2"
                 }`}
               >
                 {t("All", "Tất cả")}
@@ -450,7 +450,7 @@ export function UnknownUsersPage() {
               <button
                 onClick={() => setSelectedTab("errors")}
                 className={`rounded px-2.5 py-1 transition-all ${
-                  selectedTab === "errors" ? "bg-warn text-black font-bold" : "text-faint hover:text-ink"
+                  selectedTab === "errors" ? "bg-warn text-ink font-bold" : "text-faint hover:text-ink"
                 }`}
               >
                 {t("5xx Errors", "Lỗi Máy chủ 5xx")}
@@ -465,7 +465,7 @@ export function UnknownUsersPage() {
                 placeholder={t("Filter by service, API, IP...", "Lọc theo service, API, IP...")}
                 value={searchTerm}
                 onChange={(e) => setSearchTerm(e.target.value)}
-                className="h-8 rounded-lg border border-line bg-surface pl-8 pr-3 text-xs text-white placeholder:text-muted focus:border-accent focus:outline-none"
+                className="h-8 rounded-lg border border-line bg-surface pl-8 pr-3 text-xs text-ink placeholder:text-muted focus:border-line-strong focus:outline-none"
               />
             </div>
           </div>
@@ -486,7 +486,7 @@ export function UnknownUsersPage() {
                 <th className="py-2.5 px-3 text-right">{t("P95 latency", "Độ trễ P95")}</th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-white/5 font-mono">
+            <tbody className="divide-y divide-line font-mono">
               {filteredRollups.length === 0 ? (
                 <tr>
                   <td colSpan={8} className="py-10 text-center text-xs text-faint">
@@ -504,12 +504,12 @@ export function UnknownUsersPage() {
                           second: "2-digit",
                         })}
                       </td>
-                      <td className="py-2.5 px-3 font-bold text-white">{row.target_service}</td>
+                      <td className="py-2.5 px-3 font-bold text-ink">{row.target_service}</td>
                       <td className="py-2.5 px-3 text-entity-api max-w-[240px] truncate" title={row.operation}>
                         {row.operation}
                       </td>
                       <td className="py-2.5 px-3 text-faint">{row.source_ip || "—"}</td>
-                      <td className="py-2.5 px-3 text-right text-white">{Number(row.requests || 0).toLocaleString()}</td>
+                      <td className="py-2.5 px-3 text-right text-ink">{Number(row.requests || 0).toLocaleString()}</td>
                       <td className={"py-2.5 px-3 text-right " + (row.errors ? "text-bad" : "text-faint")}>{Number(row.errors || 0).toLocaleString()}</td>
                       <td className={"py-2.5 px-3 text-right " + (row.auth_failure_count ? "text-warn" : "text-faint")}>{Number(row.auth_failure_count || 0).toLocaleString()}</td>
                       <td className="py-2.5 px-3 text-right text-faint">{Number(row.duration_ms || 0).toLocaleString()} ms</td>

@@ -204,8 +204,8 @@ function StatusBadge({ status }: { status: string }) {
     <span
       className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-0.5 text-[10px] font-semibold uppercase tracking-wider ${
         ok
-          ? "border-good/25 bg-good/10 text-good"
-          : "border-warn/30 bg-warn/10 text-warn"
+          ? "border border-good bg-structure text-good"
+          : "border border-warn bg-structure text-warn"
       }`}
     >
       <span className={`h-1.5 w-1.5 rounded-full ${ok ? "bg-good animate-pulse" : "bg-warn"}`} />
@@ -235,16 +235,16 @@ function NodeRow({
   return (
     <tr
       onClick={() => nav(`/agent-stats/${encodeURIComponent(sample.node)}?instance_id=${encodeURIComponent(sample.instance_id)}`)}
-      className="cursor-pointer border-b border-[rgba(255,255,255,0.05)] transition hover:bg-surface/[0.03] group"
+      className="cursor-pointer border-b border-line transition hover:bg-hover group"
     >
       {/* node */}
       <td className="whitespace-nowrap px-4 py-3">
         <div className="flex items-center gap-2.5">
-          <div className="grid h-7 w-7 place-items-center rounded-lg border border-line bg-surface/[0.02] text-muted group-hover:border-accent/50 group-hover:text-accent transition">
+          <div className="grid h-7 w-7 place-items-center rounded-lg border border-line bg-surface-2 text-muted group-hover:border-line-strong group-hover:text-ink transition">
             <Server size={14} />
           </div>
           <div>
-            <div className="text-xs font-semibold text-ink group-hover:text-accent transition">
+            <div className="text-xs font-semibold text-ink group-hover:text-ink group-hover:underline transition">
               {sample.node}
             </div>
             <div className="text-[10px] text-faint font-mono">
@@ -261,7 +261,7 @@ function NodeRow({
           {reasons.length > 0 && (
             <div className="flex flex-wrap gap-1">
               {reasons.map((r) => (
-                <span key={r} className="rounded bg-warn/10 px-1.5 py-0.5 text-[10px] font-mono text-warn">
+                <span key={r} className="rounded bg-structure border border-structure-line px-1.5 py-0.5 text-[10px] font-mono text-warn">
                   {r}
                 </span>
               ))}
@@ -272,7 +272,7 @@ function NodeRow({
 
       {/* mode */}
       <td className="px-4 py-3 text-[11px] font-mono text-muted">
-        <span className="rounded bg-surface/[0.04] px-1.5 py-0.5 border border-white/[0.06]">
+        <span className="rounded bg-surface-2 px-1.5 py-0.5 border border-line">
           {sample.mode ?? "—"}
         </span>
       </td>
@@ -336,7 +336,7 @@ function NodeRow({
       {/* action link & delete */}
       <td className="whitespace-nowrap px-4 py-3 text-right">
         <div className="flex items-center justify-end gap-2.5">
-          <div className="inline-flex items-center gap-1 text-[11px] font-medium text-entity-user group-hover:text-accent transition">
+          <div className="inline-flex items-center gap-1 text-[11px] font-medium text-entity-user group-hover:text-ink group-hover:underline transition">
             <span>{t("Drilldown")}</span>
             <ArrowRight size={13} className="group-hover:translate-x-0.5 transition" />
           </div>
@@ -347,7 +347,7 @@ function NodeRow({
               e.stopPropagation();
               onDelete(sample.node, sample.instance_id);
             }}
-            className="grid h-7 w-7 place-items-center rounded-lg border border-transparent text-faint hover:border-bad/40 hover:bg-bad/10 hover:text-bad transition"
+            className="grid h-7 w-7 place-items-center rounded-lg border border-transparent text-faint hover:border-bad-bd hover:text-bad transition"
           >
             <Trash2 size={13} />
           </button>
@@ -508,7 +508,7 @@ export function AgentStatsPage() {
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4">
           <div className="w-full max-w-md rounded-xl border border-line bg-page p-5 shadow-2xl">
             <div className="flex items-center gap-3 text-bad">
-              <div className="grid h-10 w-10 place-items-center rounded-xl bg-bad/10 border border-bad/20">
+              <div className="grid h-10 w-10 place-items-center rounded-xl bg-structure border border-bad text-bad">
                 <Trash2 size={20} />
               </div>
               <div>
@@ -518,10 +518,10 @@ export function AgentStatsPage() {
             </div>
 
             <div className="mt-4 space-y-2.5 text-xs text-ink">
-              <div className="rounded-lg border border-[rgba(255,255,255,0.06)] bg-surface/[0.02] p-3 space-y-1">
+              <div className="rounded-lg border border-line bg-surface p-3 space-y-1">
                 <div className="flex justify-between">
                   <span className="text-muted">{t("Node:")}</span>
-                  <span className="font-mono font-semibold text-white">{targetToDelete.node}</span>
+                  <span className="font-mono font-semibold text-ink">{targetToDelete.node}</span>
                 </div>
                 <div className="flex justify-between">
                   <span className="text-muted">{t("Target Instance:")}</span>
@@ -530,7 +530,7 @@ export function AgentStatsPage() {
               </div>
 
               <div className="space-y-2 pt-1">
-                <label className="flex items-start gap-2.5 p-2.5 rounded-lg border border-[rgba(255,255,255,0.06)] bg-surface/[0.01] cursor-pointer hover:bg-surface/[0.03] transition">
+                <label className="flex items-start gap-2.5 p-2.5 rounded-lg border border-line bg-surface cursor-pointer hover:bg-structure-2 transition">
                   <input
                     type="radio"
                     name="deleteScope"
@@ -541,12 +541,12 @@ export function AgentStatsPage() {
                   <div>
                     <div className="font-semibold text-ink">{t("Delete this instance only")}</div>
                     <div className="text-[11px] text-muted mt-0.5">
-                      Purges only instance <code className="font-mono text-entity-user">{targetToDelete.instance_id}</code>. Other active or historical instances of <span className="font-mono text-white">{targetToDelete.node}</span> remain unaffected.
+                      Purges only instance <code className="font-mono text-entity-user">{targetToDelete.instance_id}</code>. Other active or historical instances of <span className="font-mono text-ink">{targetToDelete.node}</span> remain unaffected.
                     </div>
                   </div>
                 </label>
 
-                <label className="flex items-start gap-2.5 p-2.5 rounded-lg border border-bad/20 bg-bad/5 cursor-pointer hover:bg-bad/10 transition">
+                <label className="flex items-start gap-2.5 p-2.5 rounded-lg border border-bad text-bad bg-structure cursor-pointer hover:bg-structure-2 transition">
                   <input
                     type="radio"
                     name="deleteScope"
@@ -565,7 +565,7 @@ export function AgentStatsPage() {
             </div>
 
             {deleteError && (
-              <div className="mt-3 rounded-lg border border-bad/30 bg-bad/10 p-2.5 text-xs text-bad">
+              <div className="mt-3 rounded-lg border-l-2 border-bad bg-surface p-2.5 text-xs text-bad">
                 {deleteError}
               </div>
             )}
@@ -586,7 +586,7 @@ export function AgentStatsPage() {
                 type="button"
                 disabled={isDeleting}
                 onClick={confirmDeleteTarget}
-                className="btn border-bad/40 bg-bad/80 hover:bg-bad text-white font-semibold transition"
+                className="btn bg-bad border-bad text-white font-semibold hover:opacity-90 transition"
               >
                 <Trash2 size={13} />
                 <span>{isDeleting ? t("Deleting…") : (deleteMode === "instance" ? t("Delete Instance") : t("Delete Whole Node"))}</span>
@@ -738,7 +738,7 @@ export function AgentNodeDetailPage() {
         <div className="flex flex-wrap items-center gap-2">
           {/* Instance Selector Dropdown if multiple instances exist */}
           {knownInstances.length > 1 && (
-            <div className="flex items-center gap-1.5 rounded-lg border border-line bg-surface/[0.02] px-2.5 py-1">
+            <div className="flex items-center gap-1.5 rounded-lg border border-line bg-surface-2 px-2.5 py-1">
               <span className="text-[11px] text-muted">{t("Target Instance:")}</span>
               <select
                 value={activeInstanceId}
@@ -759,7 +759,7 @@ export function AgentNodeDetailPage() {
           )}
 
           {/* Sample Window Limit Segmented Control */}
-          <div className="flex items-center rounded-lg border border-line bg-surface/[0.02] p-0.5">
+          <div className="flex items-center rounded-lg border border-line bg-surface-2 p-0.5">
             {[
               { label: `30 ${t("pts", "pts")} (~15m)`, val: 30 },
               { label: `60 ${t("pts", "pts")} (~30m)`, val: 60 },
@@ -771,7 +771,7 @@ export function AgentNodeDetailPage() {
                 onClick={() => setSampleLimit(val)}
                 className={`rounded px-2 py-1 text-xs font-medium transition ${
                   sampleLimit === val
-                    ? "bg-surface/[0.12] text-white shadow-sm font-semibold"
+                    ? "bg-surface text-ink shadow-sm font-semibold"
                     : "text-muted hover:text-ink"
                 }`}
               >
@@ -794,7 +794,7 @@ export function AgentNodeDetailPage() {
           </button>
 
           <button
-            className="btn border-bad/30 text-bad hover:bg-bad/10 hover:border-bad/50 transition"
+            className="btn border-bad text-bad hover:bg-structure-2 transition"
             onClick={() => setShowDeleteModal(true)}
             title={t("Delete this agent node and its entire telemetry history")}
           >
@@ -812,7 +812,7 @@ export function AgentNodeDetailPage() {
       {/* Node Status Banner */}
       <div className="mb-6 flex flex-wrap items-center justify-between gap-4 rounded-xl border border-line bg-page p-4">
         <div className="flex items-center gap-3">
-          <div className="grid h-10 w-10 place-items-center rounded-xl bg-accent/10 border border-line/20 text-entity-user">
+          <div className="grid h-10 w-10 place-items-center rounded-xl bg-structure border border-structure-line text-entity-user">
             <Server size={20} />
           </div>
           <div>
@@ -833,7 +833,7 @@ export function AgentNodeDetailPage() {
           <div className="flex items-center gap-1.5">
             <span className="text-[11px] font-semibold text-warn">{t("Active Degradation Causes:")}</span>
             {reasons.map((r) => (
-              <span key={r} className="rounded bg-warn/15 border border-warn/30 px-2 py-0.5 text-xs font-mono text-warn">
+              <span key={r} className="rounded bg-structure border border-structure-line px-2 py-0.5 text-xs font-mono text-warn">
                 {r}
               </span>
             ))}
@@ -1124,27 +1124,27 @@ export function AgentNodeDetailPage() {
         {/* 5. Agent Constraints & Process Isolation Specs */}
         <Panel title={t("Process Safety & Hardware Constraints")} subtitle={t("Enforced host-protection limits reported by agent")}>
           <div className="grid grid-cols-2 gap-4 p-5 sm:grid-cols-3 lg:grid-cols-4 text-xs">
-            <div className="flex flex-col gap-1 border-r border-[rgba(255,255,255,0.06)] pr-3">
+            <div className="flex flex-col gap-1 border-r border-line pr-3">
               <span className="text-[10px] uppercase font-semibold text-faint">{t("CPU Core Pin")}</span>
               <span className="font-mono text-ink text-sm">Core #{String(limits.cpu_core ?? latest?.lim_cpu_core ?? "2")}</span>
               <span className="text-[10px] text-muted">{t("Affinity isolated")}</span>
             </div>
-            <div className="flex flex-col gap-1 border-r border-[rgba(255,255,255,0.06)] pr-3">
+            <div className="flex flex-col gap-1 border-r border-line pr-3">
               <span className="text-[10px] uppercase font-semibold text-faint">{t("Bandwidth Ceiling")}</span>
               <span className="font-mono text-ink text-sm">{limits.ship_rate_kbps ?? latest?.lim_ship_rate_kbps ?? 1024} kbps</span>
               <span className="text-[10px] text-muted">{t("Rate limiter capped")}</span>
             </div>
-            <div className="flex flex-col gap-1 border-r border-[rgba(255,255,255,0.06)] pr-3">
+            <div className="flex flex-col gap-1 border-r border-line pr-3">
               <span className="text-[10px] uppercase font-semibold text-faint">{t("Address Space Limit")}</span>
               <span className="font-mono text-ink text-sm">{fmtBytes(limits.address_space_bytes ?? latest?.lim_address_space_bytes ?? 268435456)}</span>
               <span className="text-[10px] text-muted">{t("RLIMIT_AS hard ceiling")}</span>
             </div>
-            <div className="flex flex-col gap-1 border-r border-[rgba(255,255,255,0.06)] pr-3">
+            <div className="flex flex-col gap-1 border-r border-line pr-3">
               <span className="text-[10px] uppercase font-semibold text-faint">{t("Max Upload Body")}</span>
               <span className="font-mono text-ink text-sm">{fmtBytes(limits.http_body_max_bytes ?? latest?.lim_http_body_max_bytes ?? 65536)}</span>
               <span className="text-[10px] text-muted">{t("Single batch cap")}</span>
             </div>
-            <div className="flex flex-col gap-1 border-r border-[rgba(255,255,255,0.06)] pr-3">
+            <div className="flex flex-col gap-1 border-r border-line pr-3">
               <span className="text-[10px] uppercase font-semibold text-faint">{t("Max Ship Threads")}</span>
               <span className="font-mono text-ink text-sm">{limits.ship_threads_max ?? latest?.lim_ship_threads_max ?? 8} threads</span>
               <span className="text-[10px] text-muted">{t("Worker thread pool")}</span>
@@ -1165,7 +1165,7 @@ export function AgentNodeDetailPage() {
           <div className="overflow-x-auto">
             <table className="w-full text-xs">
               <thead>
-                <tr className="border-b border-[rgba(255,255,255,0.06)] text-[10px] uppercase tracking-wider text-faint">
+                <tr className="border-b border-line text-[10px] uppercase tracking-wider text-faint">
                   <th className="px-4 py-2.5 text-left font-semibold">{t("Sequence")}</th>
                   <th className="px-4 py-2.5 text-left font-semibold">{t("Observation Time")}</th>
                   <th className="px-4 py-2.5 text-left font-semibold">{t("Status")}</th>
@@ -1184,7 +1184,7 @@ export function AgentNodeDetailPage() {
                   return (
                     <tr
                       key={`${h.node}-${h.instance_id}-${h.sequence}`}
-                      className="border-b border-[rgba(255,255,255,0.04)] hover:bg-surface/[0.02] font-mono text-[11px]"
+                      className="border-b border-line hover:bg-surface-2 font-mono text-[11px]"
                     >
                       <td className="px-4 py-2.5 text-muted">#{h.sequence}</td>
                       <td className="px-4 py-2.5 text-ink">{fmtFullDate(h.observed_at)}</td>
@@ -1215,7 +1215,7 @@ export function AgentNodeDetailPage() {
                         {rList.length > 0 ? (
                           <div className="flex flex-wrap gap-1">
                             {rList.map((r) => (
-                              <span key={r} className="rounded bg-warn/10 px-1.5 py-0.5 text-[10px] text-warn">
+                              <span key={r} className="rounded bg-structure border border-structure-line px-1.5 py-0.5 text-[10px] text-warn">
                                 {r}
                               </span>
                             ))}
@@ -1238,7 +1238,7 @@ export function AgentNodeDetailPage() {
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4">
           <div className="w-full max-w-md rounded-xl border border-line bg-page p-5 shadow-2xl">
             <div className="flex items-center gap-3 text-bad">
-              <div className="grid h-10 w-10 place-items-center rounded-xl bg-bad/10 border border-bad/20">
+              <div className="grid h-10 w-10 place-items-center rounded-xl bg-structure border border-bad text-bad">
                 <Trash2 size={20} />
               </div>
               <div>
@@ -1248,10 +1248,10 @@ export function AgentNodeDetailPage() {
             </div>
 
             <div className="mt-4 space-y-2.5 text-xs text-ink">
-              <div className="rounded-lg border border-[rgba(255,255,255,0.06)] bg-surface/[0.02] p-3 space-y-1">
+              <div className="rounded-lg border border-line bg-surface p-3 space-y-1">
                 <div className="flex justify-between">
                   <span className="text-muted">{t("Node:")}</span>
-                  <span className="font-mono font-semibold text-white">{node}</span>
+                  <span className="font-mono font-semibold text-ink">{node}</span>
                 </div>
                 <div className="flex justify-between">
                   <span className="text-muted">{t("Target Instance:")}</span>
@@ -1261,7 +1261,7 @@ export function AgentNodeDetailPage() {
 
               <div className="space-y-2 pt-1">
                 {activeInstanceId && (
-                  <label className="flex items-start gap-2.5 p-2.5 rounded-lg border border-[rgba(255,255,255,0.06)] bg-surface/[0.01] cursor-pointer hover:bg-surface/[0.03] transition">
+                  <label className="flex items-start gap-2.5 p-2.5 rounded-lg border border-line bg-surface cursor-pointer hover:bg-structure-2 transition">
                     <input
                       type="radio"
                       name="detailDeleteScope"
@@ -1278,7 +1278,7 @@ export function AgentNodeDetailPage() {
                   </label>
                 )}
 
-                <label className="flex items-start gap-2.5 p-2.5 rounded-lg border border-bad/20 bg-bad/5 cursor-pointer hover:bg-bad/10 transition">
+                <label className="flex items-start gap-2.5 p-2.5 rounded-lg border border-bad text-bad bg-structure cursor-pointer hover:bg-structure-2 transition">
                   <input
                     type="radio"
                     name="detailDeleteScope"
@@ -1297,7 +1297,7 @@ export function AgentNodeDetailPage() {
             </div>
 
             {deleteError && (
-              <div className="mt-3 rounded-lg border border-bad/30 bg-bad/10 p-2.5 text-xs text-bad">
+              <div className="mt-3 rounded-lg border-l-2 border-bad bg-surface p-2.5 text-xs text-bad">
                 {deleteError}
               </div>
             )}
@@ -1318,7 +1318,7 @@ export function AgentNodeDetailPage() {
                 type="button"
                 disabled={isDeleting}
                 onClick={confirmDelete}
-                className="btn border-bad/40 bg-bad/80 hover:bg-bad text-white font-semibold transition"
+                className="btn bg-bad border-bad text-white font-semibold hover:opacity-90 transition"
               >
                 <Trash2 size={13} />
                 <span>{isDeleting ? t("Deleting…") : (deleteMode === "instance" ? t("Delete Instance") : t("Delete Whole Node"))}</span>

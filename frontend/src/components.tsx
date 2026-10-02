@@ -34,8 +34,8 @@ export function Page({
       <div className="page-heading mb-4 flex flex-wrap items-center justify-between gap-3 border-b border-line pb-3">
         <div>
           <div className="mb-1 flex items-center gap-2">
-            <span className="h-1.5 w-1.5 rounded-full bg-accent" />
-            <span className="page-eyebrow text-[11px] font-semibold uppercase tracking-[0.12em] text-accent">
+            <span className="h-1.5 w-1.5 rounded-full bg-muted" />
+            <span className="page-eyebrow text-[11px] font-semibold uppercase tracking-[0.12em] text-muted">
               {eyebrow}
             </span>
           </div>
@@ -69,7 +69,7 @@ export function Panel({
   subtitleClassName?: string;
 }) {
   return (
-    <section className={`rounded-card border border-line bg-surface-2 p-[3px] shadow-card ${className}`}>
+    <section className={`rounded-card border border-line bg-structure p-[3px] shadow-card ${className}`}>
       <div className="rounded-inner border border-line bg-surface overflow-hidden flex flex-col h-full">
         <header className="panel-header flex min-h-9 items-center justify-between border-b border-line px-3.5 py-2">
           <div>
@@ -158,7 +158,7 @@ export function InteractiveMetricCard({
       onClick={onSelect}
       className={`min-w-0 cursor-pointer text-left transition-colors rounded-inner border p-2.5 shadow-card ${
         selected
-          ? "border-accent ring-1 ring-accent bg-accent-soft/40"
+          ? "border-accent ring-1 ring-accent bg-accent-soft"
           : "border-line bg-surface hover:bg-hover"
       } focus-visible:outline focus-visible:outline-2 focus-visible:outline-accent`}
     >
@@ -262,7 +262,7 @@ export function Loading() {
 export function ErrorState({ message }: { message: string }) {
   const { t } = useI18n();
   return (
-    <div className="rounded-inner border border-bad-bd bg-bad-bg/30 flex min-h-40 flex-col items-center justify-center gap-3 p-6 text-center text-sm text-bad">
+    <div className="rounded-inner border border-bad-bd bg-bad-bg flex min-h-40 flex-col items-center justify-center gap-3 p-6 text-center text-sm text-bad">
       <div className="grid h-8 w-8 place-items-center rounded-full border border-bad/30 bg-bad-bg text-bad">
         <AlertTriangle size={18} />
       </div>

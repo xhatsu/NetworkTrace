@@ -126,7 +126,7 @@ function SideNav() {
   ] as const;
 
   return (
-    <aside className="app-rail fixed inset-y-0 left-0 z-50 hidden w-[230px] flex-col py-4 md:flex bg-bg border-r border-line">
+    <aside className="app-rail fixed inset-y-0 left-0 z-50 hidden w-[230px] flex-col py-4 md:flex bg-structure border-r border-structure-line">
       {/* Brand mark */}
       <div className="mb-5 flex items-center gap-2.5 px-3">
         <div className="grid h-8 w-8 shrink-0 place-items-center rounded-ctl bg-accent text-white font-bold shadow-card">
@@ -134,7 +134,7 @@ function SideNav() {
         </div>
         <div className="rail-label">
           <div className="text-sm font-bold text-ink tracking-tight">TraceScope</div>
-          <div className="text-[10.5px] uppercase tracking-wider text-accent font-bold">{t("Intelligence")}</div>
+          <div className="text-[10.5px] uppercase tracking-wider text-structure-ink/70 font-bold">{t("Intelligence")}</div>
         </div>
       </div>
 
@@ -159,8 +159,8 @@ function SideNav() {
                     const isActive = navActive(to, routeActive);
                     return `group relative flex h-8 w-full items-center gap-2.5 rounded-ctl px-2.5 text-[12.5px] font-medium transition duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent ${
                       isActive
-                        ? "bg-surface-2 border border-line text-accent font-semibold"
-                        : "text-muted hover:bg-hover hover:text-ink"
+                        ? "bg-accent-soft text-ink font-semibold"
+                        : "text-structure-ink/80 hover:bg-structure-2 hover:text-ink"
                     }`;
                   }}
                 >
@@ -191,7 +191,7 @@ function SideNav() {
       </nav>
 
       {/* Database/Storage status */}
-      <div className="flex items-center gap-2 px-3 text-[11px] text-muted border-t border-line pt-3">
+      <div className="flex items-center gap-2 px-3 text-[11px] text-muted border-t border-structure-line pt-3">
         <div
           title={t("ClickHouse Store · Real-Time Analytics")}
           className="relative grid h-7 w-7 shrink-0 place-items-center rounded-ctl border border-good-bd bg-good-bg text-good"
@@ -379,34 +379,37 @@ function FilterBar() {
 
   return (
     <div className="toolbar px-3 py-1.5 md:px-4">
-      <div className="flex flex-wrap items-center justify-between gap-3">
+      {/* One line from lg up in every language: the left side shrinks (breadcrumb truncates, search narrows)
+          and the controls never wrap. Below lg the controls always take their own second line. */}
+      <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1.5 lg:flex-nowrap">
         {/* Left: Branding, Current entity & Global Search */}
-        <div className="flex items-center gap-3">
-          <div className="flex items-center gap-2">
-            <span className="text-xs font-bold tracking-tight text-muted">
+        <div className="flex min-w-0 flex-1 items-center gap-3">
+          <div className="flex min-w-0 items-center gap-2">
+            <span className="truncate text-xs font-bold tracking-tight text-muted">
               TraceScope / <span className="text-ink font-semibold">{currentEntity}</span>
             </span>
           </div>
 
           {/* Quick Global Search */}
-          <form onSubmit={handleGlobalSearch} className="relative hidden lg:block">
+          <form onSubmit={handleGlobalSearch} className="relative hidden min-w-[9rem] max-w-64 flex-1 xl:block">
             <Search className="absolute left-2.5 top-2 text-faint" size={13} />
             <input
               type="text"
               placeholder={t("Search service, API, user, IP, or trace ID...")}
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              className="h-7 w-64 rounded-ctl border border-line-strong bg-bg pl-8 pr-3 text-[11.5px] text-ink placeholder:text-faint focus:border-accent focus:outline-none"
+              className="h-7 w-full rounded-ctl border border-line-strong bg-bg pl-8 pr-3 text-[11.5px] text-ink placeholder:text-faint focus:border-line-strong focus:outline-none"
             />
           </form>
         </div>
 
         {/* Middle/Right: Operational window, Refresh, Filters, Language, Theme */}
-        <div className="flex flex-wrap items-center gap-2">
+        <div className="flex w-full flex-wrap items-center gap-2 lg:w-auto lg:shrink-0 lg:flex-nowrap">
           {/* Fixed operational window: current five-minute bucket with seven-day history. */}
           <div className="flex items-center gap-1.5 rounded-ctl border border-line bg-surface-2 px-2.5 py-1 text-[11px] font-semibold text-muted">
             <Clock size={13} />
-            <span>{t("Current: 5m · History: 7d", "Hiện tại: 5 phút · Lịch sử: 7 ngày")}</span>
+            <span className="hidden 2xl:inline">{t("Current: 5m · History: 7d", "Hiện tại: 5 phút · Lịch sử: 7 ngày")}</span>
+            <span className="2xl:hidden" title={t("Current: 5m · History: 7d", "Hiện tại: 5 phút · Lịch sử: 7 ngày")}>5m · 7d</span>
           </div>
 
           <button
@@ -416,8 +419,8 @@ function FilterBar() {
             onClick={handleRefresh}
             className="flex items-center gap-1.5 rounded-ctl border border-line-strong bg-bg px-2.5 py-1 text-[11px] font-semibold text-ink transition hover:bg-hover"
           >
-            <RefreshCw size={12} className={`text-accent ${isRefreshing ? "animate-spin" : ""}`} />
-            <span className="hidden sm:inline">{t("Refresh", "Làm mới")}</span>
+            <RefreshCw size={12} className={`text-muted ${isRefreshing ? "animate-spin text-accent" : ""}`} />
+            <span className="hidden 2xl:inline">{t("Refresh", "Làm mới")}</span>
           </button>
 
           <button
@@ -425,7 +428,7 @@ function FilterBar() {
             aria-expanded={showFilters}
             aria-controls="toolbar-filters"
             onClick={() => setShowFilters(!showFilters)}
-            className={`flex items-center gap-1.5 rounded-ctl border border-line-strong bg-bg px-2.5 py-1 text-[11px] font-semibold transition hover:bg-hover ${showFilters || activeFilterKeys.length > 0 ? "border-accent bg-accent-soft text-accent" : "text-ink"}`}
+            className={`flex items-center gap-1.5 rounded-ctl border border-line-strong bg-bg px-2.5 py-1 text-[11px] font-semibold transition hover:bg-hover ${showFilters || activeFilterKeys.length > 0 ? "border-accent bg-accent-soft text-ink font-semibold" : "text-ink"}`}
           >
             <SlidersHorizontal size={13} />
             <span>{t("Filters")}</span>
@@ -456,7 +459,7 @@ function FilterBar() {
                   }`}
                 >
                   <Icon size={12} />
-                  <span className="hidden xl:inline">{label}</span>
+                  <span className="hidden 2xl:inline">{label}</span>
                 </button>
               );
             })}
@@ -466,14 +469,14 @@ function FilterBar() {
             aria-label={t("Timezone")}
             value={filters.timezone}
             onChange={(e) => setFilter("timezone", e.target.value)}
-            className="rounded-ctl border border-line-strong bg-bg px-2 py-1 text-[11px] font-semibold text-ink cursor-pointer"
+            className="w-[9.5rem] truncate rounded-ctl border border-line-strong bg-bg px-2 py-1 text-[11px] font-semibold text-ink cursor-pointer"
           >
-            <option value="local">{t("Browser Local", "Browser local")} ({Intl.DateTimeFormat().resolvedOptions().timeZone})</option>
+            <option value="local">{t("Browser Local", "Browser local")}</option>
             <option value="UTC">UTC</option>
             <option value="Asia/Ho_Chi_Minh">Asia/Ho Chi Minh</option>
           </select>
 
-          <div className="chip font-mono text-[10.5px] font-bold text-good border border-good-bd bg-good-bg rounded-ctl">
+          <div className="chip w-[5.75rem] justify-center whitespace-nowrap font-mono text-[10.5px] font-bold text-good border border-good-bd bg-good-bg rounded-ctl">
             <Radio size={11} className="text-good" />
             <span>{t("Live", "Trực tiếp")}</span>
           </div>
@@ -502,14 +505,14 @@ function FilterBar() {
                   value={filters[key] || ""}
                   disabled={needsService && !filters[key]}
                   onChange={(event) => setFilter(key, event.target.value)}
-                  className="min-w-0 flex-1 cursor-pointer rounded-ctl border border-line-strong bg-bg px-2 py-1 text-[11px] text-ink focus:border-accent focus:outline-none disabled:cursor-not-allowed disabled:opacity-50"
+                  className="min-w-0 flex-1 cursor-pointer rounded-ctl border border-line-strong bg-bg px-2 py-1 text-[11px] text-ink focus:border-line-strong focus:outline-none disabled:cursor-not-allowed disabled:opacity-50"
                 >
                   <option value="">{t("All", "Tất cả")} · {t(label)}</option>
                   {values.map((value) => <option key={value} value={value}>{value}</option>)}
                 </select>
                 {filters[key] && <button type="button" aria-label={`${t("Clear", "Xóa")} ${t(label)}`} onClick={() => setFilter(key, "")} className="p-1 text-muted hover:text-ink focus-visible:outline focus-visible:outline-2"><X size={12} /></button>}
               </div>
-              {hint && <span id={`toolbar-filter-${key}-hint`} className="text-[10px] text-faint">{hint}{source.isError && !needsService && <button type="button" onClick={() => source.refetch()} className="ml-1 text-accent underline">{t("Retry", "Thử lại")}</button>}</span>}
+              {hint && <span id={`toolbar-filter-${key}-hint`} className="text-[10px] text-muted">{hint}{source.isError && !needsService && <button type="button" onClick={() => source.refetch()} className="ml-1 text-ink underline">{t("Retry", "Thử lại")}</button>}</span>}
             </div>;
           })}
         </div>

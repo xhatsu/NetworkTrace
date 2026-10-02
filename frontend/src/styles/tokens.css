@@ -1,51 +1,68 @@
+/* Palettes (60/30/10): light = Glacier, dark = Midnight.
+   60 base  = --page / --surface / --bg
+   30 tier  = --frame* (sidebar + top bar, a soft tint step from the page)
+              and --structure* (card/panel/table header strips, tinted with the palette hue)
+   10 tier  = --accent: active item, primary button, main chart series
+   Status and entity colors are a separate semantic layer (small marks only). */
 :root {
-  /* Surfaces */
-  --page: #f7f7f8;
-  --bg: #ffffff;
-  --surface: #ffffff;
-  --surface-2: #fafafa;
+  /* Surfaces (60) */
+  --page: #f1f4f9;
+  --bg: #fbfcfe;
+  --surface: #fbfcfe;
+  --surface-2: #f5f8fc;
 
   /* Borders */
-  --border: #e8e8ec;
-  --border-strong: #dcdce2;
+  --border: #d5deea;
+  --border-strong: #c5d1e1;
+
+  /* Header strips (30): panel headers, table heads, chips, tab bars */
+  --structure: #e8eff9;
+  --structure-2: #dce6f5;        /* hover / pressed on a strip */
+  --structure-border: #d5deea;
+  --structure-text: #22304a;
+
+  /* Frame (30): sidebar rail + top bar */
+  --frame: #e4ebf5;
+  --frame-hover: #d9e3f2;
+  --frame-border: #d0dae8;
+  --frame-active: #d4e1f5;
 
   /* Text */
-  --text: #18181b;
-  --muted: #71717a;
-  --faint: #a1a1aa;
+  --text: #162033;
+  --muted: #4f5b70;
+  --faint: #56617a;        /* >= 4.5:1 on cards, strips and the sidebar */
 
-  /* Accents */
-  --accent: #6d4ae8;
-  --accent-soft: #efeafd;
-  --accent-2: #f5b13d;
+  /* Accent (10): cobalt */
+  --accent: #1e56d8;
+  --accent-soft: #dbe7fd;
 
   /* Pills & Status */
-  --up: #16a34a;
+  --up: #14733a;            /* status text colors are AA (>= 4.5:1) on every light surface */
   --up-bg: #f0fdf4;
   --up-bd: #bbf7d0;
-  --down: #dc2626;
+  --down: #b91c1c;
   --down-bg: #fef2f2;
   --down-bd: #fecaca;
-  --flat: #71717a;
-  --flat-bg: #f4f4f5;
-  --flat-bd: #e4e4e7;
+  --flat: #5b6678;
+  --flat-bg: #edf1f7;
+  --flat-bd: #d5deea;
 
   /* Relationship States */
-  --state-good: #16a34a;
-  --state-learning: #2563eb;
-  --state-new: #d97706;
-  --state-bad: #dc2626;
+  --state-good: #14733a;
+  --state-learning: #4f46e5;     /* indigo: distinct from the cobalt accent */
+  --state-new: #9e4b08;
+  --state-bad: #b91c1c;
 
   /* Shadows */
-  --shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.05), 0 1px 2px -1px rgba(0, 0, 0, 0.05);
-  --shadow-pop: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -4px rgba(0, 0, 0, 0.1);
+  --shadow: 0 1px 3px 0 rgba(22, 32, 51, 0.06), 0 1px 2px -1px rgba(22, 32, 51, 0.06);
+  --shadow-pop: 0 10px 15px -3px rgba(22, 32, 51, 0.12), 0 4px 6px -4px rgba(22, 32, 51, 0.1);
 
   /* Roles this app also needs */
-  --grid: #efeff2;
-  --hover: #f4f4f6;
+  --grid: #e5eaf2;
+  --hover: #edf2f9;
   --selected: var(--accent-soft);
-  --info: #2563eb;
-  --warn: #d97706;
+  --info: var(--accent);         /* info merges into the accent in this palette */
+  --warn: #9e4b08;
   --good: var(--up);
   --bad: var(--down);
   --info-bg: #eff6ff;
@@ -58,10 +75,10 @@
   --bad-bd: var(--down-bd);
 
   /* Entity colors */
-  --entity-service: #2563eb;
-  --entity-user: #c026d3;
-  --entity-api: #0d9488;
-  --entity-ip: #71717a;
+  --entity-service: #0c6f8a;     /* cyan: distinct from the cobalt accent */
+  --entity-user: #a21caf;
+  --entity-api: #0e706a;
+  --entity-ip: #556274;
   --path-highlight: #d97706;
 
   /* HTTP Status Classes */
@@ -72,12 +89,12 @@
 
   /* Chart Series */
   --series-1: var(--accent);
-  --series-2: var(--accent-2);
-  --series-3: var(--info);
+  --series-2: var(--muted);   /* expected/baseline is a neutral reference line */
+  --series-3: var(--entity-service);
 
   /* Chart Area Gradient */
-  --chart-area-top: rgba(109, 74, 232, 0.22);
-  --chart-area-bottom: rgba(109, 74, 232, 0.02);
+  --chart-area-top: rgba(30, 86, 216, 0.18);
+  --chart-area-bottom: rgba(30, 86, 216, 0.02);
 
   /* Radius & Metrics */
   --radius-card: 12px;
@@ -88,57 +105,68 @@
 }
 
 :root[data-theme="dark"] {
-  /* Surfaces */
-  --page: #0c0c0e;
-  --bg: #131316;
-  --surface: #18181b;
-  --surface-2: #1e1e22;
+  /* Surfaces (60) */
+  --page: #0d1117;
+  --bg: #151b23;
+  --surface: #151b23;
+  --surface-2: #1a212b;
 
   /* Borders */
-  --border: #2a2a30;
-  --border-strong: #36363d;
+  --border: #283140;
+  --border-strong: #343e50;
+
+  /* Header strips (30) */
+  --structure: #1b2330;
+  --structure-2: #222c3b;
+  --structure-border: #2b3546;
+  --structure-text: #d3dae5;
+
+  /* Frame (30) */
+  --frame: #11161d;
+  --frame-hover: #19202a;
+  --frame-border: #232b37;
+  --frame-active: #1c2a40;
 
   /* Text */
-  --text: #f4f4f5;
-  --muted: #a1a1aa;
-  --faint: #71717a;
+  --text: #e8edf4;
+  --muted: #9aa5b5;
+  --faint: #8c97a8;
 
-  /* Accents */
-  --accent: #8f74f2;
-  --accent-soft: #2a2347;
-  --accent-2: #e9a530;
+  /* Accent (10): sky blue */
+  --accent: #58a6ff;
+  --accent-soft: #1c2a40;
 
   /* Pills & Status */
   --up: #22c55e;
   --up-bg: rgba(34, 197, 94, 0.15);
   --up-bd: rgba(34, 197, 94, 0.3);
-  --down: #ef4444;
+  --down: #f87171;
   --down-bg: rgba(239, 68, 68, 0.15);
   --down-bd: rgba(239, 68, 68, 0.3);
-  --flat: #a1a1aa;
-  --flat-bg: rgba(161, 161, 170, 0.15);
-  --flat-bd: rgba(161, 161, 170, 0.3);
+  --flat: #9aa5b5;
+  --flat-bg: rgba(154, 165, 181, 0.15);
+  --flat-bd: rgba(154, 165, 181, 0.3);
 
   /* Relationship States */
   --state-good: #22c55e;
-  --state-learning: #6b9cf5;
+  --state-learning: #8b8cf0;
   --state-new: #f0a43a;
-  --state-bad: #ef4444;
+  --state-bad: #f87171;
 
   /* Shadows */
   --shadow: none;
   --shadow-pop: 0 10px 25px -5px rgba(0, 0, 0, 0.5), 0 8px 10px -6px rgba(0, 0, 0, 0.5);
 
   /* Roles this app also needs */
-  --grid: #26262b;
-  --hover: #222227;
+  --grid: #1e2632;
+  --hover: #1a212b;
   --selected: var(--accent-soft);
-  --info: #6b9cf5;
+  --info: var(--accent);
   --warn: #f0a43a;
   --good: var(--up);
   --bad: var(--down);
-  --info-bg: rgba(107, 156, 245, 0.15);
-  --info-bd: rgba(107, 156, 245, 0.3);
+  --info-bg: rgba(88, 166, 255, 0.15);
+  --info-bd: rgba(88, 166, 255, 0.3);
   --warn-bg: rgba(240, 164, 58, 0.15);
   --warn-bd: rgba(240, 164, 58, 0.3);
   --good-bg: var(--up-bg);
@@ -147,10 +175,10 @@
   --bad-bd: var(--down-bd);
 
   /* Entity colors */
-  --entity-service: #6b9cf5;
+  --entity-service: #22d3ee;
   --entity-user: #e07ae8;
   --entity-api: #4fc1b3;
-  --entity-ip: #a1a1aa;
+  --entity-ip: #9aa5b5;
   --path-highlight: #f2cc0c;
 
   /* HTTP Status Classes */
@@ -161,11 +189,24 @@
 
   /* Chart Series */
   --series-1: var(--accent);
-  --series-2: var(--accent-2);
-  --series-3: var(--info);
+  --series-2: var(--muted);   /* expected/baseline is a neutral reference line */
+  --series-3: var(--entity-service);
 
   /* Chart Area Gradient */
-  --chart-area-top: rgba(143, 116, 242, 0.25);
-  --chart-area-bottom: rgba(143, 116, 242, 0.02);
+  --chart-area-top: rgba(88, 166, 255, 0.22);
+  --chart-area-bottom: rgba(88, 166, 255, 0.02);
 }
 
+/* Frame scope: the sidebar and top bar use the frame tint. Re-point the structure/hover/selection
+   tokens inside them so the existing utility classes (bg-structure, hover:bg-structure-2,
+   border-structure-line, bg-accent-soft, .toolbar) pick up the frame without class edits. */
+.app-rail,
+.toolbar {
+  --structure: var(--frame);
+  --structure-2: var(--frame-hover);
+  --structure-border: var(--frame-border);
+  --hover: var(--frame-hover);
+  --accent-soft: var(--frame-active);
+  --selected: var(--frame-active);
+  background-color: var(--frame);
+}

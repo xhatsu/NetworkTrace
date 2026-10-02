@@ -378,3 +378,29 @@ Rough effort:
 | Removing the override block in Phase F reveals literals that were missed | The Phase F greps must be 0 before deleting; then run the full §7 pass |
 | Dark mode looks worse than before | Dark is part of the design, not an inversion: use the `frontend-next` dark set and review dark screenshots in every unit |
 | Another agent is editing `frontend/` at the same time | Check `git status` / `git diff --stat frontend/` before each unit; don't overwrite others' changes |
+
+---
+
+## 9. 60/30/10 Color Architecture & Budget Rules
+
+### 9.1 Tier Allocation
+| Tier | Share | Tokens / Roles | Usage Rules |
+|---|---|---|---|
+| **60 Base** | 55–68% | `--page`, `--bg`, `--surface`, `--surface-2`, `--hover` | Page background, cards, table rows, standard text/borders. |
+| **30 Structure** | 22–35% | `--structure`, `--structure-2`, `--structure-border`, `--structure-text` | Sidebar rail, top toolbar, table header strips, segmented control backgrounds, panel headers, pill containers. |
+| **10 Accent** | ≤ 10% | `--accent` (`#6d28d9` / `#8b5cf6`), `--accent-soft` | Primary CTA button (max 1 per view), active tab indicator/mark, selected row/node highlight, primary chart series (TPS). |
+| **Semantic** | ≤ 5% | `--good`, `--bad`, `--warn`, `--info`, `--entity-*` | Small status badges, alert severity badges, entity type marks. Tinted backgrounds only on small badges. |
+
+### 9.2 Enforcement & Budget Guard
+Run `npm run check:colors` or `sh frontend/scripts/check-color-budget.sh`. Must exit 0:
+- `text-accent (incl. hover)`: ≤ 45
+- `border-accent`: ≤ 25
+- `solid bg-accent`: ≤ 15
+- `bg-accent/NN tints`: 0
+- `accent-2`: 0
+- `undefined vars`: 0
+- `status opacity fills`: 0
+- `status -bg tints (badges)`: ≤ 45
+- `arbitrary hex classes`: 0
+- `dark: variants`: 0
+

@@ -2,6 +2,42 @@
 
 > Complete deployment, generator parameters, and stack setup guide: [GUIDE.md](file:///home/ubuntu/Viettel/OtelTrace/GUIDE.md).
 
+## Glacier (light) + Midnight (dark) palette, WCAG AA text contrast (2026-10-02; frontend only, built and served on `:31102`, not committed)
+
+- Replaces Graphite Blue (user found the dark sidebar/top bar too contrasty). Palette preview: https://claude.ai/artifact/RucpRmp5RCHpVqasajgRgq.
+- `frontend/src/styles/tokens.css`: light **Glacier**: page `#f1f4f9`, cards `#fbfcfe`, sidebar/top bar `--frame #e4ebf5` (~1.1:1 vs page), header strips `--structure #e8eff9`, accent cobalt `#1e56d8`. Dark **Midnight**: page `#0d1117`, cards `#151b23`, frame `#11161d`, strips `#1b2330`, accent `#58a6ff`. `--info` = accent; Service entity cyan; learning state indigo. The `.app-rail, .toolbar` scope now only re-points structure/hover/selection tokens to the light frame (no dark overrides). Tailwind keeps `frame`, `frame-line`; removed `frame-raised`, `frame-ink`.
+- Contrast: rendered-page audit (Playwright, every visible text node vs its composited background, 4.5:1 normal / 3:1 large) on 16 routes found 23 failing light styles; fixed to **0 in light and 0 in dark**. Light text tokens darkened: faint `#56617a`, good `#14733a`, warn `#9e4b08`, bad `#b91c1c`, accent `#1e56d8`, entity service `#0c6f8a` / API `#0e706a` / user `#a21caf` / IP `#556274`, learning `#4f46e5` (each >= 4.5:1 on page, card, strips, sidebar and its tinted badge). Dark: faint `#8c97a8`, bad `#f87171`. Component fixes: Overview heatmap counts always use body text with the accent fill capped (light 60 %, dark 50 %) so every cell >= 4.5:1; InteractiveTopology historical cards use a dashed border + `surface-2` instead of `opacity-60`; UserLayout score no longer `opacity-70`. Remaining `opacity-*` uses are `disabled:` states or decorative icons (WCAG-exempt). Audit covers page-load state only (not hover/popovers).
+- Verified: build clean, color guard all ok, Playwright pages 22/22 PASS, 0 page errors; tier shares base 61-69 %, structure 28-33 %, accent <= 4 % (empty `/changes` and `/topology` ~78-80 % base).
+
+## Top bar no longer wraps when switching language (2026-10-02; frontend only, built and served on `:31102`, not committed)
+
+- Cause: the `FilterBar` row in `frontend/src/App.tsx` was one `flex-wrap` row; Vietnamese labels make the control group ~90 px wider (838 vs 746 px), so between ~1490-1580 px viewports EN fit on one line and VI wrapped to two.
+- Fix: from `lg` the row is `flex-nowrap`; the left side is `min-w-0 flex-1` (breadcrumb `truncate`, search `flex-1 min-w-[9rem] max-w-64`, shown from `xl`); controls `lg:shrink-0`. Below `lg` the controls are `w-full`, always a second line. Language-variable labels are compact below `2xl` (operational window shows `5m · 7d` with the full text as tooltip; Refresh and Light/Dark icon-only), the timezone select is fixed `w-[9.5rem]`, the Live chip fixed `w-[5.75rem]`.
+- Verified in Chromium at 390-1920 px (14 widths): identical bar height in VI and EN at every width, 0 row/document overflow; live language toggling at 1536 px keeps 41 px. Build clean, color guard 15/15.
+
+## Graphite Blue palette (2026-10-02; SUPERSEDED by Glacier/Midnight above)
+
+- User chose **Graphite Blue** from the palette preview (https://claude.ai/artifact/RucpRmp5RCHpVqasajgRgq). Applied on top of the completed 60/30/10 work.
+- `frontend/src/styles/tokens.css` rewritten: 60 = graphite canvas `--page #eff1f4` / cards `--surface #f9fafb` (dark `#0c0e12` / `#14171d`); 30 = new always-dark **frame** (`--frame #1b1f27`, dark `#101318`, plus `--frame-raised/-hover/-border/-border-strong/-text/-text-strong/-muted/-accent/-active`) for sidebar + top bar, and tinted strips `--structure #e1e5eb` (dark `#1b1f27`) for panel/table headers; 10 = cobalt `--accent #2563eb` (dark `#5b8def`). `--info` = accent; `--entity-service` moved to cyan `#0891b2` (dark `#22d3ee`); `--state-learning` to indigo `#6366f1` (dark `#8b8cf0`); `--series-3` = entity-service; chart area gradient cobalt.
+- Frame scope: an unlayered `.app-rail, .toolbar { ... }` block at the end of `tokens.css` re-points the shared tokens (bg/surface/text/muted/border/accent/status) to frame values, so the sidebar, top bar and filter drawer render dark with no class edits. `theme.tsx` `sidebar` token -> `--frame`; Tailwind gained `frame`, `frame-raised`, `frame-line`, `frame-ink`.
+- Contrast (WCAG AA) checked for all text pairs in both themes incl. frame controls (frame muted 5.0-6.5:1, button 5.2/6.0:1). Guard `scripts/check-color-budget.sh` 15/15 ok; lint + build clean (`index-CNJ4Xs1k.js`, `index-is0iOBE0.css`); Playwright pages 22/22 PASS, 0 JS errors. Tier shares (frame counted as 30): base 57.6-64.8 %, structure 32.6-37.6 %, accent <= 3.6 % on 6/8 routes; `/changes` (empty triage list) and light `/topology` stay ~73-75 % base (content-driven).
+
+## 60/30/10 Color Architecture Plan & Follow-up Fixes (2026-10-02; docs/color-60-30-10-fixes.md COMPLETE)
+
+- **Completed Implementation (Phases 1-5 + Follow-up Fixes 1-6):**
+  - **Dead Code Removal:** Removed 6 unreachable files (`components/AccessBoardColumn.tsx`, `pages/Accounts.tsx`, `pages/Anomalies.tsx`, `pages/Principals.tsx`, `pages/Topology.tsx`, `pages/UserIntelligence.tsx`). Routes `/anomalies*`, `/accounts*`, `/principals*` remain as redirects in `App.tsx`; `/topology` renders `InteractiveTopology`.
+  - **Fix 1 (Structure Tier Contrast):** Updated `--muted` to `#65656d` and `--faint` to `#8b8b94` (light), and `--faint` to `#80808a` (dark). In `App.tsx:512`, filter hint changed to `text-muted`. Contrast ratios all meet WCAG AA/AAA:
+    - Light: `structure-text` on `structure`: 9.16; `text` on `structure`: 15.54; `muted` on `structure`: 5.07; `muted` on `structure-2`: 4.63; `muted` on `surface`: 5.78; `accent` on `structure`: 4.85; `text` on `accent-soft`: 15.07.
+    - Dark: `structure-text` on `structure`: 12.34; `text` on `structure`: 16.60; `muted` on `structure`: 7.12; `muted` on `structure-2`: 6.43; `muted` on `surface`: 6.91; `accent` on `structure`: 5.17; `text` on `accent-soft`: 13.36.
+  - **Fix 2 (Dark-Only Literals Cleaned):** Replaced all raw `rgba(255,255,255)`, `text-white` on neutral surfaces, `border-white/*`, `divide-white/*`, `bg-white/*`, and `bg-black/*` in `UnknownUsers.tsx`, `Traces.tsx`, `Services.tsx`, `UserDirectory.tsx`, and `AgentStats.tsx` with standard semantic tokens (`text-ink`, `border-line`, `border-line-strong`, `divide-line`, `bg-surface-2`, `hover:bg-hover`).
+  - **Fix 3 (Raw Accent RGBA in theme.tsx):** Replaced hardcoded `rgba(109, 74, 232, …)` chart area fallbacks in `theme.tsx` with dynamic `var(--chart-area-top)` and `var(--chart-area-bottom)`.
+  - **Fix 4 (Guard Script Extended):** Added 5 new enforcement checks to `frontend/scripts/check-color-budget.sh` (`white rgba literals`, `raw rgba in ts/tsx`, `white/black borders+dividers`, `bg-white tints`, `faint on structure`). All 15 checks pass with exit 0.
+  - **Fix 5 (Page Test Modernization):** Updated `backend/scripts/test_pages_playwright.py` to remove stale topology timeline slider assertions and align user activity assertions with the redesigned workspace. All 22/22 real browser pages pass with 0 unhandled JS exceptions.
+  - **Top Bar Timezone Fix:** Updated timezone selector in `src/App.tsx` to display clean `Browser Local` without the expanding resolved timezone string in parentheses.
+  - **Measured Pixel-Shares Truth:** 6 of 8 routes strictly inside target (base 55–68%, structure 22–35%, accent ≤ 10%, semantic ≤ 5%). `/changes` (base 76.4–77.3%, structure 20.2–21.6%) and `/topology` (base 74.6–76.4%, structure 20.3–22.8%) are content-driven exceptions due to empty incident triage lists and full-canvas graph layout; dark `/services` base 68.2% is borderline.
+  - **Reference:** Continuously synced with [AGENTS.md](file:///home/ubuntu/Viettel/OtelTrace/AGENTS.md).
+
+
 ## Frontend Complete In-Place Restyle & Legacy Override Cleanup (2026-10-02; docs/frontend-restyle-plan.md COMPLETE)
 
 - **Completed Phases:**
@@ -2184,7 +2220,3 @@ Exposes standard Prometheus 0.0.4 text exposition format at `GET /metrics` on po
 - `/services/:name` Access card, `/behavior?tab=flow` and the topology drawer share the restyled `AccessFlow`. Changes: thin node bars with labels beside them (no empty boxes), full-width responsive columns (`accessLayout.ts`, ResizeObserver; scrolls inside the card below 190 px per column), ribbon edges stroked only along the flow (established has no stroke; learning dashed; new/deviating orange with a glyph only on ribbons ≥5 px; ghost dotted), API labels drop the redundant Service prefix, one toolbar of segmented controls, clickable legend chips that emphasise one state, an inspector that defaults to the focus entity, and a table view. Colours in SVG use `--theme-*` variables so light theme works. Card chrome lost the duplicate counts, panel reset and idle hint.
 - New components use explicit EN/VI pairs; the shared dictionary had overridden generic keys (for example "New" → "NEW", "Established" → a baseline label).
 - Validation: lint, build and `git diff --check` pass. Chromium 123/123 checks passed again (1440/844/390, EN/VI). Screenshots: `/tmp/access-card-*.png`. `frontend/dist` rebuilt; no backend restart.
-
-## 60/30/10 color plan (2026-10-02)
-
-- Plan only: `docs/color-60-30-10-plan.md`. Not implemented. Undefined CSS vars `--text-muted` (36) and `--border-line` (4) noted.

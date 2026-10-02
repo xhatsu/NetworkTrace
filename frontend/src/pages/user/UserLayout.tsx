@@ -147,7 +147,7 @@ export function UserLayout() {
           <div className="flex flex-wrap items-center gap-2 sm:gap-2.5">
             <button
               onClick={() => nav("/users")}
-              className="inline-flex items-center gap-1 border border-line bg-surface bg-surface-2 px-2 py-0.5 text-[11px] font-semibold text-muted transition hover:border-accent hover:text-ink"
+              className="inline-flex items-center gap-1 border border-line bg-surface px-2 py-0.5 text-[11px] font-semibold text-muted transition hover:border-line-strong hover:text-ink"
               title={t("Back to User Directory")}
             >
               <ArrowLeft size={12} />
@@ -189,7 +189,7 @@ export function UserLayout() {
               <span
                 className={`inline-flex items-center gap-1 border px-1.5 py-0.5 font-semibold ${
                   profile?.status === "Active"
-                    ? "border-good/50 bg-good/10 text-good"
+                    ? "border border-good text-good"
                     : "border-line bg-surface-2 text-muted"
                 }`}
               >
@@ -205,7 +205,7 @@ export function UserLayout() {
               <span className={`inline-flex items-center gap-1 border px-1.5 py-0.5 font-semibold ${episodeStatusClass(behaviorState)}`}>
                 {behaviorState === "critical" || behaviorState === "needs_attention" ? <ShieldAlert size={10} /> : <Shield size={10} />}
                 {activeEpisodes.length ? episodeStatusLabel(behaviorState, t) : t("Normal")}
-                <span className="font-mono opacity-70">({score})</span>
+                <span className="font-mono font-normal">({score})</span>
               </span>
             </div>
           </div>
@@ -216,7 +216,7 @@ export function UserLayout() {
               onClick={() => setSwitcherOpen(!switcherOpen)}
               className="toolbar-control flex items-center gap-1.5 h-6 px-2 py-0 text-[11px] font-semibold text-ink hover:text-ink"
             >
-              <Users size={12} className="text-accent" />
+              <Users size={12} className="text-muted" />
               <span>{t("Switch")}</span>
               <ChevronDown size={11} className="text-muted" />
             </button>
@@ -231,7 +231,7 @@ export function UserLayout() {
                     placeholder={t("Filter users...")}
                     value={searchQuery}
                     onChange={(e) => setSearchQuery(e.target.value)}
-                    className="w-full border border-line bg-surface pl-8 pr-3 py-1.5 text-xs text-white placeholder:text-muted focus:border-accent focus:outline-none"
+                    className="w-full border border-line bg-surface pl-8 pr-3 py-1.5 text-xs text-ink placeholder:text-muted focus:border-line-strong focus:outline-none"
                   />
                 </div>
                 <div className="max-h-60 overflow-y-auto space-y-1 scrollbar">
@@ -245,7 +245,7 @@ export function UserLayout() {
                       }}
                       className={`flex w-full items-center justify-between px-2 py-1 text-xs transition ${
                         u.principal_name === principal
-                          ? "bg-accent-soft border border-accent/40 text-white font-bold"
+                          ? "bg-accent-soft border border-line-strong text-ink font-bold"
                           : "text-muted hover:bg-hover hover:text-ink"
                       }`}
                     >
@@ -256,12 +256,12 @@ export function UserLayout() {
                         <span className="truncate font-mono">{u.principal_name}</span>
                       </div>
                       <span
-                        className={`text-[10px] font-bold px-1.5 py-0.5 rounded ${
+                        className={`text-[10px] font-bold px-1.5 py-0.5 rounded border ${
                           (u.behavior_score || 0) >= 60
-                            ? "bg-bad/20 text-bad border border-bad/40"
+                            ? "border-bad text-bad"
                             : (u.behavior_score || 0) >= 25
-                            ? "bg-warn/20 text-warn border border-warn/40"
-                            : "bg-good/20 text-good border border-good/40"
+                            ? "border-warn text-warn"
+                            : "border-good text-good"
                         }`}
                       >
                         {u.behavior_score || 0}
@@ -284,7 +284,7 @@ export function UserLayout() {
             <span className="text-muted">|</span>
             <span>
               <span className="text-muted text-[10px] uppercase font-sans mr-1">{t("Services")}</span>
-              <strong className="text-accent font-semibold tabular-nums">{profile?.unique_targets ?? profile?.current?.targets?.length ?? 0}</strong>
+              <strong className="text-ink font-semibold tabular-nums">{profile?.unique_targets ?? profile?.current?.targets?.length ?? 0}</strong>
             </span>
             <span className="text-muted">|</span>
             <span>
@@ -323,10 +323,10 @@ export function UserLayout() {
                       : "border-line bg-surface text-muted hover:border-line-strong hover:bg-hover hover:text-ink"
                   }`}
                 >
-                  <Icon size={12} className={isActive ? "text-accent" : "text-muted text-muted"} />
+                  <Icon size={12} className={isActive ? "text-ink" : "text-muted"} />
                   <span>{tab.label}</span>
                   {tab.badge !== undefined && tab.badge > 0 && (
-                    <span className="rounded-[2px] bg-accent-soft border border-accent/40 px-1 py-0 text-[10px] font-mono text-accent">
+                    <span className="rounded-[2px] bg-structure-2 border border-structure-line px-1 py-0 text-[10px] font-mono text-ink">
                       {tab.badge}
                     </span>
                   )}
@@ -343,7 +343,7 @@ export function UserLayout() {
           title={t("TPS")}
           subtitle={t("Observed user throughput over the selected window")}
           className="mb-4"
-          action={<span className="font-mono text-[11px] text-accent">{n(tpsSeries[tpsSeries.length - 1]?.tps || 0, 2)} TPS</span>}
+          action={<span className="font-mono text-[11px] text-ink">{n(tpsSeries[tpsSeries.length - 1]?.tps || 0, 2)} TPS</span>}
         >
           <TpsLineChart data={tpsSeries} />
         </Panel>
@@ -359,7 +359,7 @@ export function UserLayout() {
             </div>
           </div>
         ) : profileError && !profile ? (
-          <div className="rounded-[3px] border border-bad/50 bg-bad/10 p-6 text-center text-bad">
+          <div className="rounded-[3px] border border-bad-bd bg-bad-bg p-6 text-center text-bad">
             <ShieldAlert size={26} className="mx-auto mb-2 text-bad" />
             <h3 className="text-sm font-semibold text-ink">Failed to load user intelligence for {principal}</h3>
             <p className="mt-1 text-xs text-muted">{(profileError as Error).message}</p>

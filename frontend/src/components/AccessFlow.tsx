@@ -73,7 +73,7 @@ export function StateLegend({ active, onToggle }: { active?: AccessState | null;
           <li key={state}>
             {onToggle ? (
               <button type="button" aria-pressed={active === state} title={stateLabel(t, state)} onClick={() => onToggle(state)}
-                className={`${base} ${active === state ? "border-accent bg-accent-soft text-accent" : "border-transparent text-muted hover:border-line hover:text-ink"}`}>
+                className={`${base} ${active === state ? "border-accent bg-accent-soft text-ink font-semibold" : "border-transparent text-muted hover:border-line hover:text-ink"}`}>
                 {content}
               </button>
             ) : <span className={`${base} border-transparent text-muted`} title={stateLabel(t, state)}>{content}</span>}
@@ -354,7 +354,7 @@ export function AccessFlow({
           <Search size={12} aria-hidden="true" className="pointer-events-none absolute left-2 text-muted" />
           <input value={find} onChange={e => setFind(e.target.value)} placeholder={t("Find credential, API…", "Tìm credential, API…")}
             aria-label={t("Highlight matching entities", "Làm nổi bật thực thể khớp")}
-            className="h-7 w-[200px] rounded-ctl border border-line bg-surface pl-6 pr-6 text-[11px] text-ink placeholder:text-muted shadow-xs focus:border-accent" />
+            className="h-7 w-[200px] rounded-ctl border border-line bg-surface pl-6 pr-6 text-[11px] text-ink placeholder:text-muted shadow-xs focus:border-line-strong" />
           {find && <button type="button" onClick={() => setFind("")} aria-label={t("Clear", "Xoá")} className="absolute right-1.5 text-muted hover:text-ink"><X size={12} /></button>}
           {matches && <span className="ml-2 font-mono text-[11px] text-muted">{matches.size} {t("match", "khớp")}</span>}
         </label>
@@ -380,7 +380,7 @@ export function AccessFlow({
               <button key={role.role} type="button" aria-pressed={ipRole === role.role}
                 title={role.infrastructure ? t("Infrastructure peer: never shown as the origin", "Peer hạ tầng: không bao giờ hiển thị là nguồn") : undefined}
                 onClick={() => { setIpOffset(0); setIpRole(current => (current === role.role ? "" : role.role)); }}
-                className={`inline-flex h-6 items-center gap-1 rounded-ctl border px-1.5 text-[11px] ${ipRole === role.role ? "border-accent bg-accent-soft text-accent" : "border-line text-muted hover:border-line-strong hover:text-ink"}`}>
+                className={`inline-flex h-6 items-center gap-1 rounded-ctl border px-1.5 text-[11px] ${ipRole === role.role ? "border-accent bg-accent-soft text-ink font-semibold" : "border-line text-muted hover:border-line-strong hover:text-ink"}`}>
                 {ipRoleLabel(t, role.role)} <span className="font-mono text-muted">{role.count}</span>{role.infrastructure && <span aria-hidden="true">⚑</span>}
               </button>
             ))}

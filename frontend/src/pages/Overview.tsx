@@ -19,6 +19,7 @@ import type { SeriesPoint, Summary } from "../types";
 import { isEpisodeAttention, episodeStatusClass, episodeStatusLabel, type Episode, type EpisodeResponse } from "../components/EpisodePrimitives";
 import { EntityLink } from "../components/EntityLink";
 import { ZoomableDashboardChart } from "../components/ZoomableDashboardChart";
+import { useTheme } from "../theme";
 
 type UserSummary = {
   observed_principals: number;
@@ -78,8 +79,8 @@ function MetricTrend({ data, lines, timezone, formatValue }: {
       <ResponsiveContainer width="100%" height="100%">
         <LineChart data={data} syncId="overview-metrics" syncMethod="value" margin={{ top: 5, right: 12, bottom: 0, left: 0 }}>
           <CartesianGrid stroke="var(--grid)" vertical={false} />
-          <XAxis dataKey="timestamp_ms" type="number" domain={["dataMin", "dataMax"]} minTickGap={65} tick={{ fill: "var(--text-muted)", fontSize: 12 }} tickFormatter={(value) => formatTime(Number(value), timezone)} axisLine={false} tickLine={false} />
-          <YAxis width={70} domain={[0, "auto"]} tick={{ fill: "var(--text-muted)", fontSize: 12 }} tickFormatter={formatValue} axisLine={false} tickLine={false} />
+          <XAxis dataKey="timestamp_ms" type="number" domain={["dataMin", "dataMax"]} minTickGap={65} tick={{ fill: "var(--muted)", fontSize: 12 }} tickFormatter={(value) => formatTime(Number(value), timezone)} axisLine={false} tickLine={false} />
+          <YAxis width={70} domain={[0, "auto"]} tick={{ fill: "var(--muted)", fontSize: 12 }} tickFormatter={formatValue} axisLine={false} tickLine={false} />
           <Tooltip {...chartTooltip} labelFormatter={(value) => formatTime(Number(value), timezone)} formatter={(value: unknown, name: unknown) => [formatValue(Number(value)), String(name)]} />
           {lines.map((line) => <Line key={line.key} type="linear" dataKey={line.key} name={line.label} stroke={line.color} strokeDasharray={line.dash} strokeWidth={1.8} dot={false} isAnimationActive={false} />)}
         </LineChart>
@@ -93,6 +94,7 @@ function MetricTrend({ data, lines, timezone, formatValue }: {
 
 function ChangeActivity({ changes, timezone }: { changes: Episode[]; timezone: string }) {
   const { t } = useI18n();
+  const { theme } = useTheme();
   const [selected, setSelected] = useState<number | null>(null);
   const days = [t("Mon", "T2"), t("Tue", "T3"), t("Wed", "T4"), t("Thu", "T5"), t("Fri", "T6"), t("Sat", "T7"), t("Sun", "CN")];
   const dayKeys = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
@@ -110,22 +112,24 @@ function ChangeActivity({ changes, timezone }: { changes: Episode[]; timezone: s
     cell.attention += Number(change.state === "needs_attention");
   }
   const peak = Math.max(1, ...cells.map((cell) => cell.count));
+  // Cap the accent fill so the count (body text) stays >= 4.5:1 at every intensity.
+  const heatMax = theme === "dark" ? 0.5 : 0.6;
   const activeIndex = selected ?? cells.findIndex((cell) => cell.count === peak);
   const active = cells[activeIndex];
-  return <div className="px-3 pb-3 pt-2">
+  return <div className="px-3 pb-3 pt-2 min-w-0">
     <div className="overflow-x-auto">
       <table className="w-full min-w-[560px] table-fixed border-separate border-spacing-[3px] text-[10px]" aria-label={t("Episode starts by weekday and hour", "Thời điểm bắt đầu thay đổi theo thứ và giờ")}>
         <thead><tr><th className="w-9" /><th colSpan={24} className="text-left font-normal text-muted">{t("Hour", "Giờ")} · {timezone}</th></tr><tr><th />{Array.from({ length: 24 }, (_, hour) => <th key={hour} className="font-mono font-normal text-muted">{hour % 3 === 0 ? String(hour).padStart(2, "0") : ""}</th>)}</tr></thead>
         <tbody>{days.map((day, index) => <tr key={day}><th scope="row" className="text-left font-normal text-muted">{day}</th>{cells.slice(index * 24, index * 24 + 24).map((cell, hour) => {
           const key = index * 24 + hour;
           const label = `${day} ${String(hour).padStart(2, "0")}:00 · ${cell.count} ${t("episodes", "thay đổi")}`;
-          return <td key={hour} className="h-5 p-0"><button type="button" aria-label={label} title={label} onMouseEnter={() => setSelected(key)} onFocus={() => setSelected(key)} onClick={() => setSelected(key)} className="h-full w-full rounded-ctl font-mono text-[10px] outline-offset-2 focus-visible:outline focus-visible:outline-2 focus-visible:outline-accent" style={{ background: cell.count ? `color-mix(in srgb, var(--accent) ${Math.round((0.22 + 0.78 * cell.count / peak) * 100)}%, transparent)` : "var(--surface-2)", color: cell.count / peak > 0.6 ? "var(--page)" : "var(--text)" }}>{cell.count || ""}</button></td>;
+          return <td key={hour} className="h-5 p-0"><button type="button" aria-label={label} title={label} onMouseEnter={() => setSelected(key)} onFocus={() => setSelected(key)} onClick={() => setSelected(key)} className="h-full w-full rounded-ctl font-mono text-[10px] outline-offset-2 focus-visible:outline focus-visible:outline-2 focus-visible:outline-accent" style={{ background: cell.count ? `color-mix(in srgb, var(--accent) ${Math.round((0.12 + (heatMax - 0.12) * cell.count / peak) * 100)}%, transparent)` : "var(--surface-2)", color: "var(--text)" }}>{cell.count || ""}</button></td>;
         })}</tr>)}</tbody>
       </table>
     </div>
     <div className="mt-2 flex flex-wrap items-center justify-between gap-2 text-[11px] text-muted">
       <span aria-live="polite">{active ? <>{days[Math.floor(activeIndex / 24)]} {String(activeIndex % 24).padStart(2, "0")}:00 · <strong className="text-ink">{active.count} {t("episodes", "thay đổi")}</strong> · {active.critical} {t("Critical")} · {active.attention} {t("Needs attention")}</> : t("No behavior changes in the current window.")}</span>
-      <span className="inline-flex items-center gap-1.5">0 <span className="h-2 w-3 bg-surface-2" /><span className="h-2 w-3 bg-accent/30" /><span className="h-2 w-3 bg-accent/60" /><span className="h-2 w-3 bg-accent" />{peak}</span>
+      <span className="inline-flex items-center gap-1.5">0 <span className="h-2 w-3 bg-structure" /><span className="h-2 w-3 bg-structure-2" /><span className="h-2 w-3 bg-accent-soft" /><span className="h-2 w-3 bg-accent" />{peak}</span>
     </div>
   </div>;
 }
@@ -262,7 +266,7 @@ export function OverviewPage() {
       }
     >
 
-      <div className="grid grid-cols-2 gap-3 xl:grid-cols-[1fr_1fr_1fr_1.2fr] [&_.metric-meta]:flex-col [&_.metric-meta]:items-start">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 xl:grid-cols-[1fr_1fr_1fr_1.2fr] [&_.metric-meta]:flex-col [&_.metric-meta]:items-start">
         <MetricCard label="TPS" value={n(totalTps, 2)} detail={t("Current throughput")} subDetail={`${t("Avg", "TB")} ${n(avgTps, 2)} · ${t("Peak", "Đỉnh")} ${n(peakTps, 2)}`} sparkline={tpsSparkline} accent="sky" />
         <MetricCard label={t("Bandwidth")} value={bandwidthQuery.isError || bandwidthQuery.data?.available === false ? "—" : formatRate(currentBandwidth)} detail={t("Request + response bytes/s")} subDetail={bandwidthQuery.isError || bandwidthQuery.data?.available === false ? "—" : `${t("Avg", "TB")} ${formatRate(avgBandwidth)} · ${t("Peak", "Đỉnh")} ${formatRate(peakBandwidth)}`} sparkline={bandwidthQuery.isError || bandwidthQuery.data?.available === false ? undefined : bandwidthSeries} accent="cyan" />
         <button type="button" onClick={() => nav("/changes?view=attention")} className="panel p-3 text-left hover:border-warn focus-visible:outline focus-visible:outline-2 focus-visible:outline-warn">
@@ -274,8 +278,8 @@ export function OverviewPage() {
         <div className="panel flex flex-col justify-center p-3">
           <span className="mb-2 text-[10px] font-semibold uppercase tracking-wider text-muted">{t("Observed footprint", "Phạm vi quan sát")}</span>
           <div className="grid grid-cols-2 divide-x divide-line">
-            <button type="button" onClick={() => nav("/services")} className="pr-2 text-left hover:text-accent"><span className="flex items-center gap-1.5 text-xs text-muted"><Server size={12} />Services</span><strong className="font-mono text-xl">{n(totalServices, 0)}</strong><span className="mt-1 block text-[10px] text-muted">{servicesQuery.isError || servicesQuery.isLoading ? "—" : abnormalServices.length} {t("with anomalies", "có bất thường")}</span></button>
-            <button type="button" onClick={() => nav("/users")} className="pl-3 text-left hover:text-accent"><span className="flex items-center gap-1.5 text-xs text-muted"><UserRound size={12} />{t("Active users")}</span><strong className="font-mono text-xl">{n(users.active_principals, 0)}</strong><span className="mt-1 block text-[10px] text-muted">{n(totalUsers, 0)} {t("observed", "đã quan sát")}</span></button>
+            <button type="button" onClick={() => nav("/services")} className="pr-2 text-left hover:text-ink"><span className="flex items-center gap-1.5 text-xs text-muted"><Server size={12} />Services</span><strong className="font-mono text-xl">{n(totalServices, 0)}</strong><span className="mt-1 block text-[10px] text-muted">{servicesQuery.isError || servicesQuery.isLoading ? "—" : abnormalServices.length} {t("with anomalies", "có bất thường")}</span></button>
+            <button type="button" onClick={() => nav("/users")} className="pl-3 text-left hover:text-ink"><span className="flex items-center gap-1.5 text-xs text-muted"><UserRound size={12} />{t("Active users")}</span><strong className="font-mono text-xl">{n(users.active_principals, 0)}</strong><span className="mt-1 block text-[10px] text-muted">{n(totalUsers, 0)} {t("observed", "đã quan sát")}</span></button>
           </div>
         </div>
       </div>
@@ -290,13 +294,13 @@ export function OverviewPage() {
       </div>
 
       <div className="mt-3 grid grid-cols-1 lg:grid-cols-5 gap-3 items-stretch">
-        <div className="lg:col-span-2 flex flex-col h-full">
+        <div className="lg:col-span-2 flex flex-col h-full min-w-0">
           <Panel
             title={t("Top users")}
             subtitle={t("Identity activity and behavior changes in this window.")}
             className="h-full flex flex-col"
             action={
-              <button onClick={() => nav("/users")} className="text-[11px] font-semibold text-accent hover:text-ink">
+              <button onClick={() => nav("/users")} className="text-[11px] font-semibold text-ink hover:underline">
                 {t("View users")} <ArrowRight size={12} className="inline" />
               </button>
             }
@@ -308,7 +312,7 @@ export function OverviewPage() {
                     <th className="table-head px-3 py-2 text-left">{t("User")}</th>
                     <th
                       onClick={() => handleUserSort("tps")}
-                      className={`table-head cursor-pointer select-none px-2.5 py-2 text-right transition hover:text-ink ${userSortField === "tps" ? "text-accent" : ""}`}
+                      className={`table-head cursor-pointer select-none px-2.5 py-2 text-right transition hover:text-ink ${userSortField === "tps" ? "text-ink font-semibold" : ""}`}
                       title={t("Sort by TPS", "Sắp xếp theo TPS")}
                     >
                       <span className="inline-flex items-center justify-end gap-1">
@@ -322,7 +326,7 @@ export function OverviewPage() {
                     </th>
                     <th
                       onClick={() => handleUserSort("services")}
-                      className={`table-head cursor-pointer select-none px-2.5 py-2 text-right transition hover:text-ink ${userSortField === "services" ? "text-accent" : ""}`}
+                      className={`table-head cursor-pointer select-none px-2.5 py-2 text-right transition hover:text-ink ${userSortField === "services" ? "text-ink font-semibold" : ""}`}
                       title={t("Sort by Services", "Sắp xếp theo Service")}
                     >
                       <span className="inline-flex items-center justify-end gap-1">
@@ -336,7 +340,7 @@ export function OverviewPage() {
                     </th>
                     <th
                       onClick={() => handleUserSort("apis")}
-                      className={`table-head cursor-pointer select-none px-2.5 py-2 text-right transition hover:text-ink ${userSortField === "apis" ? "text-accent" : ""}`}
+                      className={`table-head cursor-pointer select-none px-2.5 py-2 text-right transition hover:text-ink ${userSortField === "apis" ? "text-ink font-semibold" : ""}`}
                       title={t("Sort by APIs", "Sắp xếp theo API")}
                     >
                       <span className="inline-flex items-center justify-end gap-1">
@@ -350,7 +354,7 @@ export function OverviewPage() {
                     </th>
                     <th
                       onClick={() => handleUserSort("changes")}
-                      className={`table-head cursor-pointer select-none px-3 py-2 text-right transition hover:text-ink ${userSortField === "changes" ? "text-accent" : ""}`}
+                      className={`table-head cursor-pointer select-none px-3 py-2 text-right transition hover:text-ink ${userSortField === "changes" ? "text-ink font-semibold" : ""}`}
                       title={t("Sort by Changes", "Sắp xếp theo Thay đổi")}
                     >
                       <span className="inline-flex items-center justify-end gap-1">
@@ -368,11 +372,11 @@ export function OverviewPage() {
                   {sortedUserHotspots.length ? sortedUserHotspots.map((user) => (
                     <tr key={user.principal_name} className="hover:bg-hover transition-colors">
                       <td className="px-3 py-2">
-                        <EntityLink entity={{ kind: "user", principal: user.principal_name }} className="flex items-center gap-1.5 text-left font-semibold text-ink hover:text-accent truncate max-w-[110px] xl:max-w-[140px]">
-                          <UserRound size={13} className="shrink-0 text-accent" /><span className="truncate">{user.principal_name}</span>
+                        <EntityLink entity={{ kind: "user", principal: user.principal_name }} className="flex items-center gap-1.5 text-left font-semibold text-ink hover:underline truncate max-w-[110px] xl:max-w-[140px]">
+                          <UserRound size={13} className="shrink-0 text-entity-user" /><span className="truncate">{user.principal_name}</span>
                         </EntityLink>
                       </td>
-                      <td className={`px-2.5 py-2 text-right font-mono tabular-nums ${userSortField === "tps" ? "text-accent font-semibold" : "text-accent"}`}>
+                      <td className={`px-2.5 py-2 text-right font-mono tabular-nums ${userSortField === "tps" ? "text-ink font-semibold" : "text-muted"}`}>
                         {n(Number(user.total_requests || 0) / windowSeconds, 2)}
                       </td>
                       <td className={`px-2.5 py-2 text-right font-mono tabular-nums ${userSortField === "services" ? "text-ink font-semibold" : "text-muted"}`}>
@@ -388,8 +392,8 @@ export function OverviewPage() {
                   )) : sortedChangedUsers.map(([principal, count]) => (
                     <tr key={principal} className="hover:bg-hover transition-colors">
                       <td className="px-3 py-2">
-                        <EntityLink entity={{ kind: "user", principal }} className="flex items-center gap-1.5 text-left font-semibold text-ink hover:text-accent truncate max-w-[110px] xl:max-w-[140px]">
-                          <UserRound size={13} className="shrink-0 text-accent" /><span className="truncate">{principal}</span>
+                        <EntityLink entity={{ kind: "user", principal }} className="flex items-center gap-1.5 text-left font-semibold text-ink hover:underline truncate max-w-[110px] xl:max-w-[140px]">
+                          <UserRound size={13} className="shrink-0 text-entity-user" /><span className="truncate">{principal}</span>
                         </EntityLink>
                       </td>
                       <td className="px-2.5 py-2 text-right font-mono text-muted">—</td>
@@ -407,14 +411,14 @@ export function OverviewPage() {
           </Panel>
         </div>
 
-        <div className="lg:col-span-3 flex flex-col h-full">
+        <div className="lg:col-span-3 flex flex-col h-full min-w-0">
           <Panel
             title={t("When behavior changes", "Hành vi thay đổi khi nào")}
             subtitle={t("Episode starts by weekday × hour · selected window", "Số thay đổi bắt đầu theo thứ × giờ · khoảng đã chọn")}
             className="h-full flex flex-col"
             action={<span className="text-[10px] text-muted">{changeCoverage}</span>}
           >
-            <div className="flex-1 flex flex-col justify-between">
+            <div className="flex-1 flex flex-col justify-between min-w-0">
               {changesQuery.isLoading ? <Loading /> : changesQuery.isError ? <div className="p-6 text-xs text-muted">{t("Change data unavailable", "Chưa có dữ liệu thay đổi")}</div> : <ChangeActivity changes={changes.filter((change) => change.started_at >= new Date(filters.start).getTime() && change.started_at <= new Date(filters.end).getTime())} timezone={filters.timezone} />}
             </div>
           </Panel>
@@ -428,7 +432,7 @@ export function OverviewPage() {
           title={t("Unresolved priority changes", "Thay đổi ưu tiên chưa xử lý")}
           subtitle={`${t("Critical first · up to 6 episodes", "Nghiêm trọng trước · tối đa 6 thay đổi")} · ${changeCoverage}`}
           action={
-            <button onClick={() => nav("/changes")} className="text-[11px] font-semibold text-accent hover:text-ink">
+            <button onClick={() => nav("/changes")} className="text-[11px] font-semibold text-ink hover:underline">
               {t("View all")} <ArrowRight size={12} className="inline" />
             </button>
           }
@@ -439,7 +443,7 @@ export function OverviewPage() {
                 <div key={change.id} className="flex items-start gap-2.5 px-3 py-2 transition hover:bg-hover">
                   <span className={`mt-0.5 border px-1.5 py-0.5 text-[10px] font-bold uppercase ${episodeStatusClass(change.state)}`}>{episodeStatusLabel(change.state, t)}</span>
                   <span className="min-w-0 flex-1">
-                    <EntityLink entity={{ kind: "change", id: change.id }} search={`?${queryString(filters)}`} className="block truncate text-xs font-semibold text-ink hover:text-accent">{change.summary}</EntityLink>
+                    <EntityLink entity={{ kind: "change", id: change.id }} search={`?${queryString(filters)}`} className="block truncate text-xs font-semibold text-ink hover:underline">{change.summary}</EntityLink>
                     <span className="mt-0.5 flex flex-wrap gap-x-1 text-[10px] text-muted">
                       {change.context.target && <EntityLink entity={{ kind: "service", name: change.context.target }}>{change.context.target}</EntityLink>}
                       {change.context.caller && <EntityLink entity={{ kind: "service", name: change.context.caller }}>{change.context.caller}</EntityLink>}

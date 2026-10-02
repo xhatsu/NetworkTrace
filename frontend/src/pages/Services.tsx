@@ -335,7 +335,6 @@ export function ServicePerformancePanel({
           color="var(--series-1)"
           selected={selectedMetric === "tps"}
           onSelect={() => setSelectedMetric("tps")}
-          valueClass="text-accent"
         />
         <InteractiveMetricCard
           label={t("Requests")}
@@ -435,7 +434,7 @@ export function RecentChangesPanel({ query, viewAllHref, search, emptyText }: {
       subtitle={t("Latest episodes · up to 10 loaded, 5 shown", "Episode gần nhất · tải tối đa 10, hiển thị 5")}
       className="flex h-full flex-col min-w-0"
       action={
-        <button onClick={() => nav(viewAllHref)} className="shrink-0 text-[11px] font-semibold text-accent text-accent hover:text-ink">
+        <button onClick={() => nav(viewAllHref)} className="shrink-0 text-[11px] font-semibold text-ink hover:underline">
           {t("View all")} <ArrowRight size={12} className="inline" />
         </button>
       }
@@ -454,7 +453,7 @@ export function RecentChangesPanel({ query, viewAllHref, search, emptyText }: {
                   entity={{ kind: "change", id: change.id }}
                   search={search}
                   title={change.summary}
-                  className="block truncate text-xs font-semibold text-ink hover:text-accent"
+                  className="block truncate text-xs font-semibold text-ink hover:underline"
                 >
                   {change.summary}
                 </EntityLink>
@@ -611,7 +610,7 @@ export function ServiceDetailPage() {
         <ServiceAccessBoard key={`${name}:${qs}`} service={name} accounts={accounts} operations={operations} filters={filters} />
       </div>
       <div className="mt-5 flex flex-wrap gap-2 border-b border-line pb-3" role="group" aria-label={t("Service detail views", "Góc nhìn Service")}>
-        {[["operations", "APIs", operations.length], ["users", t("Users"), serviceUsers.data?.total ?? "—"], ["instances", t("Instances", "Instance"), instances.length], ["traces", t("Traces"), traces.length]].map(([value, label, count]) => <button key={value} aria-pressed={detailTab === value} className={`rounded border px-3 py-2 text-xs ${detailTab === value ? "border-accent bg-accent-soft text-accent" : "border-line-strong text-muted hover:text-ink"}`} onClick={() => setDetailTab(String(value))}>{label} <span className="ml-2 font-mono">{count}</span></button>)}
+        {[["operations", "APIs", operations.length], ["users", t("Users"), serviceUsers.data?.total ?? "—"], ["instances", t("Instances", "Instance"), instances.length], ["traces", t("Traces"), traces.length]].map(([value, label, count]) => <button key={value} aria-pressed={detailTab === value} className={`rounded border px-3 py-2 text-xs ${detailTab === value ? "border-accent bg-accent-soft text-ink font-semibold" : "border-line-strong text-muted hover:text-ink"}`} onClick={() => setDetailTab(String(value))}>{label} <span className="ml-2 font-mono">{count}</span></button>)}
       </div>
       {detailTab === "operations" && <>
       {/* 4. APIs */}
@@ -629,7 +628,7 @@ export function ServiceDetailPage() {
                 key={`attention-${operation.name}`}
                 className="flex w-full flex-wrap items-center justify-between gap-2 px-4 py-3 text-left transition hover:bg-hover"
               >
-                <span className="min-w-0 truncate font-semibold text-ink hover:text-accent">{operation.name}</span>
+                <span className="min-w-0 truncate font-semibold text-ink hover:underline">{operation.name}</span>
                 <span className="flex flex-wrap items-center gap-3 font-mono text-[11px] tabular-nums">
                   <span className={operation.failure_rate > 0.02 ? "text-bad" : "text-good"}>{pct(operation.failure_rate || 0)} {t("error")}</span>
                   <span className={operation.p95_ms > 500 ? "text-warn" : "text-entity-user"}>{n(operation.p95_ms || 0, 1)} ms p95</span>
@@ -675,7 +674,7 @@ export function ServiceDetailPage() {
                   onClick={() => nav(entityPath({ kind: "api", service: name, operation: o.name }) + `?${qs}`)}
                   className="cursor-pointer hover:bg-hover transition"
                 >
-                  <td className="px-4 py-2.5 font-medium text-accent text-accent"><EntityLink entity={{ kind: "api", service: name, operation: o.name }} search={`?${qs}`} className="hover:underline">{o.name}</EntityLink></td>
+                  <td className="px-4 py-2.5 font-medium text-ink"><EntityLink entity={{ kind: "api", service: name, operation: o.name }} search={`?${qs}`} className="hover:underline">{o.name}</EntityLink></td>
                   <td className="px-4 font-mono tabular-nums text-ink text-ink">{n(o.requests)}</td>
                   <td className="px-4 font-mono tabular-nums text-muted text-muted">{n(o.p50_ms || 0)} ms</td>
                   <td className="px-4 font-mono tabular-nums text-entity-user">{n(o.p95_ms || 0)} ms</td>
@@ -711,13 +710,13 @@ export function ServiceDetailPage() {
             <tbody className="divide-y divide-line">
               {(serviceUsers.data?.items || []).map((u: any) => (
                 <tr key={u.principal_name} onClick={() => nav(entityPath({ kind: "user", principal: u.principal_name }) + `?${qs}`)} className="cursor-pointer hover:bg-hover transition">
-                  <td className="px-3 py-2 font-mono text-accent text-accent"><EntityLink entity={{ kind: "user", principal: u.principal_name }} search={`?${qs}`} className="hover:underline">{u.principal_name}</EntityLink></td>
+                  <td className="px-3 py-2 font-mono text-ink"><EntityLink entity={{ kind: "user", principal: u.principal_name }} search={`?${qs}`} className="hover:underline">{u.principal_name}</EntityLink></td>
                   <td className="px-3 font-mono tabular-nums text-ink text-ink">{n(u.total_requests || u.requests || 0, 0)}</td>
                   <td className="px-3 font-mono tabular-nums text-muted text-muted">{u.unique_callers ?? u.callers ?? "—"}</td>
                   <td className="px-3 font-mono tabular-nums text-muted text-muted">{u.unique_operations ?? u.operations ?? "—"}</td>
                   <td className="px-3 text-muted text-muted">{u.first_seen ? new Date(u.first_seen).toLocaleString() : "—"}</td>
                   <td className="px-3 text-muted text-muted">{u.last_seen ? new Date(u.last_seen).toLocaleString() : "—"}</td>
-                  <td className="px-3">{u.recent_changes || u.recent_change ? <span className="rounded-[2px] bg-warn-bg/10 border border-warn/40 px-1.5 py-0.5 text-[10px] text-warn text-warn">{t("Changed")}</span> : "—"}</td>
+                  <td className="px-3">{u.recent_changes || u.recent_change ? <span className="rounded-[2px] border border-warn px-1.5 py-0.5 text-[10px] text-warn font-semibold">{t("Changed")}</span> : "—"}</td>
                 </tr>
               ))}
               {!(serviceUsers.data?.items || []).length && (
@@ -758,7 +757,7 @@ export function ServiceDetailPage() {
         title={t("Representative Traces")}
         subtitle={t("Recent distributed traces for this service")}
         className="mt-4"
-        action={<button onClick={() => nav(`/traces?${qs}&service=${encodeURIComponent(name)}`)} className="text-[11px] font-semibold text-accent text-accent hover:text-ink">{t("Open in Traces")} <ArrowRight size={12} className="inline" /></button>}
+        action={<button onClick={() => nav(`/traces?${qs}&service=${encodeURIComponent(name)}`)} className="text-[11px] font-semibold text-ink hover:underline">{t("Open in Traces")} <ArrowRight size={12} className="inline" /></button>}
       >
         {serviceTraces.isLoading ? (
           <Loading />
@@ -781,12 +780,12 @@ export function ServiceDetailPage() {
                     onClick={() => nav(`/traces/${encodeURIComponent(tr.trace_id || tr.id)}`)}
                     className="cursor-pointer hover:bg-hover transition"
                   >
-                    <td className="px-3 py-2 font-mono text-accent">{(tr.trace_id || tr.id || "").slice(0, 16)}…</td>
+                    <td className="px-3 py-2 font-mono text-ink">{(tr.trace_id || tr.id || "").slice(0, 16)}…</td>
                     <td className="px-3 text-ink">{tr.operation || tr.name || "—"}</td>
                     <td className="px-3 font-mono text-muted">{tr.principal_name || tr.user || "—"}</td>
                     <td className="px-3 text-right font-mono tabular-nums text-ink">{tr.duration_ms != null ? `${Number(tr.duration_ms).toFixed(1)} ms` : "—"}</td>
                     <td className="px-3 text-right font-mono">
-                      <span className={`rounded-[2px] px-1.5 py-0.5 text-[10px] uppercase font-semibold ${String(tr.status_code || tr.http_status || tr.status).startsWith("5") ? "text-bad bg-bad-bg/10" : "text-good bg-good-bg/10"}`}>
+                      <span className={`rounded-[2px] border px-1.5 py-0.5 text-[10px] uppercase font-semibold ${String(tr.status_code || tr.http_status || tr.status).startsWith("5") ? "text-bad border-bad" : "text-good border-good"}`}>
                         {tr.status_code || tr.http_status || tr.status || "OK"}
                       </span>
                     </td>
@@ -812,11 +811,11 @@ function SimpleTable({
   const safeRows = rows || [];
   const total = safeRows.reduce((sum, row) => sum + row.requests, 0);
   return (
-    <div className="divide-y divide-[rgba(255,255,255,0.04)]">
+    <div className="divide-y divide-line">
       {safeRows.map((r) => (
         <div
           key={`${r.name}:${r.operation || ""}`}
-          className="flex items-center justify-between px-4 py-2.5 text-xs hover:bg-white/[0.02]"
+          className="flex items-center justify-between px-4 py-2.5 text-xs hover:bg-hover"
         >
           <div className="min-w-0">
             <span className="break-all font-medium text-ink">{r.name}</span>

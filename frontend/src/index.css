@@ -86,7 +86,7 @@ textarea {
 }
 
 .recharts-cartesian-axis-tick-value {
-  fill: var(--text-muted);
+  fill: var(--muted);
   font-size: 11px;
   font-weight: 500;
   font-family: 'JetBrains Mono', monospace;
@@ -119,8 +119,8 @@ textarea {
   }
 
   .panel-header {
-    background: var(--surface);
-    border-bottom: 1px solid var(--border);
+    background: var(--structure);
+    border-bottom: 1px solid var(--structure-border);
   }
 
   .metric-panel {
@@ -167,7 +167,7 @@ textarea {
 
   .btn:hover {
     border-color: var(--border-strong);
-    background: var(--hover);
+    background: var(--structure-2);
   }
 
   .btn:active {
@@ -202,8 +202,8 @@ textarea {
     align-items: center;
     gap: 0.25rem;
     border-radius: var(--radius-ctl);
-    border: 1px solid var(--border);
-    background: var(--surface-2);
+    border: 1px solid var(--structure-border);
+    background: var(--structure);
     padding: 0.125rem 0.5rem;
     font-size: 11px;
     font-weight: 600;
@@ -211,15 +211,15 @@ textarea {
   }
 
   .toolbar {
-    border-bottom: 1px solid var(--border);
-    background: var(--surface);
+    border-bottom: 1px solid var(--structure-border);
+    background: var(--structure);
   }
 
   .toolbar-control {
     min-height: 30px;
     border: 1px solid var(--border-strong);
     border-radius: var(--radius-ctl);
-    background: var(--surface-2);
+    background: var(--surface);
     color: var(--text);
   }
 
@@ -229,5 +229,6 @@ textarea {
     font-weight: 600;
     letter-spacing: 0.04em;
     color: var(--muted);
+    background: var(--structure);
   }
 }

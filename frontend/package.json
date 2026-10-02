@@ -6,7 +6,8 @@
   "scripts": {
     "dev": "vite --host 0.0.0.0",
     "build": "tsc -b && vite build",
-    "lint": "tsc --noEmit -p tsconfig.app.json"
+    "lint": "tsc --noEmit -p tsconfig.app.json",
+    "check:colors": "sh scripts/check-color-budget.sh"
   },
   "dependencies": {
     "@tanstack/react-query": "^5.87.1",

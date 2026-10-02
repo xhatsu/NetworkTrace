@@ -115,7 +115,7 @@ function ApiDirectory({ rows, search }: { rows: ApiRow[]; search: string }) {
             ["all", t("All APIs", "Tất cả API"), rows.length],
             ["anomalies", t("Open anomalies", "Bất thường đang mở"), rows.filter(row => row.anomaly_status === "abnormal").length],
             ["errors", t("With errors", "Có lỗi"), rows.filter(row => row.error_rate > 0).length],
-          ].map(([value, label, count]) => <button key={value} type="button" aria-pressed={scope === value} onClick={() => { setScope(String(value)); setPage(0); }} className={`rounded border px-2.5 py-1.5 text-xs focus-visible:outline focus-visible:outline-2 focus-visible:outline-accent ${scope === value ? "border-accent bg-accent-soft text-accent" : "border-line-strong text-muted hover:text-ink"}`}>{label} <span className="ml-1 font-mono">{count}</span></button>)}
+          ].map(([value, label, count]) => <button key={value} type="button" aria-pressed={scope === value} onClick={() => { setScope(String(value)); setPage(0); }} className={`rounded border px-2.5 py-1.5 text-xs focus-visible:outline focus-visible:outline-2 focus-visible:outline-accent ${scope === value ? "border-accent bg-accent-soft text-ink font-semibold" : "border-line-strong text-muted hover:text-ink"}`}>{label} <span className="ml-1 font-mono">{count}</span></button>)}
         </div>
         <input aria-label={t("Search APIs", "Tìm API")} placeholder={t("Search API path or Service…", "Tìm đường dẫn API hoặc Service…")} value={query} onChange={event => { setQuery(event.target.value); setPage(0); }} className="min-w-0 basis-full rounded border border-line-strong bg-surface-2 px-3 py-2 text-xs text-ink sm:basis-48 sm:flex-1" />
         <select aria-label={t("Owning Service", "Service sở hữu")} value={service} onChange={event => { setService(event.target.value); setPage(0); }} className="max-w-full rounded border border-line-strong bg-surface-2 px-2 py-2 text-xs text-ink">
@@ -140,11 +140,11 @@ function ApiDirectory({ rows, search }: { rows: ApiRow[]; search: string }) {
           <tbody className="divide-y divide-line">{visible.map(row => <tr key={`${row.service}|${row.name}`} className="hover:bg-hover">
             <td className="max-w-[340px] px-3 py-2.5">
               <EntityLink entity={{ kind: "api", service: row.service, operation: row.name }} search={search} className="block truncate font-mono font-semibold text-ink hover:text-entity-api" title={row.name}>{row.name}</EntityLink>
-              <EntityLink entity={{ kind: "service", name: row.service }} search={search} className="text-[10px] text-muted hover:text-accent">{row.service}</EntityLink>
+              <EntityLink entity={{ kind: "service", name: row.service }} search={search} className="text-[10px] text-muted hover:text-ink hover:underline">{row.service}</EntityLink>
             </td>
             <td className="px-3 py-2"><span className={row.anomaly_status === "abnormal" ? "text-warn" : "text-muted"}>{row.anomaly_status === "abnormal" ? t("Open anomaly", "Bất thường đang mở") : t("No open anomaly", "Không có bất thường mở")}</span></td>
             <td className="px-3 py-2 text-right font-mono tabular-nums">{n(row.total_requests, 0)}</td>
-            <td className="px-3 py-2 text-right font-mono tabular-nums text-accent">{n(row.rps, 3)}</td>
+            <td className="px-3 py-2 text-right font-mono tabular-nums text-ink">{n(row.rps, 3)}</td>
             <td className={`px-3 py-2 text-right font-mono tabular-nums ${row.error_rate > 0 ? "text-warn" : "text-muted"}`}>{pct(row.error_rate || 0)}</td>
             <td className="px-3 py-2 text-right font-mono tabular-nums">{n(row.p95_latency || 0, 0)} ms</td>
             <td className="px-3 py-2 text-right font-mono tabular-nums">{n(row.caller_count, 0)}</td>
@@ -303,7 +303,7 @@ export function ApiDetailPage() {
       </div>}
     >
       <div className="flex flex-wrap items-center gap-2 text-xs text-muted">
-        <EntityLink entity={{ kind: "service", name: service }} search={search} className="inline-flex items-center gap-1.5 rounded-[2px] border border-accent/40 bg-accent-soft px-2 py-1 font-mono text-accent hover:underline">
+        <EntityLink entity={{ kind: "service", name: service }} search={search} className="inline-flex items-center gap-1.5 rounded-[2px] border border-line-strong bg-surface px-2 py-1 font-mono text-ink hover:underline">
           <Activity size={12} /> {service}
         </EntityLink>
         <span className="text-muted">/</span>
@@ -345,7 +345,7 @@ export function ApiDetailPage() {
 
       <div className="mt-5 flex flex-wrap gap-2 border-b border-line pb-3" role="group" aria-label={t("API detail views", "Góc nhìn API")}>
         {[["users", t("Users"), users.length], ["callers", t("Caller services"), callers.length], ["traces", t("Traces"), traces.length]].map(([value, label, count]) => (
-          <button key={value} aria-pressed={detailTab === value} className={`rounded border px-3 py-2 text-xs ${detailTab === value ? "border-accent bg-accent-soft text-accent" : "border-line-strong text-muted hover:text-ink"}`} onClick={() => setDetailTab(String(value))}>
+          <button key={value} aria-pressed={detailTab === value} className={`rounded border px-3 py-2 text-xs ${detailTab === value ? "border-accent bg-accent-soft text-ink font-semibold" : "border-line-strong text-muted hover:text-ink"}`} onClick={() => setDetailTab(String(value))}>
             {label} <span className="ml-2 font-mono">{count}</span>
           </button>
         ))}
@@ -384,7 +384,7 @@ export function ApiDetailPage() {
           title={t("Representative Traces")}
           subtitle={t("Recent distributed traces executing this API")}
           className="mt-4"
-          action={<button onClick={() => nav(`/traces?${qs}&service=${encodedService}&operation=${encodedApi}`)} className="text-[11px] font-semibold text-accent hover:text-ink">{t("Open in Traces")} <ArrowRight size={12} className="inline" /></button>}
+          action={<button onClick={() => nav(`/traces?${qs}&service=${encodedService}&operation=${encodedApi}`)} className="text-[11px] font-semibold text-ink hover:underline">{t("Open in Traces")} <ArrowRight size={12} className="inline" /></button>}
         >
           {tracesQuery.isLoading ? <Loading /> : tracesQuery.isError ? <ErrorState message={tracesQuery.error.message} /> : traces.length ? (
             <div className="overflow-auto">
@@ -398,11 +398,11 @@ export function ApiDetailPage() {
                 <tbody className="divide-y divide-line">
                   {traces.map((tr: any) => (
                     <tr key={tr.trace_id || tr.id} onClick={() => nav(`/traces/${encodeURIComponent(tr.trace_id || tr.id)}`)} className="cursor-pointer transition hover:bg-hover">
-                      <td className="px-3 py-2 font-mono text-accent"><Link to={`/traces/${encodeURIComponent(tr.trace_id || tr.id)}`} className="hover:underline">{(tr.trace_id || tr.id || "").slice(0, 16)}…</Link></td>
+                      <td className="px-3 py-2 font-mono text-ink"><Link to={`/traces/${encodeURIComponent(tr.trace_id || tr.id)}`} className="hover:underline">{(tr.trace_id || tr.id || "").slice(0, 16)}…</Link></td>
                       <td className="px-3 font-mono text-muted">{(tr.principal_name || tr.user) ? <EntityLink entity={{ kind: "user", principal: tr.principal_name || tr.user }}>{tr.principal_name || tr.user}</EntityLink> : "—"}</td>
                       <td className="px-3 text-right font-mono tabular-nums text-ink">{tr.duration_ms != null ? `${Number(tr.duration_ms).toFixed(1)} ms` : "—"}</td>
                       <td className="px-3 text-right font-mono">
-                        <span className={`rounded-[2px] px-1.5 py-0.5 text-[10px] font-semibold uppercase ${String(tr.status_code || tr.http_status || tr.status).startsWith("5") ? "bg-bad-bg/10 text-bad" : "bg-good/10 text-good"}`}>
+                        <span className={`rounded-[2px] px-1.5 py-0.5 text-[10px] font-semibold uppercase ${String(tr.status_code || tr.http_status || tr.status).startsWith("5") ? "border border-bad-bd bg-bad-bg text-bad" : "border border-good-bd bg-good-bg text-good"}`}>
                           {tr.status_code || tr.http_status || tr.status || "OK"}
                         </span>
                       </td>
@@ -443,12 +443,12 @@ function PartyTable({ title, subtitle, query, rows, durationSec, kind, partnerLa
             <tbody className="divide-y divide-line">
               {rows.map(row => (
                 <tr key={row.name} onClick={() => nav(path(row.name))} className="cursor-pointer transition hover:bg-hover">
-                  <td className="px-3 py-2 font-mono text-accent">
+                  <td className="px-3 py-2 font-mono text-ink">
                     {kind === "user" ? <Users size={12} className="mr-1 inline" /> : <Activity size={12} className="mr-1 inline" />}
                     <EntityLink entity={kind === "user" ? { kind: "user", principal: row.name } : { kind: "service", name: row.name }} search={search} className="hover:underline">{row.name}</EntityLink>
                   </td>
                   <td className="px-3 text-right font-mono tabular-nums text-ink">{n(row.requests, 0)}</td>
-                  <td className="px-3 text-right font-mono tabular-nums text-accent">{n(row.requests / durationSec, 4)}</td>
+                  <td className="px-3 text-right font-mono tabular-nums text-ink">{n(row.requests / durationSec, 4)}</td>
                   <td className={`px-3 text-right font-mono tabular-nums ${row.errorRate > 0 ? "text-bad" : "text-muted"}`}>{pct(row.errorRate)}</td>
                   <td className="px-3 text-right font-mono tabular-nums text-entity-user">{n(row.p95, 1)} ms</td>
                   <td className="px-3 text-right font-mono tabular-nums">{n(row.partners, 0)}</td>

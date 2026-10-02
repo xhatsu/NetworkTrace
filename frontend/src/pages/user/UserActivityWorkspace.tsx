@@ -389,7 +389,6 @@ function PerformanceSection({
           color="var(--series-1)"
           selected={selectedMetric === "tps"}
           onSelect={() => selectMetric("tps")}
-          valueClass="text-accent"
         />
         <InteractiveMetricCard
           label={t("Error rate")}
@@ -768,7 +767,7 @@ export function UserActivityWorkspace() {
       <div className="flex flex-wrap gap-2 border-b border-line pb-3 pt-2" role="group" aria-label={t("User detail views", "Góc nhìn User")}>
         {tabs.map(([value, label, count]) => (
           <button key={value} type="button" aria-pressed={detailTab === value} onClick={() => setDetailTab(value)}
-            className={`rounded-ctl border px-3 py-2 text-xs ${detailTab === value ? "border-accent bg-accent-soft text-accent font-semibold" : "border-line text-muted hover:text-ink"}`}>
+            className={`rounded-ctl border px-3 py-2 text-xs ${detailTab === value ? "border-accent bg-accent-soft text-ink font-semibold" : "border-line text-muted hover:text-ink"}`}>
             {label} <span className="ml-2 font-mono">{count}</span>
           </button>
         ))}
@@ -800,7 +799,7 @@ export function UserActivityWorkspace() {
         <Panel
           title={t("Representative Traces")}
           subtitle={t("Recent distributed traces carrying this identity", "Trace phân tán gần đây mang danh tính này")}
-          action={<Link to={`/traces?${queryString(filters, { principal, account: principal })}`} className="text-[11px] font-semibold text-accent hover:text-ink">{t("Open in Traces")} <ArrowRight size={12} className="inline" /></Link>}
+          action={<Link to={`/traces?${queryString(filters, { principal, account: principal })}`} className="text-[11px] font-semibold text-ink hover:underline">{t("Open in Traces")} <ArrowRight size={12} className="inline" /></Link>}
         >
           {tracesQuery.isLoading ? <Loading /> : tracesQuery.isError ? <ErrorState message={(tracesQuery.error as Error).message} /> : traces.length ? (
             <div className="overflow-auto">
@@ -815,12 +814,12 @@ export function UserActivityWorkspace() {
                 <tbody className="divide-y divide-line">
                   {traces.map((tr: any) => (
                     <tr key={tr.trace_id || tr.id} onClick={() => nav(`/traces/${encodeURIComponent(tr.trace_id || tr.id)}`)} className="cursor-pointer transition hover:bg-hover">
-                      <td className="px-3 py-2 font-mono text-accent">{(tr.trace_id || tr.id || "").slice(0, 16)}…</td>
+                      <td className="px-3 py-2 font-mono text-ink">{(tr.trace_id || tr.id || "").slice(0, 16)}…</td>
                       <td className="px-3 text-ink">{tr.service || tr.service_name || tr.target_service || "—"}</td>
                       <td className="px-3 font-mono text-muted">{tr.operation || tr.name || "—"}</td>
                       <td className="px-3 text-right font-mono tabular-nums text-ink">{tr.duration_ms != null ? `${Number(tr.duration_ms).toFixed(1)} ms` : "—"}</td>
                       <td className="px-3 text-right font-mono">
-                        <span className={`rounded-ctl px-1.5 py-0.5 text-[10px] font-semibold uppercase ${String(tr.status_code || tr.http_status || tr.status).startsWith("5") ? "bg-bad-bg text-bad" : "bg-good-bg text-good"}`}>{tr.status_code || tr.http_status || tr.status || "OK"}</span>
+                        <span className={`rounded-ctl border px-1.5 py-0.5 text-[10px] font-semibold uppercase ${String(tr.status_code || tr.http_status || tr.status).startsWith("5") ? "border-bad text-bad" : "border-good text-good"}`}>{tr.status_code || tr.http_status || tr.status || "OK"}</span>
                       </td>
                     </tr>
                   ))}
@@ -873,17 +872,17 @@ function PartyTable({ kind, rows, windowSec, search, onOpen, t }: {
                 <tr key={row.name} onClick={path ? () => onOpen(path) : undefined} className={`transition hover:bg-hover ${path ? "cursor-pointer" : ""}`}>
                   <td className="max-w-[360px] px-3 py-2">
                     <span className="flex items-center gap-1.5 font-mono">
-                      {kind === "apis" ? <Fingerprint size={12} className="shrink-0 text-entity-api" /> : kind === "ips" ? <Globe2 size={12} className="shrink-0 text-muted" /> : <Server size={12} className="shrink-0 text-accent" />}
+                      {kind === "apis" ? <Fingerprint size={12} className="shrink-0 text-entity-api" /> : kind === "ips" ? <Globe2 size={12} className="shrink-0 text-muted" /> : <Server size={12} className="shrink-0 text-entity-service" />}
                       {kind === "apis" ? <EntityLink entity={{ kind: "api", ...split(row.name) }} search={search} className="truncate text-entity-api hover:underline" title={label}>{label}</EntityLink>
                         : kind === "ips" ? <span className="text-ink">{row.name}</span>
                         : <EntityLink entity={{ kind: "service", name: row.name }} search={search} className="truncate text-entity-service hover:underline">{row.name}</EntityLink>}
-                      {row.isNew && kind === "ips" && <span className="border border-warn/40 bg-warn-bg px-1 text-[10px] text-warn">NEW</span>}
+                      {row.isNew && kind === "ips" && <span className="border border-warn px-1 text-[10px] text-warn font-semibold">NEW</span>}
                     </span>
                     {kind === "apis" && <span className="text-[10px] text-muted">{split(row.name).service}</span>}
                     {kind === "ips" && row.role && <span className="text-[10px] text-muted">{row.role}</span>}
                   </td>
                   <td className="px-3 text-right font-mono tabular-nums text-ink">{n(row.requestCount, 0)}</td>
-                  <td className="px-3 text-right font-mono tabular-nums text-accent">{n(row.requestCount / windowSec, 4)}</td>
+                  <td className="px-3 text-right font-mono tabular-nums text-ink">{n(row.requestCount / windowSec, 4)}</td>
                   <td className={`px-3 text-right font-mono tabular-nums ${row.errorRate > 0 ? "text-bad" : "text-muted"}`}>{percent(row.errorRate)}</td>
                   <td className="px-3 text-right font-mono tabular-nums text-entity-user">{n(row.p95, 1)} ms</td>
                   {countsOf(row).map((value, i) => <td key={i} className="px-3 text-right font-mono tabular-nums">{n(value, 0)}</td>)}

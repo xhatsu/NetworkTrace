@@ -85,7 +85,7 @@ export function TracesPage() {
               placeholder={t("Filter by Trace ID...")}
               value={traceIdFilter}
               onChange={(e) => setTraceIdFilter(e.target.value)}
-              className="h-8 w-48 rounded-lg border border-line bg-surface-2 pl-8 pr-3 text-xs text-ink placeholder:text-muted focus:border-accent/50 focus:outline-none"
+              className="h-8 w-48 rounded-lg border border-line bg-surface-2 pl-8 pr-3 text-xs text-ink placeholder:text-muted focus:border-line-strong focus:outline-none"
             />
           </div>
           <div className="relative">
@@ -94,7 +94,7 @@ export function TracesPage() {
               placeholder={`${t("Service")}...`}
               value={serviceFilter}
               onChange={(e) => setServiceFilter(e.target.value)}
-              className="h-8 w-32 rounded-lg border border-line bg-surface-2 px-3 text-xs text-ink placeholder:text-muted focus:border-accent/50 focus:outline-none"
+              className="h-8 w-32 rounded-lg border border-line bg-surface-2 px-3 text-xs text-ink placeholder:text-muted focus:border-line-strong focus:outline-none"
             />
           </div>
           <div className="relative">
@@ -103,7 +103,7 @@ export function TracesPage() {
               placeholder={`${t("Principal")}...`}
               value={principalFilter}
               onChange={(e) => setPrincipalFilter(e.target.value)}
-              className="h-8 w-28 rounded-lg border border-line bg-surface-2 px-3 text-xs text-ink placeholder:text-muted focus:border-accent/50 focus:outline-none"
+              className="h-8 w-28 rounded-lg border border-line bg-surface-2 px-3 text-xs text-ink placeholder:text-muted focus:border-line-strong focus:outline-none"
             />
           </div>
           <select
@@ -130,7 +130,7 @@ export function TracesPage() {
           <div className="overflow-auto scrollbar">
             <table className="w-full min-w-[1000px] text-left">
               <thead>
-                <tr className="border-b border-[rgba(255,255,255,0.06)] bg-white/[0.01] text-[11px] font-semibold uppercase tracking-wider text-muted">
+                <tr className="border-b border-line bg-surface-2 text-[11px] font-semibold uppercase tracking-wider text-muted">
                   <th className="px-4 py-3">{t("Trace ID")}</th>
                   <th className="px-4 py-3">{t("Timestamp")}</th>
                   <th className="px-4 py-3">{t("Service & Operation")}</th>
@@ -140,14 +140,14 @@ export function TracesPage() {
                   <th className="px-4 py-3 text-right">{t("Action")}</th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-[rgba(255,255,255,0.04)] text-xs">
+              <tbody className="divide-y divide-line text-xs">
                 {q.data?.items.map((item) => {
                   const isError = (item.http_status && item.http_status >= 400) || item.outcome === "failure";
                   return (
                     <tr
                       key={`${item.trace_id}-${item.span_id || item.id}`}
                       onClick={() => nav(`/traces/${item.trace_id}`)}
-                      className="cursor-pointer transition hover:bg-white/[0.03]"
+                      className="cursor-pointer transition hover:bg-hover"
                     >
                       <td className="px-4 py-3 font-mono text-entity-user">
                         <span className="hover:underline">{item.trace_id.slice(0, 16)}...</span>
@@ -175,30 +175,30 @@ export function TracesPage() {
                       <td className="px-4 py-3 text-right font-mono">
                         {item.http_status ? (
                           isError ? (
-                            <span className="inline-flex items-center gap-1 rounded bg-bad/10 px-2 py-0.5 text-[11px] font-semibold text-bad border border-bad/20">
+                            <span className="inline-flex items-center gap-1 rounded px-2 py-0.5 text-[11px] font-semibold text-bad border border-bad">
                               {item.http_status} ERROR
                             </span>
                           ) : (
-                            <span className="inline-flex items-center gap-1 rounded bg-good/10 px-2 py-0.5 text-[11px] font-semibold text-good border border-good/20">
+                            <span className="inline-flex items-center gap-1 rounded px-2 py-0.5 text-[11px] font-semibold text-good border border-good">
                               {item.http_status} OK
                             </span>
                           )
                         ) : isError ? (
-                          <span className="inline-flex items-center gap-1 rounded bg-bad/10 px-2 py-0.5 text-[11px] font-semibold text-bad border border-bad/20">
+                          <span className="inline-flex items-center gap-1 rounded px-2 py-0.5 text-[11px] font-semibold text-bad border border-bad">
                             ERROR
                           </span>
                         ) : item.outcome === "success" ? (
-                          <span className="inline-flex items-center gap-1 rounded bg-good/10 px-2 py-0.5 text-[11px] font-semibold text-good border border-good/20">
+                          <span className="inline-flex items-center gap-1 rounded px-2 py-0.5 text-[11px] font-semibold text-good border border-good">
                             200 OK
                           </span>
                         ) : (
-                          <span className="inline-flex items-center gap-1 rounded bg-surface-2/10 px-2 py-0.5 text-[11px] font-semibold text-muted border border-line/20">
+                          <span className="inline-flex items-center gap-1 rounded bg-structure px-2 py-0.5 text-[11px] font-semibold text-muted border border-structure-line">
                             N/A
                           </span>
                         )}
                       </td>
                       <td className="px-4 py-3 text-right">
-                        <span className="inline-flex items-center gap-1 text-[11px] text-entity-user hover:text-accent">
+                        <span className="inline-flex items-center gap-1 text-[11px] text-entity-user hover:text-ink hover:underline">
                           {t("Waterfall")} <ChevronRight size={12} />
                         </span>
                       </td>
@@ -318,8 +318,8 @@ export function TraceDetailPage() {
                     onClick={() => setSelectedSpan(span)}
                     className={`group flex cursor-pointer items-center gap-3 rounded-lg border p-2 transition ${
                       isSelected
-                        ? "border-line bg-accent/10"
-                        : "border-[rgba(255,255,255,0.04)] bg-white/[0.01] hover:border-[rgba(255,255,255,0.1)] hover:bg-white/[0.03]"
+                        ? "border-line-strong bg-accent-soft"
+                        : "border-line bg-surface hover:bg-hover"
                     }`}
                   >
                     {/* Left: Service & Operation */}
@@ -346,8 +346,8 @@ export function TraceDetailPage() {
                         }}
                         className={`absolute top-1 h-4 rounded text-[10px] font-mono px-1 flex items-center shadow-sm ${
                           isErr
-                            ? "bg-bad/80 text-white"
-                            : "bg-accent/80 text-white"
+                            ? "bg-bad text-white"
+                            : "bg-accent text-white"
                         }`}
                       >
                         <span className="truncate">{span.duration_ms ? `${span.duration_ms.toFixed(1)}ms` : "0ms"}</span>
@@ -358,10 +358,10 @@ export function TraceDetailPage() {
                     <div className="w-20 shrink-0 text-right">
                       <span className={`font-mono text-[10px] px-1.5 py-0.5 rounded ${
                         isErr
-                          ? "bg-bad/20 text-bad"
+                          ? "border border-bad text-bad"
                           : (span.http_status || span.outcome === "success")
-                          ? "bg-good/20 text-good"
-                          : "bg-surface-2/20 text-muted"
+                          ? "border border-good text-good"
+                          : "border border-structure-line bg-structure text-muted"
                       }`}>
                         {span.http_status || (span.outcome === "failure" ? "500" : span.outcome === "success" ? "200" : "N/A")}
                       </span>
@@ -429,7 +429,7 @@ export function TraceDetailPage() {
                     <span className="text-[10px] font-semibold uppercase text-muted mb-1 flex items-center gap-1">
                       <FileJson size={12} /> {t("Attributes JSON")}
                     </span>
-                    <pre className="max-h-56 overflow-auto rounded bg-black/40 p-2 font-mono text-[10px] text-ink border border-[rgba(255,255,255,0.06)]">
+                    <pre className="max-h-56 overflow-auto rounded bg-surface-2 p-2 font-mono text-[10px] text-ink border border-line">
                       {formatAttributes(selectedSpan.attributes_json)}
                     </pre>
                   </div>

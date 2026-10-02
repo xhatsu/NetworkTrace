@@ -5,6 +5,7 @@ export type ThemeMode = "dark" | "light";
 export interface ColorTokens {
   canvas: string;
   sidebar: string;
+  structure: string;
   surface: string;
   surfaceRaised: string;
   surfaceMuted: string;
@@ -127,6 +128,8 @@ export function getThemeTokens(theme?: ThemeMode): ColorTokens {
   if (typeof document !== "undefined" && targetTheme === activeTheme) {
     const page = readCssVar("--page", "var(--page)");
     const bg = readCssVar("--bg", "var(--bg)");
+    const structure = readCssVar("--structure", "var(--structure)");
+    const frame = readCssVar("--frame", "var(--frame)");
     const surface = readCssVar("--surface", "var(--surface)");
     const surface2 = readCssVar("--surface-2", "var(--surface-2)");
     const border = readCssVar("--border", "var(--border)");
@@ -137,7 +140,6 @@ export function getThemeTokens(theme?: ThemeMode): ColorTokens {
 
     const accent = readCssVar("--accent", "var(--accent)");
     const accentSoft = readCssVar("--accent-soft", "var(--accent-soft)");
-    const accent2 = readCssVar("--accent-2", "var(--accent-2)");
 
     const good = readCssVar("--good", "var(--good)");
     const bad = readCssVar("--bad", "var(--bad)");
@@ -154,7 +156,8 @@ export function getThemeTokens(theme?: ThemeMode): ColorTokens {
 
     const tokens: ColorTokens = {
       canvas: page,
-      sidebar: bg,
+      sidebar: frame,
+      structure,
       surface,
       surfaceRaised: surface2,
       surfaceMuted: surface2,
@@ -175,7 +178,7 @@ export function getThemeTokens(theme?: ThemeMode): ColorTokens {
       green: good,
       orange: warn,
       red: bad,
-      yellow: accent2,
+      yellow: warn,
       purple: accent,
       teal: entityApi,
 
@@ -187,12 +190,12 @@ export function getThemeTokens(theme?: ThemeMode): ColorTokens {
         tooltipBorder: borderStrong,
         tooltipText: text,
         tps: accent,
-        baseline: accent2,
+        baseline: muted,
         http4xx: warn,
         http5xx: bad,
         p95: entityApi,
-        areaTop: readCssVar("--chart-area-top", "rgba(109, 74, 232, 0.22)"),
-        areaBottom: readCssVar("--chart-area-bottom", "rgba(109, 74, 232, 0.02)"),
+        areaTop: readCssVar("--chart-area-top", "var(--chart-area-top)"),
+        areaBottom: readCssVar("--chart-area-bottom", "var(--chart-area-bottom)"),
       },
 
       entity: {
@@ -215,7 +218,8 @@ export function getThemeTokens(theme?: ThemeMode): ColorTokens {
   // Fallback defaults if targetTheme wasn't rendered yet
   return {
     canvas: "var(--page)",
-    sidebar: "var(--bg)",
+    sidebar: "var(--frame)",
+    structure: "var(--structure)",
     surface: "var(--surface)",
     surfaceRaised: "var(--surface-2)",
     surfaceMuted: "var(--surface-2)",
@@ -234,7 +238,7 @@ export function getThemeTokens(theme?: ThemeMode): ColorTokens {
     green: "var(--good)",
     orange: "var(--warn)",
     red: "var(--bad)",
-    yellow: "var(--accent-2)",
+    yellow: "var(--warn)",
     purple: "var(--accent)",
     teal: "var(--entity-api)",
     chart: {
@@ -245,12 +249,12 @@ export function getThemeTokens(theme?: ThemeMode): ColorTokens {
       tooltipBorder: "var(--border-strong)",
       tooltipText: "var(--text)",
       tps: "var(--accent)",
-      baseline: "var(--accent-2)",
+      baseline: "var(--muted)",
       http4xx: "var(--warn)",
       http5xx: "var(--bad)",
       p95: "var(--entity-api)",
-      areaTop: "rgba(109, 74, 232, 0.22)",
-      areaBottom: "rgba(109, 74, 232, 0.02)",
+      areaTop: "var(--chart-area-top)",
+      areaBottom: "var(--chart-area-bottom)",
     },
     entity: {
       service: "var(--entity-service)",
