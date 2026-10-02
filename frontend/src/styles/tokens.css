@@ -1,0 +1,171 @@
+:root {
+  /* Surfaces */
+  --page: #f7f7f8;
+  --bg: #ffffff;
+  --surface: #ffffff;
+  --surface-2: #fafafa;
+
+  /* Borders */
+  --border: #e8e8ec;
+  --border-strong: #dcdce2;
+
+  /* Text */
+  --text: #18181b;
+  --muted: #71717a;
+  --faint: #a1a1aa;
+
+  /* Accents */
+  --accent: #6d4ae8;
+  --accent-soft: #efeafd;
+  --accent-2: #f5b13d;
+
+  /* Pills & Status */
+  --up: #16a34a;
+  --up-bg: #f0fdf4;
+  --up-bd: #bbf7d0;
+  --down: #dc2626;
+  --down-bg: #fef2f2;
+  --down-bd: #fecaca;
+  --flat: #71717a;
+  --flat-bg: #f4f4f5;
+  --flat-bd: #e4e4e7;
+
+  /* Relationship States */
+  --state-good: #16a34a;
+  --state-learning: #2563eb;
+  --state-new: #d97706;
+  --state-bad: #dc2626;
+
+  /* Shadows */
+  --shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.05), 0 1px 2px -1px rgba(0, 0, 0, 0.05);
+  --shadow-pop: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -4px rgba(0, 0, 0, 0.1);
+
+  /* Roles this app also needs */
+  --grid: #efeff2;
+  --hover: #f4f4f6;
+  --selected: var(--accent-soft);
+  --info: #2563eb;
+  --warn: #d97706;
+  --good: var(--up);
+  --bad: var(--down);
+  --info-bg: #eff6ff;
+  --info-bd: #bfdbfe;
+  --warn-bg: #fffbeb;
+  --warn-bd: #fde68a;
+  --good-bg: var(--up-bg);
+  --good-bd: var(--up-bd);
+  --bad-bg: var(--down-bg);
+  --bad-bd: var(--down-bd);
+
+  /* Entity colors */
+  --entity-service: #2563eb;
+  --entity-user: #c026d3;
+  --entity-api: #0d9488;
+  --entity-ip: #71717a;
+  --path-highlight: #d97706;
+
+  /* HTTP Status Classes */
+  --http-2xx: var(--good);
+  --http-3xx: var(--info);
+  --http-4xx: var(--warn);
+  --http-5xx: var(--bad);
+
+  /* Chart Series */
+  --series-1: var(--accent);
+  --series-2: var(--accent-2);
+  --series-3: var(--info);
+
+  /* Chart Area Gradient */
+  --chart-area-top: rgba(109, 74, 232, 0.22);
+  --chart-area-bottom: rgba(109, 74, 232, 0.02);
+
+  /* Radius & Metrics */
+  --radius-card: 12px;
+  --radius-inner: 9px;
+  --radius-ctl: 8px;
+  --radius-pill: 999px;
+  --chart-line-width: 1.5px;
+}
+
+:root[data-theme="dark"] {
+  /* Surfaces */
+  --page: #0c0c0e;
+  --bg: #131316;
+  --surface: #18181b;
+  --surface-2: #1e1e22;
+
+  /* Borders */
+  --border: #2a2a30;
+  --border-strong: #36363d;
+
+  /* Text */
+  --text: #f4f4f5;
+  --muted: #a1a1aa;
+  --faint: #71717a;
+
+  /* Accents */
+  --accent: #8f74f2;
+  --accent-soft: #2a2347;
+  --accent-2: #e9a530;
+
+  /* Pills & Status */
+  --up: #22c55e;
+  --up-bg: rgba(34, 197, 94, 0.15);
+  --up-bd: rgba(34, 197, 94, 0.3);
+  --down: #ef4444;
+  --down-bg: rgba(239, 68, 68, 0.15);
+  --down-bd: rgba(239, 68, 68, 0.3);
+  --flat: #a1a1aa;
+  --flat-bg: rgba(161, 161, 170, 0.15);
+  --flat-bd: rgba(161, 161, 170, 0.3);
+
+  /* Relationship States */
+  --state-good: #22c55e;
+  --state-learning: #6b9cf5;
+  --state-new: #f0a43a;
+  --state-bad: #ef4444;
+
+  /* Shadows */
+  --shadow: none;
+  --shadow-pop: 0 10px 25px -5px rgba(0, 0, 0, 0.5), 0 8px 10px -6px rgba(0, 0, 0, 0.5);
+
+  /* Roles this app also needs */
+  --grid: #26262b;
+  --hover: #222227;
+  --selected: var(--accent-soft);
+  --info: #6b9cf5;
+  --warn: #f0a43a;
+  --good: var(--up);
+  --bad: var(--down);
+  --info-bg: rgba(107, 156, 245, 0.15);
+  --info-bd: rgba(107, 156, 245, 0.3);
+  --warn-bg: rgba(240, 164, 58, 0.15);
+  --warn-bd: rgba(240, 164, 58, 0.3);
+  --good-bg: var(--up-bg);
+  --good-bd: var(--up-bd);
+  --bad-bg: var(--down-bg);
+  --bad-bd: var(--down-bd);
+
+  /* Entity colors */
+  --entity-service: #6b9cf5;
+  --entity-user: #e07ae8;
+  --entity-api: #4fc1b3;
+  --entity-ip: #a1a1aa;
+  --path-highlight: #f2cc0c;
+
+  /* HTTP Status Classes */
+  --http-2xx: var(--good);
+  --http-3xx: var(--info);
+  --http-4xx: var(--warn);
+  --http-5xx: var(--bad);
+
+  /* Chart Series */
+  --series-1: var(--accent);
+  --series-2: var(--accent-2);
+  --series-3: var(--info);
+
+  /* Chart Area Gradient */
+  --chart-area-top: rgba(143, 116, 242, 0.25);
+  --chart-area-bottom: rgba(143, 116, 242, 0.02);
+}
+

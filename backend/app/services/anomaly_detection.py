@@ -506,50 +506,47 @@ def detect_anomalies(
                 )]
             ))
 
-    # Detector 9: User + Source IP Behavioral Anomalies
+    # Detector 9: User + Source IP Behavioral Anomalies. Reads only the per-credential
+    # activity rollup (principal_activity_5m), never raw traces, so it keeps working after
+    # the one-day raw trace TTL. The rollup already excludes anonymous principals.
+    ws_ms, we_ms = window_start_sec * 1000, window_end_sec * 1000
+    _ip_ok = "source_ip != '' AND source_ip NOT IN ('unknown', 'unavailable')"
     with get_connection(db_path) as db:
-        user_ip_window = db.execute("""
+        user_ip_window = db.execute(f"""
             SELECT
               principal_name,
-              caller_ip as source_ip,
-              COALESCE(caller_service, '') as caller_service,
+              source_ip,
+              caller_service,
               target_service,
               operation,
-              COUNT(*) as request_count
-            FROM traces
-            WHERE timestamp_ms >= ? AND timestamp_ms < ?
-              AND principal_name IS NOT NULL AND principal_name NOT IN ('', 'unknown', '-anonymous-', 'anonymous')
-              AND caller_ip IS NOT NULL AND caller_ip != '' AND caller_ip NOT IN ('unknown', 'unavailable')
-            GROUP BY principal_name, caller_ip, caller_service, target_service, operation
-        """, (window_start_sec * 1000, window_end_sec * 1000)).fetchall()
+              sum(request_count) as request_count
+            FROM principal_activity_5m FINAL
+            WHERE bucket_start_ms >= ? AND bucket_start_ms < ?
+              AND {_ip_ok}
+            GROUP BY principal_name, source_ip, caller_service, target_service, operation
+        """, (ws_ms // 300000 * 300000, we_ms)).fetchall()
 
         historical_user_ips = {
             (row[0], row[1]) for row in db.execute(
-                "SELECT DISTINCT principal_name, caller_ip FROM traces WHERE timestamp_ms < ? AND principal_name NOT IN ('unknown', '-anonymous-', 'anonymous', '') AND caller_ip IS NOT NULL AND caller_ip != ''",
-                (window_start_sec * 1000,)
+                "SELECT DISTINCT principal_name, source_ip FROM principal_activity_5m FINAL "
+                "WHERE bucket_start_ms < ? AND source_ip != ''",
+                (ws_ms // 300000 * 300000,)
             ).fetchall()
         }
-        known_ips = {
-            row[0] for row in db.execute(
-                "SELECT DISTINCT caller_ip FROM traces WHERE timestamp_ms < ? AND caller_ip IS NOT NULL AND caller_ip != ''",
-                (window_start_sec * 1000,)
-            ).fetchall()
-        }
+        known_ips = set()
         historical_ip_endpoints = set()
-        try:
-            ip_ep_rows = db.execute(
-                "SELECT DISTINCT caller_ip, target_service, operation FROM traces WHERE timestamp_ms < ? AND caller_ip IS NOT NULL AND caller_ip != '' AND caller_ip NOT IN ('unknown', 'unavailable')",
-                (window_start_sec * 1000,)
-            ).fetchall()
-            for row in ip_ep_rows:
-                historical_ip_endpoints.add(f"{row[0]}->{row[1]}:{row[2]}")
-                known_ips.add(row[0])
-        except Exception:
-            pass
+        for row in db.execute(
+            f"SELECT DISTINCT source_ip, target_service, operation FROM principal_activity_5m FINAL "
+            f"WHERE bucket_start_ms < ? AND {_ip_ok}",
+            (ws_ms // 300000 * 300000,)
+        ).fetchall():
+            historical_ip_endpoints.add(f"{row[0]}->{row[1]}:{row[2]}")
+            known_ips.add(row[0])
+        known_ips |= {ip for _, ip in historical_user_ips}
         known_users = {
             row[0] for row in db.execute(
-                "SELECT DISTINCT principal_name FROM traces WHERE timestamp_ms < ? AND principal_name NOT IN ('unknown', '-anonymous-', 'anonymous', '')",
-                (window_start_sec * 1000,)
+                "SELECT DISTINCT principal_name FROM principal_activity_5m FINAL WHERE bucket_start_ms < ?",
+                (ws_ms // 300000 * 300000,)
             ).fetchall()
         }
 

@@ -1,0 +1,192 @@
+# ==============================================================================
+# TraceScope OBI Agent Only Manifest (Without OpenTelemetry Collector)
+#
+# Use this manifest when your Kubernetes cluster already hosts an OpenTelemetry
+# Collector or routes traces directly to an external OTLP receiver.
+#
+# BEFORE APPLYING:
+# 1. Edit the ConfigMap below to replace `http://<YOUR_EXISTING_COLLECTOR_HOST>:4317`
+#    with your actual collector gRPC endpoint (e.g. `http://otel-collector.monitoring.svc.cluster.local:4317`).
+# 2. Adjust target namespaces under `discovery.instrument` if needed.
+# ==============================================================================
+
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: tracescope-obi
+  namespace: tracescope
+  labels:
+    app.kubernetes.io/name: tracescope-obi
+    app.kubernetes.io/component: ebpf-agent
+    app.kubernetes.io/part-of: tracescope
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: tracescope-obi
+  labels:
+    app.kubernetes.io/name: tracescope-obi
+    app.kubernetes.io/component: ebpf-agent
+    app.kubernetes.io/part-of: tracescope
+rules:
+  - apiGroups: [""]
+    resources:
+      - pods
+      - services
+      - nodes
+      - namespaces
+    verbs: [get, list, watch]
+  - apiGroups: ["apps"]
+    resources:
+      - replicasets
+      - deployments
+      - daemonsets
+      - statefulsets
+    verbs: [get, list, watch]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: tracescope-obi
+  labels:
+    app.kubernetes.io/name: tracescope-obi
+    app.kubernetes.io/component: ebpf-agent
+    app.kubernetes.io/part-of: tracescope
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: tracescope-obi
+subjects:
+  - kind: ServiceAccount
+    name: tracescope-obi
+    namespace: tracescope
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: tracescope-obi
+  namespace: tracescope
+  labels:
+    app.kubernetes.io/name: tracescope-obi
+    app.kubernetes.io/component: ebpf-agent
+    app.kubernetes.io/part-of: tracescope
+data:
+  obi.yml: |
+    attributes:
+      kubernetes:
+        enable: true
+    discovery:
+      instrument:
+        - k8s_namespace: default
+    ebpf:
+      buffer_sizes:
+        http: 2048
+      payload_extraction:
+        http:
+          enrichment:
+            enabled: true
+            policy:
+              default_action:
+                headers: exclude
+                body: exclude
+            rules:
+              - action: include
+                type: headers
+                scope: request
+                match:
+                  patterns:
+                    - content-type
+                    - soapaction
+                    - x-forwarded-for
+                    - x-real-ip
+                    - x-wsse
+                    - authorization
+                    - user-agent
+              - action: include
+                type: body
+                scope: request
+                match:
+                  methods: [POST, PUT]
+              - action: include
+                type: body
+                scope: response
+                match:
+                  methods: [POST, PUT]
+      track_request_headers: true
+    log_level: info
+    otel_traces_export:
+      endpoint: http://<YOUR_EXISTING_COLLECTOR_HOST>:4317
+      protocol: grpc
+---
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: tracescope-obi
+  namespace: tracescope
+  labels:
+    app.kubernetes.io/name: tracescope-obi
+    app.kubernetes.io/component: ebpf-agent
+    app.kubernetes.io/part-of: tracescope
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: tracescope-obi
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: tracescope-obi
+        obi.variant: standard
+    spec:
+      serviceAccountName: tracescope-obi
+      hostPID: true
+      hostNetwork: true
+      dnsPolicy: ClusterFirstWithHostNet
+      tolerations:
+        - effect: NoSchedule
+          operator: Exists
+        - effect: NoExecute
+          operator: Exists
+      containers:
+        - name: obi
+          image: "otel/ebpf-instrument:v0.13.0"
+          imagePullPolicy: IfNotPresent
+          securityContext:
+            privileged: true
+          env:
+            - name: OTEL_EBPF_CONFIG_PATH
+              value: /etc/obi/obi.yml
+            - name: OTEL_METRICS_EXPORTER
+              value: "none"
+            - name: OTEL_LOGS_EXPORTER
+              value: "none"
+            - name: OTEL_EBPF_KUBE_METADATA_ENABLE
+              value: "true"
+          volumeMounts:
+            - name: config
+              mountPath: /etc/obi
+            - name: sys-kernel-debug
+              mountPath: /sys/kernel/debug
+            - name: sys-fs-cgroup
+              mountPath: /sys/fs/cgroup
+            - name: sys-fs-bpf
+              mountPath: /sys/fs/bpf
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+      volumes:
+        - name: config
+          configMap:
+            name: tracescope-obi
+        - name: sys-kernel-debug
+          hostPath:
+            path: /sys/kernel/debug
+        - name: sys-fs-cgroup
+          hostPath:
+            path: /sys/fs/cgroup
+        - name: sys-fs-bpf
+          hostPath:
+            path: /sys/fs/bpf

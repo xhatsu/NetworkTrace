@@ -287,3 +287,11 @@ refresh, independent of the number of individual traces ingested. Relationship
 cardinality and peak ingestion rate still determine system capacity.
 
 Changes now includes learned metric deviations from the `legacy_metrics` snapshot as explicit `learned_behavior` signals. Each signal carries the metric-bucket source scope, reference sample/day counts, observation bucket, persistence, and learned baseline/current TPS values. Existing detector signals remain intact and are correlated into the same bounded episodes. Learned novelty or elevated TPS alone is a Watch/review candidate and cannot escalate severity without the existing measured-impact, persistence, and baseline gates. Jev remains advisory; raw trace evidence is not used to create these learned signals.
+
+## Access flow and matrix
+
+`GET /api/v1/behavior/access` joins the learned graph with current-window observation state for the Sankey (`view=flow`) and credential × API matrix (`view=matrix`). It reads only the graph snapshot and profile/deviation read models. See the 2026-09-30 section of `AGENTS.md` for states, caps and IP-role rules.
+
+## Trace-free user behavior
+
+User behavior (principal profiles, behavioral detectors, user/IP anomalies) never reads raw `traces`. The worker builds `principal_activity_5m` (35-day TTL) from the caller-resolved trace source for each aggregation slice, and every consumer reads that rollup. `principal_activity_consumed` records what was already processed per row so a rewritten bucket contributes only its increase. Raw traces can expire after one day without losing behavior history. Re-resolved callers can be counted again under a new row key; decreases are never subtracted. See AGENTS.md "Trace-free user behavior and mid-request dependency edges".

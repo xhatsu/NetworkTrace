@@ -1,0 +1,29 @@
+tracescope-obi {{ .Chart.Version }} installed in namespace {{ .Release.Namespace }}.
+{{- if .Values.obi.enabled }}
+
+OBI variant : {{ .Values.obi.variant }} ({{ include "tracescope-obi.obiImage" . }})
+Body capture: {{ ternary "on" "off" .Values.obi.bodyCapture.enabled }}
+Export to   : {{ include "tracescope-obi.obiExportEndpoint" . }}
+{{- if and (eq .Values.obi.variant "custom") (not .Values.obi.bodyCapture.enabled) }}
+
+WARNING: obi.variant=custom only adds XML body extraction, but bodyCapture is off.
+         Use obi.variant=standard unless you capture SOAP/XML bodies.
+{{- end }}
+{{- if and (eq .Values.obi.variant "standard") .Values.obi.bodyCapture.enabled }}
+
+NOTE: standard OBI captures JSON bodies only. SOAP/WSSE usernames in XML
+      bodies require obi.variant=custom.
+{{- end }}
+{{- end }}
+{{- if .Values.collector.enabled }}
+
+Collector mode: {{ .Values.collector.exporter.mode }}
+{{- if eq .Values.collector.exporter.mode "tracescope" }}
+  -> {{ .Values.collector.exporter.tracescope.endpoint }}/v1/traces
+  TraceScope must run with: storage.pipelineMode=clickhouse,
+  elasticsearch.syncEnabled=false, storage.clickhouseOnlyAgentTraces=false.
+{{- else }}
+  -> {{ .Values.collector.exporter.elk.endpoint }} (Elastic APM)
+  TraceScope must run with: storage.pipelineMode=elk_to_clickhouse.
+{{- end }}
+{{- end }}

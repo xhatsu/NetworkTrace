@@ -14,6 +14,7 @@ import re
 import time
 from datetime import datetime
 from typing import Any, Optional
+from urllib.parse import urlsplit
 
 from backend.app.models.trace import NormalizedTrace
 from backend.app.services.wsse import (
@@ -281,13 +282,26 @@ def extract_principal(auth_header: Any, fallback_user: Any = None) -> str:
                 return username.strip()[:200]
         except Exception:
             pass
-    # NOTE: Non-header identity extraction commented out for now (will be implemented later)
-    # if fallback_user:
-    #     if isinstance(fallback_user, list) and fallback_user:
-    #         fallback_user = fallback_user[0]
-    #     s = str(fallback_user).strip()
-    #     if s:
-    #         return s[:200]
+    if isinstance(auth_header, str) and auth_header.lower().startswith("bearer "):
+        try:
+            token = auth_header[7:].strip()
+            parts = token.split(".")
+            if len(parts) >= 2:
+                payload_b64 = parts[1]
+                rem = len(payload_b64) % 4
+                if rem > 0:
+                    payload_b64 += "=" * (4 - rem)
+                decoded_json = base64.urlsafe_b64decode(payload_b64.encode("ascii")).decode("utf-8", "replace")
+                claims = json.loads(decoded_json)
+                if isinstance(claims, dict):
+                    for k in ("preferred_username", "username", "sub", "name", "email", "client_id", "user_id"):
+                        val = claims.get(k)
+                        if val and isinstance(val, str) and val.strip():
+                            return val.strip()[:200]
+            elif token:
+                return token[:200]
+        except Exception:
+            pass
     return "unknown"
 
 def _extract_attributes(document: dict[str, Any]) -> dict[str, Any]:
@@ -503,7 +517,8 @@ def normalize_otel_record(raw: dict[str, Any], source_label: str = "import") -> 
 
     # Span Kind & Networking
     event_type = str(pick("processor.event", "event.type", default="transaction"))
-    kind_raw = str(pick("span.kind", "span_kind", "span.type", "kind", default="server" if event_type == "transaction" else "internal")).lower()
+    explicit_kind = pick("span.kind", "span_kind", "kind")
+    kind_raw = str(explicit_kind or pick("span.type", default="server" if event_type == "transaction" else "internal")).lower()
     if kind_raw in {"span_kind_server", "server"}: span_kind = "server"
     elif kind_raw in {"span_kind_client", "client", "producer", "external"}: span_kind = "client"
     else: span_kind = "internal"
@@ -519,12 +534,40 @@ def normalize_otel_record(raw: dict[str, Any], source_label: str = "import") -> 
     except Exception:
         target_port = None
 
+    # OBI can export an initiating HTTP client call as a root transaction with
+    # no span.kind. Infer direction only when a destination address corroborates
+    # a peer name; caller/parent fields in peer_service are NOT destination proof.
+    inferred_root_client = False
+    outbound_peer = pick(
+        "labels.service_peer_name", "service_peer_name", "peer.service.name",
+        "peer.service", "span.destination.service.resource", "destination.service.resource",
+    )
+
+    def destination_host(value: Any) -> str:
+        text = str(value or "").strip()
+        try:
+            return (urlsplit(text if "://" in text else "//" + text).hostname or "").lower().rstrip(".")
+        except ValueError:
+            return ""
+
+    if event_type == "transaction" and not parent_span_id and not explicit_kind and outbound_peer:
+        peer_host = destination_host(outbound_peer)
+        addresses = (
+            pick("labels.server_address", "server.address", "server_address"),
+            pick("labels.url_full", "url.full", "url_full"),
+        )
+        if (peer_host and peer_host != destination_host(service_name)
+                and any(destination_host(address) == peer_host for address in addresses)):
+            span_kind = "client"
+            peer_service = str(outbound_peer)[:200]
+            inferred_root_client = True
+
     # Caller and Target Services & Resolution
     if span_kind == "client":
         caller_service = service_name
         target_service = peer_service or "unknown"
-        caller_resolution_method = "client_span"
-        caller_confidence = 1.0
+        caller_resolution_method = "root_client_inferred" if inferred_root_client else "client_span"
+        caller_confidence = 0.8 if inferred_root_client else 1.0
     else:
         target_service = service_name
         if peer_service:
@@ -568,7 +611,10 @@ def normalize_otel_record(raw: dict[str, Any], source_label: str = "import") -> 
     else:
         auth_header = pick("labels.http_request_header_authorization", "http.request.headers.authorization", "authorization")
         principal_name = extract_principal(auth_header, fallback_user=None)
-        auth_scheme = "basic" if principal_name != "unknown" else None
+        if principal_name != "unknown":
+            auth_scheme = "bearer" if (auth_header and "bearer " in str(auth_header).lower()) else "basic"
+        else:
+            auth_scheme = None
 
     if principal_name == "unknown":
         for key in WSSE_USERNAME_ATTRIBUTES:
@@ -603,6 +649,8 @@ def normalize_otel_record(raw: dict[str, Any], source_label: str = "import") -> 
         identity_source = "wsse_username"
     elif auth_scheme == "basic":
         identity_source = "basic_auth"
+    elif auth_scheme == "bearer":
+        identity_source = "bearer_jwt"
     elif auth_scheme == "enduser":
         identity_source = "enduser_id"
     elif is_network_event and principal_name != "unknown":

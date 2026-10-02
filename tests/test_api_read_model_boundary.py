@@ -67,3 +67,16 @@ def test_trace_explorer_raw_access_is_limited_to_explicit_routes():
     allowed = {"insert_traces", "get_trace", "list_traces"}
     assert raw_methods <= allowed, "Raw table access escaped ingestion/Trace Explorer: " + ", ".join(sorted(raw_methods - allowed))
     assert "temporary exception" in source
+
+
+def test_user_behavior_services_read_the_activity_rollup_not_raw_traces():
+    """User behavior must keep working after raw traces expire (1-day TTL)."""
+    services = ROOT / "backend" / "app" / "services"
+    offenders = [
+        name for name in (
+            "principal_relationships.py", "behavioral_engine.py",
+            "anomaly_detection.py", "prometheus_metrics.py",
+        )
+        if RAW_TABLE_READ.search((services / name).read_text(encoding="utf-8"))
+    ]
+    assert offenders == [], "Behavior services must read principal_activity_5m: " + ", ".join(offenders)

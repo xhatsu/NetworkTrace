@@ -1,0 +1,46 @@
+{{- if .Values.obi.enabled }}
+{{- $o := .Values.obi -}}
+{{- $discovery := dict "instrument" $o.discovery.instrument -}}
+{{- if $o.discovery.excludeInstrument }}
+{{- $_ := set $discovery "exclude_instrument" $o.discovery.excludeInstrument -}}
+{{- end }}
+{{- $discovery = mustMergeOverwrite $discovery (deepCopy $o.discovery.extra) -}}
+{{- $rules := list -}}
+{{- if and $o.headers.enabled $o.headers.include }}
+{{- $rules = append $rules (dict "action" "include" "type" "headers" "scope" "request" "match" (dict "patterns" $o.headers.include)) -}}
+{{- end }}
+{{- if $o.bodyCapture.enabled }}
+{{- range $scope := list "request" "response" }}
+{{- $b := index $o.bodyCapture $scope -}}
+{{- if $b.enabled }}
+{{- $rules = append $rules (dict "action" "include" "type" "body" "scope" $scope "match" (dict "methods" $b.methods)) -}}
+{{- end }}
+{{- end }}
+{{- end }}
+{{- $ebpf := dict "track_request_headers" (and $o.headers.enabled (gt (len $o.headers.include) 0)) -}}
+{{- if $o.bodyCapture.enabled }}
+{{- $_ := set $ebpf "buffer_sizes" (dict "http" (int $o.bodyCapture.bufferSize)) -}}
+{{- end }}
+{{- if $rules }}
+{{- $policy := dict "default_action" (dict "headers" "exclude" "body" "exclude") -}}
+{{- $_ := set $ebpf "payload_extraction" (dict "http" (dict "enrichment" (dict "enabled" true "policy" $policy "rules" $rules))) -}}
+{{- end }}
+{{- $cfg := dict
+      "discovery" $discovery
+      "attributes" (dict "kubernetes" (dict "enable" $o.kubernetesMetadata))
+      "otel_traces_export" (dict "endpoint" (include "tracescope-obi.obiExportEndpoint" .) "protocol" $o.export.protocol)
+      "ebpf" $ebpf
+      "log_level" $o.logLevel -}}
+{{- $cfg = mustMergeOverwrite $cfg (deepCopy $o.extraConfig) }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "tracescope-obi.obiName" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "tracescope-obi.labels" . | nindent 4 }}
+    app.kubernetes.io/name: tracescope-obi
+data:
+  obi.yml: |
+    {{- toYaml $cfg | nindent 4 }}
+{{- end }}

@@ -12,10 +12,29 @@ def normalize(source, row):
                   auth_successes=int(row.get('auth_successes') or 0),
                   p95_ms=float(row.get('p95_ms') or 0),
                   request_bytes=int(row.get('request_bytes') or 0), response_bytes=int(row.get('response_bytes') or 0),
-                  byte_samples=int(row.get('byte_samples') or 0), trace_ids=row.get('trace_ids',[])[:3],
-                  observed_ips=[{'address':str(ip),'role':'infrastructure' if ip in (*settings.known_f5,*settings.known_lb,*settings.known_reverse_proxy,*settings.known_nat) else 'unverified_peer'} for ip in row.get('observed_ips',[]) if ip][:10])
-    result['caller_observed']=result['caller'].lower() not in UNKNOWN
-    result['reference_eligible']=all(result[k].lower() not in UNKNOWN for k in ('target','operation'))
+                  byte_samples=int(row.get('byte_samples') or 0), trace_ids=row.get('trace_ids',[])[:3])
+    observed = []
+    for item in row.get('observed_ip_tuples') or []:
+        if isinstance(item, (tuple, list)) and len(item) >= 2:
+            addr, role = str(item[0]).strip(), str(item[1]).strip()
+        elif isinstance(item, dict):
+            addr = str(item.get('address') or item.get('source_ip') or '').strip()
+            role = str(item.get('role') or item.get('source_ip_role') or 'unverified_peer').strip()
+        else:
+            addr, role = str(item).strip(), 'unverified_peer'
+        if addr and addr.lower() not in UNKNOWN:
+            if addr in (*settings.known_f5, *settings.known_lb, *settings.known_reverse_proxy, *settings.known_nat):
+                role = 'infrastructure'
+            elif not role or role.lower() in UNKNOWN:
+                role = 'unverified_peer'
+            observed.append({'address': addr, 'role': role})
+    for ip in row.get('observed_ips') or []:
+        if ip and str(ip).lower() not in UNKNOWN:
+            role = 'infrastructure' if ip in (*settings.known_f5, *settings.known_lb, *settings.known_reverse_proxy, *settings.known_nat) else 'unverified_peer'
+            observed.append({'address': str(ip), 'role': role})
+    result['observed_ips'] = observed[:10]
+    result['caller_observed'] = result['caller'].lower() not in UNKNOWN
+    result['reference_eligible'] = all(result[k].lower() not in UNKNOWN for k in ('target','operation'))
     # Missing caller attribution does not invalidate measured credential/API TPS.
     # Its unknown-caller scope stays separate; no caller edge is fabricated.
     return result
@@ -24,17 +43,51 @@ def normalize(source, row):
 def sql_day(repo, source, start, end):
     if source != 'legacy_metrics':
         raise ValueError('behavior learning only accepts metric_buckets')
-    if source=='legacy_metrics':
-        sql='''SELECT bucket_start*1000 AS bucket_ms, 'unknown' AS environment,
-        caller_service AS caller,principal_name AS principal,target_service AS target,operation,
-        request_count AS requests,error_count AS errors,latency_p95 AS p95_ms,
-        request_bytes,response_bytes,request_bytes_samples AS byte_samples
-        FROM metric_buckets FINAL WHERE bucket_size=300 AND bucket_start>={start:Int64}/1000
-        AND bucket_start<{end:Int64}/1000 LIMIT 100001'''
-    rows=repo.query(sql,{'start':start,'end':end})
-    if len(rows)>100000:
+    if source == 'legacy_metrics':
+        sql = '''
+        SELECT 
+            m.bucket_start * 1000 AS bucket_ms,
+            'unknown' AS environment,
+            m.caller_service AS caller,
+            m.principal_name AS principal,
+            m.target_service AS target,
+            m.operation,
+            m.request_count AS requests,
+            m.error_count AS errors,
+            m.latency_p95 AS p95_ms,
+            m.request_bytes,
+            m.response_bytes,
+            m.request_bytes_samples AS byte_samples,
+            arrayFilter(x -> x.1 != '' AND lower(x.1) != 'unknown', arrayDistinct(groupArray(tuple(t.source_ip, t.source_ip_role)))) AS observed_ip_tuples
+        FROM (
+            SELECT bucket_start, caller_service, principal_name, target_service, operation,
+                   request_count, error_count, latency_p95, request_bytes, response_bytes, request_bytes_samples,
+                   if(principal_name IN ('unknown', ''), '-anonymous-', principal_name) AS norm_principal
+            FROM metric_buckets FINAL
+            WHERE bucket_size = 300 AND bucket_start >= {start:Int64}/1000 AND bucket_start < {end:Int64}/1000
+        ) AS m
+        LEFT JOIN (
+            -- The IP rollup spells APIs 'service/operation'; metric_buckets uses the bare operation.
+            SELECT bucket_start, caller_service, principal, service,
+                   if(startsWith(api, concat(service, '/')), substring(api, length(service) + 2), api) AS ip_operation,
+                   source_ip, source_ip_role
+            FROM topology_principal_ip_5m AS t FINAL
+            WHERE bucket_start >= {start:Int64}/1000 AND bucket_start < {end:Int64}/1000 AND source_ip != ''
+        ) AS t
+        ON m.bucket_start = t.bucket_start
+        AND m.caller_service = t.caller_service
+        AND m.norm_principal = t.principal
+        AND m.target_service = t.service
+        AND m.operation = t.ip_operation
+        GROUP BY 
+            m.bucket_start, m.caller_service, m.principal_name, m.target_service, m.operation,
+            m.request_count, m.error_count, m.latency_p95, m.request_bytes, m.response_bytes, m.request_bytes_samples
+        LIMIT 100001
+        '''
+    rows = repo.query(sql, {'start': start, 'end': end})
+    if len(rows) > 100000:
         raise ValueError('behavior input exceeds 100000 windows/day')
-    return [normalize(source,r) for r in rows]
+    return [normalize(source, r) for r in rows]
 
 
 def _raw_sources_removed(start, end, after=None):

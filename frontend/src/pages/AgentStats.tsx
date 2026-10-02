@@ -204,11 +204,11 @@ function StatusBadge({ status }: { status: string }) {
     <span
       className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-0.5 text-[10px] font-semibold uppercase tracking-wider ${
         ok
-          ? "border-emerald-500/25 bg-emerald-500/10 text-emerald-400"
-          : "border-amber-500/30 bg-amber-500/10 text-amber-400"
+          ? "border-good/25 bg-good/10 text-good"
+          : "border-warn/30 bg-warn/10 text-warn"
       }`}
     >
-      <span className={`h-1.5 w-1.5 rounded-full ${ok ? "bg-emerald-400 animate-pulse" : "bg-amber-400"}`} />
+      <span className={`h-1.5 w-1.5 rounded-full ${ok ? "bg-good animate-pulse" : "bg-warn"}`} />
       {status}
     </span>
   );
@@ -235,19 +235,19 @@ function NodeRow({
   return (
     <tr
       onClick={() => nav(`/agent-stats/${encodeURIComponent(sample.node)}?instance_id=${encodeURIComponent(sample.instance_id)}`)}
-      className="cursor-pointer border-b border-[rgba(255,255,255,0.05)] transition hover:bg-white/[0.03] group"
+      className="cursor-pointer border-b border-[rgba(255,255,255,0.05)] transition hover:bg-surface/[0.03] group"
     >
       {/* node */}
       <td className="whitespace-nowrap px-4 py-3">
         <div className="flex items-center gap-2.5">
-          <div className="grid h-7 w-7 place-items-center rounded-lg border border-[rgba(255,255,255,0.08)] bg-white/[0.02] text-[#8b949e] group-hover:border-indigo-500/50 group-hover:text-indigo-300 transition">
+          <div className="grid h-7 w-7 place-items-center rounded-lg border border-line bg-surface/[0.02] text-muted group-hover:border-accent/50 group-hover:text-accent transition">
             <Server size={14} />
           </div>
           <div>
-            <div className="text-xs font-semibold text-[#f0f3f6] group-hover:text-indigo-300 transition">
+            <div className="text-xs font-semibold text-ink group-hover:text-accent transition">
               {sample.node}
             </div>
-            <div className="text-[10px] text-[#59616b] font-mono">
+            <div className="text-[10px] text-faint font-mono">
               {sample.instance_id} · seq #{sample.sequence}
             </div>
           </div>
@@ -261,7 +261,7 @@ function NodeRow({
           {reasons.length > 0 && (
             <div className="flex flex-wrap gap-1">
               {reasons.map((r) => (
-                <span key={r} className="rounded bg-amber-500/10 px-1.5 py-0.5 text-[10px] font-mono text-amber-400">
+                <span key={r} className="rounded bg-warn/10 px-1.5 py-0.5 text-[10px] font-mono text-warn">
                   {r}
                 </span>
               ))}
@@ -271,8 +271,8 @@ function NodeRow({
       </td>
 
       {/* mode */}
-      <td className="px-4 py-3 text-[11px] font-mono text-[#8b949e]">
-        <span className="rounded bg-white/[0.04] px-1.5 py-0.5 border border-white/[0.06]">
+      <td className="px-4 py-3 text-[11px] font-mono text-muted">
+        <span className="rounded bg-surface/[0.04] px-1.5 py-0.5 border border-white/[0.06]">
           {sample.mode ?? "—"}
         </span>
       </td>
@@ -280,10 +280,10 @@ function NodeRow({
       {/* capture */}
       <td className="px-4 py-3">
         <div className="flex flex-col gap-0.5">
-          <span className="font-mono text-[11px] text-[#c9d1d9]">
+          <span className="font-mono text-[11px] text-ink">
             {n(sample.cap_events_emitted_delta)} evt/win
           </span>
-          <span className={`font-mono text-[10px] ${dropWarn ? "text-amber-400" : "text-[#59616b]"}`}>
+          <span className={`font-mono text-[10px] ${dropWarn ? "text-warn" : "text-faint"}`}>
             k-drop {(sample.cap_kernel_drop_percent ?? 0).toFixed(3)}%
           </span>
         </div>
@@ -292,10 +292,10 @@ function NodeRow({
       {/* shipping */}
       <td className="px-4 py-3">
         <div className="flex flex-col gap-0.5">
-          <span className="font-mono text-[11px] text-[#c9d1d9]">
+          <span className="font-mono text-[11px] text-ink">
             {(sample.ship_push_kbps ?? 0).toFixed(1)} kbps
           </span>
-          <span className={`font-mono text-[10px] ${(sample.ship_drop_percent ?? 0) > 5 ? "text-rose-400" : "text-[#59616b]"}`}>
+          <span className={`font-mono text-[10px] ${(sample.ship_drop_percent ?? 0) > 5 ? "text-bad" : "text-faint"}`}>
             drop {(sample.ship_drop_percent ?? 0).toFixed(1)}%
           </span>
         </div>
@@ -304,13 +304,13 @@ function NodeRow({
       {/* queue */}
       <td className="px-4 py-3">
         <div className="flex items-center gap-2">
-          <div className="h-1.5 w-16 rounded-full bg-[rgba(255,255,255,0.08)] overflow-hidden">
+          <div className="h-1.5 w-16 rounded-full bg-surface-2 overflow-hidden">
             <div
-              className={`h-full rounded-full transition-all ${queueWarn ? "bg-amber-400" : "bg-emerald-500"}`}
+              className={`h-full rounded-full transition-all ${queueWarn ? "bg-warn" : "bg-good"}`}
               style={{ width: `${Math.min(100, queueRatio * 100).toFixed(0)}%` }}
             />
           </div>
-          <span className="font-mono text-[10px] text-[#8b949e]">
+          <span className="font-mono text-[10px] text-muted">
             {n(queueDepth)}/{n(queueCap)}
           </span>
         </div>
@@ -318,25 +318,25 @@ function NodeRow({
 
       {/* cpu */}
       <td className="px-4 py-3">
-        <span className={`font-mono text-[11px] ${(sample.res_cpu_percent_one_core ?? 0) > 80 ? "text-rose-400" : "text-[#c9d1d9]"}`}>
+        <span className={`font-mono text-[11px] ${(sample.res_cpu_percent_one_core ?? 0) > 80 ? "text-bad" : "text-ink"}`}>
           {(sample.res_cpu_percent_one_core ?? 0).toFixed(1)}%
         </span>
       </td>
 
       {/* rss */}
-      <td className="px-4 py-3 font-mono text-[11px] text-[#c9d1d9]">
+      <td className="px-4 py-3 font-mono text-[11px] text-ink">
         {fmtBytes(sample.res_rss_bytes)}
       </td>
 
       {/* last seen */}
-      <td className="px-4 py-3 text-[11px] text-[#59616b]">
+      <td className="px-4 py-3 text-[11px] text-faint">
         {fmtAge(sample.observed_at)}
       </td>
 
       {/* action link & delete */}
       <td className="whitespace-nowrap px-4 py-3 text-right">
         <div className="flex items-center justify-end gap-2.5">
-          <div className="inline-flex items-center gap-1 text-[11px] font-medium text-indigo-400 group-hover:text-indigo-300 transition">
+          <div className="inline-flex items-center gap-1 text-[11px] font-medium text-entity-user group-hover:text-accent transition">
             <span>{t("Drilldown")}</span>
             <ArrowRight size={13} className="group-hover:translate-x-0.5 transition" />
           </div>
@@ -347,7 +347,7 @@ function NodeRow({
               e.stopPropagation();
               onDelete(sample.node, sample.instance_id);
             }}
-            className="grid h-7 w-7 place-items-center rounded-lg border border-transparent text-[#6e7681] hover:border-rose-500/40 hover:bg-rose-500/10 hover:text-rose-400 transition"
+            className="grid h-7 w-7 place-items-center rounded-lg border border-transparent text-faint hover:border-bad/40 hover:bg-bad/10 hover:text-bad transition"
           >
             <Trash2 size={13} />
           </button>
@@ -451,13 +451,13 @@ export function AgentStatsPage() {
         ) : isError ? (
           <ErrorState message={(error as Error)?.message ?? "Failed to load agent stats"} />
         ) : samples.length === 0 ? (
-          <div className="flex min-h-56 flex-col items-center justify-center gap-3 text-sm text-[#8b949e]">
-            <Server size={36} className="opacity-20 text-indigo-400" />
+          <div className="flex min-h-56 flex-col items-center justify-center gap-3 text-sm text-muted">
+            <Server size={36} className="opacity-20 text-entity-user" />
             <div className="text-center">
-              <div className="font-semibold text-[#f0f3f6]">{t("No active agents reporting")}</div>
+              <div className="font-semibold text-ink">{t("No active agents reporting")}</div>
               <div className="mt-1 text-xs">
                 {t("Agents ship statistics via")}{" "}
-                <code className="rounded bg-white/[0.05] px-1.5 py-0.5 font-mono text-indigo-300">
+                <code className="rounded bg-surface/[0.05] px-1.5 py-0.5 font-mono text-entity-user">
                   POST /api/agent/stats
                 </code>
               </div>
@@ -467,7 +467,7 @@ export function AgentStatsPage() {
           <div className="overflow-x-auto">
             <table className="w-full">
               <thead>
-                <tr className="border-b border-[rgba(255,255,255,0.07)] text-[10px] uppercase tracking-wider text-[#59616b]">
+                <tr className="border-b border-line text-[10px] uppercase tracking-wider text-faint">
                   {[
                     t("Node / Instance"),
                     t("Status"),
@@ -506,31 +506,31 @@ export function AgentStatsPage() {
       {/* Delete Confirmation Modal */}
       {targetToDelete && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4">
-          <div className="w-full max-w-md rounded-xl border border-[rgba(255,255,255,0.12)] bg-[#0e1116] p-5 shadow-2xl">
-            <div className="flex items-center gap-3 text-rose-400">
-              <div className="grid h-10 w-10 place-items-center rounded-xl bg-rose-500/10 border border-rose-500/20">
+          <div className="w-full max-w-md rounded-xl border border-line bg-page p-5 shadow-2xl">
+            <div className="flex items-center gap-3 text-bad">
+              <div className="grid h-10 w-10 place-items-center rounded-xl bg-bad/10 border border-bad/20">
                 <Trash2 size={20} />
               </div>
               <div>
-                <h3 className="text-sm font-semibold text-[#f0f3f6]">{t("Delete Agent Telemetry")}</h3>
-                <p className="text-xs text-[#8b949e]">{t("Select deletion scope for")} {targetToDelete.node}</p>
+                <h3 className="text-sm font-semibold text-ink">{t("Delete Agent Telemetry")}</h3>
+                <p className="text-xs text-muted">{t("Select deletion scope for")} {targetToDelete.node}</p>
               </div>
             </div>
 
-            <div className="mt-4 space-y-2.5 text-xs text-[#c9d1d9]">
-              <div className="rounded-lg border border-[rgba(255,255,255,0.06)] bg-white/[0.02] p-3 space-y-1">
+            <div className="mt-4 space-y-2.5 text-xs text-ink">
+              <div className="rounded-lg border border-[rgba(255,255,255,0.06)] bg-surface/[0.02] p-3 space-y-1">
                 <div className="flex justify-between">
-                  <span className="text-[#8b949e]">{t("Node:")}</span>
+                  <span className="text-muted">{t("Node:")}</span>
                   <span className="font-mono font-semibold text-white">{targetToDelete.node}</span>
                 </div>
                 <div className="flex justify-between">
-                  <span className="text-[#8b949e]">{t("Target Instance:")}</span>
-                  <span className="font-mono text-indigo-300">{targetToDelete.instance_id}</span>
+                  <span className="text-muted">{t("Target Instance:")}</span>
+                  <span className="font-mono text-entity-user">{targetToDelete.instance_id}</span>
                 </div>
               </div>
 
               <div className="space-y-2 pt-1">
-                <label className="flex items-start gap-2.5 p-2.5 rounded-lg border border-[rgba(255,255,255,0.06)] bg-white/[0.01] cursor-pointer hover:bg-white/[0.03] transition">
+                <label className="flex items-start gap-2.5 p-2.5 rounded-lg border border-[rgba(255,255,255,0.06)] bg-surface/[0.01] cursor-pointer hover:bg-surface/[0.03] transition">
                   <input
                     type="radio"
                     name="deleteScope"
@@ -539,14 +539,14 @@ export function AgentStatsPage() {
                     className="mt-0.5 accent-rose-500"
                   />
                   <div>
-                    <div className="font-semibold text-[#f0f3f6]">{t("Delete this instance only")}</div>
-                    <div className="text-[11px] text-[#8b949e] mt-0.5">
-                      Purges only instance <code className="font-mono text-indigo-300">{targetToDelete.instance_id}</code>. Other active or historical instances of <span className="font-mono text-white">{targetToDelete.node}</span> remain unaffected.
+                    <div className="font-semibold text-ink">{t("Delete this instance only")}</div>
+                    <div className="text-[11px] text-muted mt-0.5">
+                      Purges only instance <code className="font-mono text-entity-user">{targetToDelete.instance_id}</code>. Other active or historical instances of <span className="font-mono text-white">{targetToDelete.node}</span> remain unaffected.
                     </div>
                   </div>
                 </label>
 
-                <label className="flex items-start gap-2.5 p-2.5 rounded-lg border border-rose-500/20 bg-rose-500/5 cursor-pointer hover:bg-rose-500/10 transition">
+                <label className="flex items-start gap-2.5 p-2.5 rounded-lg border border-bad/20 bg-bad/5 cursor-pointer hover:bg-bad/10 transition">
                   <input
                     type="radio"
                     name="deleteScope"
@@ -555,8 +555,8 @@ export function AgentStatsPage() {
                     className="mt-0.5 accent-rose-500"
                   />
                   <div>
-                    <div className="font-semibold text-rose-300">{t("Delete entire node")} "{targetToDelete.node}"</div>
-                    <div className="text-[11px] text-[#8b949e] mt-0.5">
+                    <div className="font-semibold text-bad">{t("Delete entire node")} "{targetToDelete.node}"</div>
+                    <div className="text-[11px] text-muted mt-0.5">
                       {t("Purges all instances and complete historical metrics recorded under this node hostname.")}
                     </div>
                   </div>
@@ -565,7 +565,7 @@ export function AgentStatsPage() {
             </div>
 
             {deleteError && (
-              <div className="mt-3 rounded-lg border border-rose-500/30 bg-rose-500/10 p-2.5 text-xs text-rose-300">
+              <div className="mt-3 rounded-lg border border-bad/30 bg-bad/10 p-2.5 text-xs text-bad">
                 {deleteError}
               </div>
             )}
@@ -586,7 +586,7 @@ export function AgentStatsPage() {
                 type="button"
                 disabled={isDeleting}
                 onClick={confirmDeleteTarget}
-                className="btn border-rose-500/40 bg-rose-600/80 hover:bg-rose-600 text-white font-semibold transition"
+                className="btn border-bad/40 bg-bad/80 hover:bg-bad text-white font-semibold transition"
               >
                 <Trash2 size={13} />
                 <span>{isDeleting ? t("Deleting…") : (deleteMode === "instance" ? t("Delete Instance") : t("Delete Whole Node"))}</span>
@@ -738,8 +738,8 @@ export function AgentNodeDetailPage() {
         <div className="flex flex-wrap items-center gap-2">
           {/* Instance Selector Dropdown if multiple instances exist */}
           {knownInstances.length > 1 && (
-            <div className="flex items-center gap-1.5 rounded-lg border border-[rgba(255,255,255,0.08)] bg-white/[0.02] px-2.5 py-1">
-              <span className="text-[11px] text-[#8b949e]">{t("Target Instance:")}</span>
+            <div className="flex items-center gap-1.5 rounded-lg border border-line bg-surface/[0.02] px-2.5 py-1">
+              <span className="text-[11px] text-muted">{t("Target Instance:")}</span>
               <select
                 value={activeInstanceId}
                 onChange={(e) => {
@@ -747,10 +747,10 @@ export function AgentNodeDetailPage() {
                   setSelectedInstanceId(val);
                   setSearchParams({ instance_id: val });
                 }}
-                className="bg-transparent font-mono text-xs font-semibold text-indigo-300 focus:outline-none cursor-pointer"
+                className="bg-transparent font-mono text-xs font-semibold text-entity-user focus:outline-none cursor-pointer"
               >
                 {knownInstances.map((inst) => (
-                  <option key={inst} value={inst} className="bg-[#0e1116] text-[#f0f3f6]">
+                  <option key={inst} value={inst} className="bg-page text-ink">
                     {inst} {inst === knownInstances[0] ? "(current)" : ""}
                   </option>
                 ))}
@@ -759,7 +759,7 @@ export function AgentNodeDetailPage() {
           )}
 
           {/* Sample Window Limit Segmented Control */}
-          <div className="flex items-center rounded-lg border border-[rgba(255,255,255,0.08)] bg-white/[0.02] p-0.5">
+          <div className="flex items-center rounded-lg border border-line bg-surface/[0.02] p-0.5">
             {[
               { label: `30 ${t("pts", "pts")} (~15m)`, val: 30 },
               { label: `60 ${t("pts", "pts")} (~30m)`, val: 60 },
@@ -771,8 +771,8 @@ export function AgentNodeDetailPage() {
                 onClick={() => setSampleLimit(val)}
                 className={`rounded px-2 py-1 text-xs font-medium transition ${
                   sampleLimit === val
-                    ? "bg-white/[0.12] text-white shadow-sm font-semibold"
-                    : "text-[#8b949e] hover:text-[#f0f3f6]"
+                    ? "bg-surface/[0.12] text-white shadow-sm font-semibold"
+                    : "text-muted hover:text-ink"
                 }`}
               >
                 {label}
@@ -794,7 +794,7 @@ export function AgentNodeDetailPage() {
           </button>
 
           <button
-            className="btn border-rose-500/30 text-rose-400 hover:bg-rose-500/10 hover:border-rose-500/50 transition"
+            className="btn border-bad/30 text-bad hover:bg-bad/10 hover:border-bad/50 transition"
             onClick={() => setShowDeleteModal(true)}
             title={t("Delete this agent node and its entire telemetry history")}
           >
@@ -810,30 +810,30 @@ export function AgentNodeDetailPage() {
       }
     >
       {/* Node Status Banner */}
-      <div className="mb-6 flex flex-wrap items-center justify-between gap-4 rounded-xl border border-[rgba(255,255,255,0.07)] bg-[#0e1116] p-4">
+      <div className="mb-6 flex flex-wrap items-center justify-between gap-4 rounded-xl border border-line bg-page p-4">
         <div className="flex items-center gap-3">
-          <div className="grid h-10 w-10 place-items-center rounded-xl bg-indigo-500/10 border border-indigo-500/20 text-indigo-400">
+          <div className="grid h-10 w-10 place-items-center rounded-xl bg-accent/10 border border-line/20 text-entity-user">
             <Server size={20} />
           </div>
           <div>
             <div className="flex items-center gap-2">
-              <span className="text-base font-semibold text-[#f0f3f6]">{node}</span>
+              <span className="text-base font-semibold text-ink">{node}</span>
               <StatusBadge status={latest?.status ?? "unknown"} />
-              <span className="rounded bg-white/[0.05] px-1.5 py-0.5 font-mono text-[10px] text-[#8b949e]">
+              <span className="rounded bg-surface/[0.05] px-1.5 py-0.5 font-mono text-[10px] text-muted">
                 {latest?.mode ?? "cpp"}
               </span>
             </div>
-            <div className="mt-0.5 text-xs text-[#8b949e]">
-              {t("Last heartbeat:")} <span className="font-mono text-[#c9d1d9]">{fmtFullDate(latest?.observed_at ?? 0)}</span> ({fmtAge(latest?.observed_at ?? 0)})
+            <div className="mt-0.5 text-xs text-muted">
+              {t("Last heartbeat:")} <span className="font-mono text-ink">{fmtFullDate(latest?.observed_at ?? 0)}</span> ({fmtAge(latest?.observed_at ?? 0)})
             </div>
           </div>
         </div>
 
         {reasons.length > 0 && (
           <div className="flex items-center gap-1.5">
-            <span className="text-[11px] font-semibold text-amber-400">{t("Active Degradation Causes:")}</span>
+            <span className="text-[11px] font-semibold text-warn">{t("Active Degradation Causes:")}</span>
             {reasons.map((r) => (
-              <span key={r} className="rounded bg-amber-500/15 border border-amber-500/30 px-2 py-0.5 text-xs font-mono text-amber-300">
+              <span key={r} className="rounded bg-warn/15 border border-warn/30 px-2 py-0.5 text-xs font-mono text-warn">
                 {r}
               </span>
             ))}
@@ -882,7 +882,7 @@ export function AgentNodeDetailPage() {
           subtitle={t("Real-time uplink rate (kbps) and event publishing velocity (events/s) across sample windows")}
         >
           {chartPoints.length === 0 ? (
-            <div className="h-64 flex items-center justify-center text-xs text-[#6e7681]">
+            <div className="h-64 flex items-center justify-center text-xs text-faint">
               Awaiting consecutive historical sample snapshots…
             </div>
           ) : (
@@ -891,18 +891,18 @@ export function AgentNodeDetailPage() {
                 <AreaChart data={chartPoints}>
                   <defs>
                     <linearGradient id="colorKbps" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="5%" stopColor="#10b981" stopOpacity={0.3} />
-                      <stop offset="95%" stopColor="#10b981" stopOpacity={0} />
+                      <stop offset="5%" stopColor="var(--good)" stopOpacity={0.3} />
+                      <stop offset="95%" stopColor="var(--good)" stopOpacity={0} />
                     </linearGradient>
                     <linearGradient id="colorEps" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="5%" stopColor="#6366f1" stopOpacity={0.3} />
-                      <stop offset="95%" stopColor="#6366f1" stopOpacity={0} />
+                      <stop offset="5%" stopColor="var(--accent)" stopOpacity={0.3} />
+                      <stop offset="95%" stopColor="var(--accent)" stopOpacity={0} />
                     </linearGradient>
                   </defs>
-                  <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.05)" />
-                  <XAxis dataKey="time" stroke="#59616b" tick={{ fontSize: 11 }} />
-                  <YAxis yAxisId="left" stroke="#10b981" tick={{ fontSize: 11 }} unit=" kbps" />
-                  <YAxis yAxisId="right" orientation="right" stroke="#818cf8" tick={{ fontSize: 11 }} unit=" ev/s" />
+                  <CartesianGrid strokeDasharray="3 3" stroke="var(--grid)" />
+                  <XAxis dataKey="time" stroke="var(--faint)" tick={{ fontSize: 11 }} />
+                  <YAxis yAxisId="left" stroke="var(--good)" tick={{ fontSize: 11 }} unit=" kbps" />
+                  <YAxis yAxisId="right" orientation="right" stroke="var(--accent)" tick={{ fontSize: 11 }} unit=" ev/s" />
                   <Tooltip
                     {...chartTooltip}
                     formatter={(v: any, name: any) => [
@@ -916,7 +916,7 @@ export function AgentNodeDetailPage() {
                     type="monotone"
                     dataKey="pushKbps"
                     name={t("Throughput (kbps)")}
-                    stroke="#10b981"
+                    stroke="var(--good)"
                     strokeWidth={2}
                     fillOpacity={1}
                     fill="url(#colorKbps)"
@@ -926,7 +926,7 @@ export function AgentNodeDetailPage() {
                     type="monotone"
                     dataKey="pushEps"
                     name={t("Push Velocity (ev/s)")}
-                    stroke="#818cf8"
+                    stroke="var(--accent)"
                     strokeWidth={2}
                     fillOpacity={1}
                     fill="url(#colorEps)"
@@ -944,24 +944,24 @@ export function AgentNodeDetailPage() {
             subtitle={t("Kernel socket buffer packet drop % vs Agent shipping queue drop %")}
           >
             {chartPoints.length === 0 ? (
-              <div className="h-60 flex items-center justify-center text-xs text-[#6e7681]">{t("No history")}</div>
+              <div className="h-60 flex items-center justify-center text-xs text-faint">{t("No history")}</div>
             ) : (
               <div className="h-64 p-4">
                 <ResponsiveContainer width="100%" height="100%">
                   <AreaChart data={chartPoints}>
                     <defs>
                       <linearGradient id="colorShipDrop" x1="0" y1="0" x2="0" y2="1">
-                        <stop offset="5%" stopColor="#f43f5e" stopOpacity={0.35} />
-                        <stop offset="95%" stopColor="#f43f5e" stopOpacity={0} />
+                        <stop offset="5%" stopColor="var(--bad)" stopOpacity={0.35} />
+                        <stop offset="95%" stopColor="var(--bad)" stopOpacity={0} />
                       </linearGradient>
                       <linearGradient id="colorKernDrop" x1="0" y1="0" x2="0" y2="1">
-                        <stop offset="5%" stopColor="#f59e0b" stopOpacity={0.3} />
-                        <stop offset="95%" stopColor="#f59e0b" stopOpacity={0} />
+                        <stop offset="5%" stopColor="var(--warn)" stopOpacity={0.3} />
+                        <stop offset="95%" stopColor="var(--warn)" stopOpacity={0} />
                       </linearGradient>
                     </defs>
-                    <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.05)" />
-                    <XAxis dataKey="time" stroke="#59616b" tick={{ fontSize: 10 }} />
-                    <YAxis stroke="#8b949e" tick={{ fontSize: 10 }} unit="%" />
+                    <CartesianGrid strokeDasharray="3 3" stroke="var(--grid)" />
+                    <XAxis dataKey="time" stroke="var(--faint)" tick={{ fontSize: 10 }} />
+                    <YAxis stroke="var(--muted)" tick={{ fontSize: 10 }} unit="%" />
                     <Tooltip
                       {...chartTooltip}
                       formatter={(v: any, name: any) => [`${Number(v).toFixed(3)}%`, name]}
@@ -971,7 +971,7 @@ export function AgentNodeDetailPage() {
                       type="monotone"
                       dataKey="shipDropPercent"
                       name={t("Shipping Drop %")}
-                      stroke="#f43f5e"
+                      stroke="var(--bad)"
                       strokeWidth={1.5}
                       fill="url(#colorShipDrop)"
                     />
@@ -979,7 +979,7 @@ export function AgentNodeDetailPage() {
                       type="monotone"
                       dataKey="kernelDropPercent"
                       name={t("Kernel tp_drop %")}
-                      stroke="#f59e0b"
+                      stroke="var(--warn)"
                       strokeWidth={1.5}
                       fill="url(#colorKernDrop)"
                     />
@@ -995,15 +995,15 @@ export function AgentNodeDetailPage() {
             subtitle={t("Pinned CPU consumption (1-core scale) and Resident Set Size (MB)")}
           >
             {chartPoints.length === 0 ? (
-              <div className="h-60 flex items-center justify-center text-xs text-[#6e7681]">{t("No history")}</div>
+              <div className="h-60 flex items-center justify-center text-xs text-faint">{t("No history")}</div>
             ) : (
               <div className="h-64 p-4">
                 <ResponsiveContainer width="100%" height="100%">
                   <LineChart data={chartPoints}>
-                    <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.05)" />
-                    <XAxis dataKey="time" stroke="#59616b" tick={{ fontSize: 10 }} />
-                    <YAxis yAxisId="left" stroke="#818cf8" tick={{ fontSize: 10 }} unit="%" domain={[0, 'auto']} />
-                    <YAxis yAxisId="right" orientation="right" stroke="#34d399" tick={{ fontSize: 10 }} unit=" MB" />
+                    <CartesianGrid strokeDasharray="3 3" stroke="var(--grid)" />
+                    <XAxis dataKey="time" stroke="var(--faint)" tick={{ fontSize: 10 }} />
+                    <YAxis yAxisId="left" stroke="var(--accent)" tick={{ fontSize: 10 }} unit="%" domain={[0, 'auto']} />
+                    <YAxis yAxisId="right" orientation="right" stroke="var(--good)" tick={{ fontSize: 10 }} unit=" MB" />
                     <Tooltip
                       {...chartTooltip}
                       formatter={(v: any, name: any) => [
@@ -1017,7 +1017,7 @@ export function AgentNodeDetailPage() {
                       type="monotone"
                       dataKey="cpuPercent"
                       name={t("CPU One-Core %")}
-                      stroke="#818cf8"
+                      stroke="var(--accent)"
                       strokeWidth={2}
                       dot={false}
                     />
@@ -1026,7 +1026,7 @@ export function AgentNodeDetailPage() {
                       type="monotone"
                       dataKey="rssMb"
                       name={t("Memory RSS (MB)")}
-                      stroke="#34d399"
+                      stroke="var(--good)"
                       strokeWidth={2}
                       dot={false}
                     />
@@ -1044,27 +1044,27 @@ export function AgentNodeDetailPage() {
             subtitle={t("Queue buffer occupancy vs high-water mark")}
           >
             {chartPoints.length === 0 ? (
-              <div className="h-60 flex items-center justify-center text-xs text-[#6e7681]">{t("No history")}</div>
+              <div className="h-60 flex items-center justify-center text-xs text-faint">{t("No history")}</div>
             ) : (
               <div className="h-64 p-4">
                 <ResponsiveContainer width="100%" height="100%">
                   <AreaChart data={chartPoints}>
                     <defs>
                       <linearGradient id="colorQueue" x1="0" y1="0" x2="0" y2="1">
-                        <stop offset="5%" stopColor="#38bdf8" stopOpacity={0.3} />
-                        <stop offset="95%" stopColor="#38bdf8" stopOpacity={0} />
+                        <stop offset="5%" stopColor="var(--info)" stopOpacity={0.3} />
+                        <stop offset="95%" stopColor="var(--info)" stopOpacity={0} />
                       </linearGradient>
                     </defs>
-                    <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.05)" />
-                    <XAxis dataKey="time" stroke="#59616b" tick={{ fontSize: 10 }} />
-                    <YAxis stroke="#8b949e" tick={{ fontSize: 10 }} unit=" ev" />
+                    <CartesianGrid strokeDasharray="3 3" stroke="var(--grid)" />
+                    <XAxis dataKey="time" stroke="var(--faint)" tick={{ fontSize: 10 }} />
+                    <YAxis stroke="var(--muted)" tick={{ fontSize: 10 }} unit=" ev" />
                     <Tooltip {...chartTooltip} />
                     <Legend wrapperStyle={{ fontSize: "11px", paddingTop: "6px" }} />
                     <Area
                       type="monotone"
                       dataKey="queueDepth"
                       name={t("Queue Depth (events)")}
-                      stroke="#38bdf8"
+                      stroke="var(--info)"
                       strokeWidth={2}
                       fill="url(#colorQueue)"
                     />
@@ -1072,7 +1072,7 @@ export function AgentNodeDetailPage() {
                       type="stepAfter"
                       dataKey="queueHighWater"
                       name={t("High-Water Mark")}
-                      stroke="#fbbf24"
+                      stroke="var(--warn)"
                       strokeWidth={1.5}
                       strokeDasharray="4 4"
                       dot={false}
@@ -1088,21 +1088,21 @@ export function AgentNodeDetailPage() {
             subtitle={t("Packets captured vs parsed events emitted per window")}
           >
             {chartPoints.length === 0 ? (
-              <div className="h-60 flex items-center justify-center text-xs text-[#6e7681]">{t("No history")}</div>
+              <div className="h-60 flex items-center justify-center text-xs text-faint">{t("No history")}</div>
             ) : (
               <div className="h-64 p-4">
                 <ResponsiveContainer width="100%" height="100%">
                   <LineChart data={chartPoints}>
-                    <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.05)" />
-                    <XAxis dataKey="time" stroke="#59616b" tick={{ fontSize: 10 }} />
-                    <YAxis stroke="#8b949e" tick={{ fontSize: 10 }} />
+                    <CartesianGrid strokeDasharray="3 3" stroke="var(--grid)" />
+                    <XAxis dataKey="time" stroke="var(--faint)" tick={{ fontSize: 10 }} />
+                    <YAxis stroke="var(--muted)" tick={{ fontSize: 10 }} />
                     <Tooltip {...chartTooltip} />
                     <Legend wrapperStyle={{ fontSize: "11px", paddingTop: "6px" }} />
                     <Line
                       type="monotone"
                       dataKey="eventsEmittedDelta"
                       name={t("Emitted Events (delta)")}
-                      stroke="#a855f7"
+                      stroke="var(--accent)"
                       strokeWidth={2}
                       dot={false}
                     />
@@ -1110,7 +1110,7 @@ export function AgentNodeDetailPage() {
                       type="monotone"
                       dataKey="flowsActive"
                       name={t("Active Network Flows")}
-                      stroke="#f97316"
+                      stroke="var(--warn)"
                       strokeWidth={1.5}
                       dot={false}
                     />
@@ -1125,34 +1125,34 @@ export function AgentNodeDetailPage() {
         <Panel title={t("Process Safety & Hardware Constraints")} subtitle={t("Enforced host-protection limits reported by agent")}>
           <div className="grid grid-cols-2 gap-4 p-5 sm:grid-cols-3 lg:grid-cols-4 text-xs">
             <div className="flex flex-col gap-1 border-r border-[rgba(255,255,255,0.06)] pr-3">
-              <span className="text-[10px] uppercase font-semibold text-[#6e7681]">{t("CPU Core Pin")}</span>
-              <span className="font-mono text-[#f0f3f6] text-sm">Core #{String(limits.cpu_core ?? latest?.lim_cpu_core ?? "2")}</span>
-              <span className="text-[10px] text-[#8b949e]">{t("Affinity isolated")}</span>
+              <span className="text-[10px] uppercase font-semibold text-faint">{t("CPU Core Pin")}</span>
+              <span className="font-mono text-ink text-sm">Core #{String(limits.cpu_core ?? latest?.lim_cpu_core ?? "2")}</span>
+              <span className="text-[10px] text-muted">{t("Affinity isolated")}</span>
             </div>
             <div className="flex flex-col gap-1 border-r border-[rgba(255,255,255,0.06)] pr-3">
-              <span className="text-[10px] uppercase font-semibold text-[#6e7681]">{t("Bandwidth Ceiling")}</span>
-              <span className="font-mono text-[#f0f3f6] text-sm">{limits.ship_rate_kbps ?? latest?.lim_ship_rate_kbps ?? 1024} kbps</span>
-              <span className="text-[10px] text-[#8b949e]">{t("Rate limiter capped")}</span>
+              <span className="text-[10px] uppercase font-semibold text-faint">{t("Bandwidth Ceiling")}</span>
+              <span className="font-mono text-ink text-sm">{limits.ship_rate_kbps ?? latest?.lim_ship_rate_kbps ?? 1024} kbps</span>
+              <span className="text-[10px] text-muted">{t("Rate limiter capped")}</span>
             </div>
             <div className="flex flex-col gap-1 border-r border-[rgba(255,255,255,0.06)] pr-3">
-              <span className="text-[10px] uppercase font-semibold text-[#6e7681]">{t("Address Space Limit")}</span>
-              <span className="font-mono text-[#f0f3f6] text-sm">{fmtBytes(limits.address_space_bytes ?? latest?.lim_address_space_bytes ?? 268435456)}</span>
-              <span className="text-[10px] text-[#8b949e]">{t("RLIMIT_AS hard ceiling")}</span>
+              <span className="text-[10px] uppercase font-semibold text-faint">{t("Address Space Limit")}</span>
+              <span className="font-mono text-ink text-sm">{fmtBytes(limits.address_space_bytes ?? latest?.lim_address_space_bytes ?? 268435456)}</span>
+              <span className="text-[10px] text-muted">{t("RLIMIT_AS hard ceiling")}</span>
             </div>
             <div className="flex flex-col gap-1 border-r border-[rgba(255,255,255,0.06)] pr-3">
-              <span className="text-[10px] uppercase font-semibold text-[#6e7681]">{t("Max Upload Body")}</span>
-              <span className="font-mono text-[#f0f3f6] text-sm">{fmtBytes(limits.http_body_max_bytes ?? latest?.lim_http_body_max_bytes ?? 65536)}</span>
-              <span className="text-[10px] text-[#8b949e]">{t("Single batch cap")}</span>
+              <span className="text-[10px] uppercase font-semibold text-faint">{t("Max Upload Body")}</span>
+              <span className="font-mono text-ink text-sm">{fmtBytes(limits.http_body_max_bytes ?? latest?.lim_http_body_max_bytes ?? 65536)}</span>
+              <span className="text-[10px] text-muted">{t("Single batch cap")}</span>
             </div>
             <div className="flex flex-col gap-1 border-r border-[rgba(255,255,255,0.06)] pr-3">
-              <span className="text-[10px] uppercase font-semibold text-[#6e7681]">{t("Max Ship Threads")}</span>
-              <span className="font-mono text-[#f0f3f6] text-sm">{limits.ship_threads_max ?? latest?.lim_ship_threads_max ?? 8} threads</span>
-              <span className="text-[10px] text-[#8b949e]">{t("Worker thread pool")}</span>
+              <span className="text-[10px] uppercase font-semibold text-faint">{t("Max Ship Threads")}</span>
+              <span className="font-mono text-ink text-sm">{limits.ship_threads_max ?? latest?.lim_ship_threads_max ?? 8} threads</span>
+              <span className="text-[10px] text-muted">{t("Worker thread pool")}</span>
             </div>
             <div className="flex flex-col gap-1">
-              <span className="text-[10px] uppercase font-semibold text-[#6e7681]">{t("WSSE Body Window")}</span>
-              <span className="font-mono text-[#f0f3f6] text-sm">{fmtBytes(limits.wsse_body_bytes ?? latest?.lim_wsse_body_bytes ?? 8192)}</span>
-              <span className="text-[10px] text-[#8b949e]">{t("Sanitization window")}</span>
+              <span className="text-[10px] uppercase font-semibold text-faint">{t("WSSE Body Window")}</span>
+              <span className="font-mono text-ink text-sm">{fmtBytes(limits.wsse_body_bytes ?? latest?.lim_wsse_body_bytes ?? 8192)}</span>
+              <span className="text-[10px] text-muted">{t("Sanitization window")}</span>
             </div>
           </div>
         </Panel>
@@ -1165,7 +1165,7 @@ export function AgentNodeDetailPage() {
           <div className="overflow-x-auto">
             <table className="w-full text-xs">
               <thead>
-                <tr className="border-b border-[rgba(255,255,255,0.06)] text-[10px] uppercase tracking-wider text-[#59616b]">
+                <tr className="border-b border-[rgba(255,255,255,0.06)] text-[10px] uppercase tracking-wider text-faint">
                   <th className="px-4 py-2.5 text-left font-semibold">{t("Sequence")}</th>
                   <th className="px-4 py-2.5 text-left font-semibold">{t("Observation Time")}</th>
                   <th className="px-4 py-2.5 text-left font-semibold">{t("Status")}</th>
@@ -1184,44 +1184,44 @@ export function AgentNodeDetailPage() {
                   return (
                     <tr
                       key={`${h.node}-${h.instance_id}-${h.sequence}`}
-                      className="border-b border-[rgba(255,255,255,0.04)] hover:bg-white/[0.02] font-mono text-[11px]"
+                      className="border-b border-[rgba(255,255,255,0.04)] hover:bg-surface/[0.02] font-mono text-[11px]"
                     >
-                      <td className="px-4 py-2.5 text-[#8b949e]">#{h.sequence}</td>
-                      <td className="px-4 py-2.5 text-[#c9d1d9]">{fmtFullDate(h.observed_at)}</td>
+                      <td className="px-4 py-2.5 text-muted">#{h.sequence}</td>
+                      <td className="px-4 py-2.5 text-ink">{fmtFullDate(h.observed_at)}</td>
                       <td className="px-4 py-2.5">
                         <StatusBadge status={h.status} />
                       </td>
-                      <td className="px-4 py-2.5 text-[#f0f3f6]">
+                      <td className="px-4 py-2.5 text-ink">
                         {(h.ship_push_kbps ?? 0).toFixed(1)} kbps
                       </td>
-                      <td className="px-4 py-2.5 text-[#c9d1d9]">
+                      <td className="px-4 py-2.5 text-ink">
                         {(h.ship_push_events_per_second ?? 0).toFixed(1)} ev/s
                       </td>
                       <td className="px-4 py-2.5">
-                        <span className={(h.ship_drop_percent ?? 0) > 1 ? "text-rose-400 font-semibold" : "text-[#8b949e]"}>
+                        <span className={(h.ship_drop_percent ?? 0) > 1 ? "text-bad font-semibold" : "text-muted"}>
                           {(h.ship_drop_percent ?? 0).toFixed(2)}%
                         </span>
                       </td>
-                      <td className="px-4 py-2.5 text-[#8b949e]">
+                      <td className="px-4 py-2.5 text-muted">
                         {n(h.ship_queue_depth_events)} / {n(h.ship_queue_capacity_events || 4000)}
                       </td>
-                      <td className="px-4 py-2.5 text-[#c9d1d9]">
+                      <td className="px-4 py-2.5 text-ink">
                         {(h.res_cpu_percent_one_core ?? 0).toFixed(1)}%
                       </td>
-                      <td className="px-4 py-2.5 text-[#8b949e]">
+                      <td className="px-4 py-2.5 text-muted">
                         {fmtBytes(h.res_rss_bytes)}
                       </td>
                       <td className="px-4 py-2.5">
                         {rList.length > 0 ? (
                           <div className="flex flex-wrap gap-1">
                             {rList.map((r) => (
-                              <span key={r} className="rounded bg-amber-500/10 px-1.5 py-0.5 text-[10px] text-amber-400">
+                              <span key={r} className="rounded bg-warn/10 px-1.5 py-0.5 text-[10px] text-warn">
                                 {r}
                               </span>
                             ))}
                           </div>
                         ) : (
-                          <span className="text-[#59616b]">—</span>
+                          <span className="text-faint">—</span>
                         )}
                       </td>
                     </tr>
@@ -1236,32 +1236,32 @@ export function AgentNodeDetailPage() {
       {/* Delete Confirmation Modal */}
       {showDeleteModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4">
-          <div className="w-full max-w-md rounded-xl border border-[rgba(255,255,255,0.12)] bg-[#0e1116] p-5 shadow-2xl">
-            <div className="flex items-center gap-3 text-rose-400">
-              <div className="grid h-10 w-10 place-items-center rounded-xl bg-rose-500/10 border border-rose-500/20">
+          <div className="w-full max-w-md rounded-xl border border-line bg-page p-5 shadow-2xl">
+            <div className="flex items-center gap-3 text-bad">
+              <div className="grid h-10 w-10 place-items-center rounded-xl bg-bad/10 border border-bad/20">
                 <Trash2 size={20} />
               </div>
               <div>
-                <h3 className="text-sm font-semibold text-[#f0f3f6]">{t("Delete Agent Node")}</h3>
-                <p className="text-xs text-[#8b949e]">{t("Confirm permanent telemetry removal")}</p>
+                <h3 className="text-sm font-semibold text-ink">{t("Delete Agent Node")}</h3>
+                <p className="text-xs text-muted">{t("Confirm permanent telemetry removal")}</p>
               </div>
             </div>
 
-            <div className="mt-4 space-y-2.5 text-xs text-[#c9d1d9]">
-              <div className="rounded-lg border border-[rgba(255,255,255,0.06)] bg-white/[0.02] p-3 space-y-1">
+            <div className="mt-4 space-y-2.5 text-xs text-ink">
+              <div className="rounded-lg border border-[rgba(255,255,255,0.06)] bg-surface/[0.02] p-3 space-y-1">
                 <div className="flex justify-between">
-                  <span className="text-[#8b949e]">{t("Node:")}</span>
+                  <span className="text-muted">{t("Node:")}</span>
                   <span className="font-mono font-semibold text-white">{node}</span>
                 </div>
                 <div className="flex justify-between">
-                  <span className="text-[#8b949e]">{t("Target Instance:")}</span>
-                  <span className="font-mono text-indigo-300">{activeInstanceId ?? "all"}</span>
+                  <span className="text-muted">{t("Target Instance:")}</span>
+                  <span className="font-mono text-entity-user">{activeInstanceId ?? "all"}</span>
                 </div>
               </div>
 
               <div className="space-y-2 pt-1">
                 {activeInstanceId && (
-                  <label className="flex items-start gap-2.5 p-2.5 rounded-lg border border-[rgba(255,255,255,0.06)] bg-white/[0.01] cursor-pointer hover:bg-white/[0.03] transition">
+                  <label className="flex items-start gap-2.5 p-2.5 rounded-lg border border-[rgba(255,255,255,0.06)] bg-surface/[0.01] cursor-pointer hover:bg-surface/[0.03] transition">
                     <input
                       type="radio"
                       name="detailDeleteScope"
@@ -1270,15 +1270,15 @@ export function AgentNodeDetailPage() {
                       className="mt-0.5 accent-rose-500"
                     />
                     <div>
-                      <div className="font-semibold text-[#f0f3f6]">{t("Delete this instance only")}</div>
-                      <div className="text-[11px] text-[#8b949e] mt-0.5">
-                        Purges only instance <code className="font-mono text-indigo-300">{activeInstanceId}</code>. Other instances for this node will remain intact.
+                      <div className="font-semibold text-ink">{t("Delete this instance only")}</div>
+                      <div className="text-[11px] text-muted mt-0.5">
+                        Purges only instance <code className="font-mono text-entity-user">{activeInstanceId}</code>. Other instances for this node will remain intact.
                       </div>
                     </div>
                   </label>
                 )}
 
-                <label className="flex items-start gap-2.5 p-2.5 rounded-lg border border-rose-500/20 bg-rose-500/5 cursor-pointer hover:bg-rose-500/10 transition">
+                <label className="flex items-start gap-2.5 p-2.5 rounded-lg border border-bad/20 bg-bad/5 cursor-pointer hover:bg-bad/10 transition">
                   <input
                     type="radio"
                     name="detailDeleteScope"
@@ -1287,8 +1287,8 @@ export function AgentNodeDetailPage() {
                     className="mt-0.5 accent-rose-500"
                   />
                   <div>
-                    <div className="font-semibold text-rose-300">{t("Delete entire node")} "{node}"</div>
-                    <div className="text-[11px] text-[#8b949e] mt-0.5">
+                    <div className="font-semibold text-bad">{t("Delete entire node")} "{node}"</div>
+                    <div className="text-[11px] text-muted mt-0.5">
                       {t("Purges all instances and complete historical metrics recorded under this node hostname.")}
                     </div>
                   </div>
@@ -1297,7 +1297,7 @@ export function AgentNodeDetailPage() {
             </div>
 
             {deleteError && (
-              <div className="mt-3 rounded-lg border border-rose-500/30 bg-rose-500/10 p-2.5 text-xs text-rose-300">
+              <div className="mt-3 rounded-lg border border-bad/30 bg-bad/10 p-2.5 text-xs text-bad">
                 {deleteError}
               </div>
             )}
@@ -1318,7 +1318,7 @@ export function AgentNodeDetailPage() {
                 type="button"
                 disabled={isDeleting}
                 onClick={confirmDelete}
-                className="btn border-rose-500/40 bg-rose-600/80 hover:bg-rose-600 text-white font-semibold transition"
+                className="btn border-bad/40 bg-bad/80 hover:bg-bad text-white font-semibold transition"
               >
                 <Trash2 size={13} />
                 <span>{isDeleting ? t("Deleting…") : (deleteMode === "instance" ? t("Delete Instance") : t("Delete Whole Node"))}</span>

@@ -1,0 +1,720 @@
+---
+# Source: tracescope/templates/pdb.yaml
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: tracescope-ingest
+  namespace: tracescope
+  labels:
+    helm.sh/chart: tracescope-0.3.11
+    app.kubernetes.io/name: tracescope
+    app.kubernetes.io/instance: tracescope
+    app.kubernetes.io/part-of: tracescope
+    app.kubernetes.io/version: "0.4.7"
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/component: ingest
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: tracescope
+      app.kubernetes.io/instance: tracescope
+      app.kubernetes.io/component: ingest
+
+---
+# Source: tracescope/templates/secret.yaml
+apiVersion: v1
+kind: Secret
+metadata:
+  name: tracescope-secrets
+  namespace: tracescope
+  labels:
+    helm.sh/chart: tracescope-0.3.11
+    app.kubernetes.io/name: tracescope
+    app.kubernetes.io/instance: tracescope
+    app.kubernetes.io/part-of: tracescope
+    app.kubernetes.io/version: "0.4.7"
+    app.kubernetes.io/managed-by: Helm
+type: Opaque
+stringData:
+  OTEL_INTERNAL_API_TOKEN: ""
+  OTEL_API_KEY: ""
+  OTEL_CLICKHOUSE_PASSWORD: ""
+  CLICKHOUSE_PASSWORD: ""
+  OTEL_ES_API_KEY: ""
+  OTEL_ES_USER: ""
+  OTEL_ES_PASSWORD: ""
+  OTEL_SEMANTIC_API_KEY: ""
+  OTEL_LLM_API_KEY: ""
+
+---
+# Source: tracescope/templates/configmap.yaml
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: tracescope-config
+  namespace: tracescope
+  labels:
+    helm.sh/chart: tracescope-0.3.11
+    app.kubernetes.io/name: tracescope
+    app.kubernetes.io/instance: tracescope
+    app.kubernetes.io/part-of: tracescope
+    app.kubernetes.io/version: "0.4.7"
+    app.kubernetes.io/managed-by: Helm
+data:
+  OTEL_RETENTION_DAYS: "30"
+  OTEL_CLICKHOUSE_HOST: "tracescope-clickhouse"
+  OTEL_CLICKHOUSE_PORT: "8123"
+  OTEL_CLICKHOUSE_DATABASE: "tracescope"
+  OTEL_CLICKHOUSE_USER: "default"
+  OTEL_CLICKHOUSE_SECURE: "false"
+  OTEL_TRACE_PIPELINE_MODE: "clickhouse"
+  OTEL_STORAGE_BACKEND: "clickhouse"
+  OTEL_TRACE_EDGE_RESOLUTION: "auto"
+  OTEL_TRACE_EDGE_SKEW_MS: "250"
+  OTEL_SERVICE_IP_MAP: ""
+  OTEL_TRACE_STORAGE_BACKEND: "clickhouse"
+  OTEL_CLICKHOUSE_ONLY_AGENT_TRACES: "false"
+  OTEL_ES_SYNC_ENABLED: "false"
+  OTEL_ES_URL: ""
+  OTEL_ES_INDEX: "traces-apm*,apm-*,traces-*"
+  OTEL_ES_VERIFY_TLS: "true"
+  OTEL_ES_TIMEOUT: "10"
+  OTEL_RUN_MIGRATIONS: "false"
+  OTEL_DEMO_MODE: "false"
+  OTEL_CORS_ORIGINS: "http://localhost:30102,http://tracescope.local,https://trace.n2d.id.vn"
+  OTEL_INGEST_QUEUE_CAPACITY: "256"
+  OTEL_INGEST_COALESCE_MS: "5"
+  OTEL_INGEST_TRANSACTION_RECORDS: "50000"
+  OTEL_INGEST_COMMIT_TIMEOUT_SECONDS: "65"
+  OTEL_INTERNAL_REQUEST_TIMEOUT_SECONDS: "70"
+  OTEL_INGEST_MAX_BATCH_BYTES: "33554432"
+  OTEL_AGGREGATION_MAX_MEMORY_USAGE: "1073741824"
+  OTEL_AGGREGATION_EXTERNAL_GROUP_BY_BYTES: "268435456"
+  OTEL_AGGREGATION_SHADOW_ENABLED: "true"
+  OTEL_AGGREGATION_CUTOVER: "false"
+  OTEL_BASELINE_CADENCE_SECONDS: "300"
+  OTEL_BASELINE_SERIES_BUDGET: "100"
+  OTEL_ANOMALY_WINDOW_BUDGET: "100"
+  OTEL_WORKER_START_TIME: ""
+  OTEL_WORKER_IGNORE_PAST_DATA: "false"
+  OTEL_LLM_INVESTIGATION_ENABLED: "true"
+  OTEL_LLM_SINGLE_OWNER_ACK: "true"
+  OTEL_LLM_BASE_URL: "https://api.ai-box.vn/v1"
+  OTEL_LLM_MODEL: "deepseek-v4.1-flash"
+  OTEL_LLM_RESPONSE_MODE: "json_object"
+  OTEL_LLM_ALLOW_LOOPBACK_HTTP: "true"
+  OTEL_LLM_CONTEXT_TOKENS: "256000"
+
+  OTEL_SEMANTIC_ASSESSMENT_ENABLED: "false"
+  OTEL_SEMANTIC_PROVIDER: "openrouter"
+  OTEL_SEMANTIC_BASE_URL: "https://openrouter.ai"
+  OTEL_SEMANTIC_MODEL: "typesafe/jev-1.13"
+  OTEL_SEMANTIC_TIMEOUT_SECONDS: "15"
+  OTEL_SEMANTIC_BATCH_SIZE: "2"
+  OTEL_SEMANTIC_BUDGET_SECONDS: "20"
+  OTEL_SEMANTIC_RETRY_SECONDS: "900"
+
+  OTEL_BEHAVIOR_LEARNING_ENABLED: "true"
+  OTEL_BEHAVIOR_BUDGET_SECONDS: "20"
+
+---
+# Source: tracescope/templates/edge-configmap.yaml
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: tracescope-edge-config
+  namespace: tracescope
+  labels:
+    helm.sh/chart: tracescope-0.3.11
+    app.kubernetes.io/name: tracescope
+    app.kubernetes.io/instance: tracescope
+    app.kubernetes.io/part-of: tracescope
+    app.kubernetes.io/version: "0.4.7"
+    app.kubernetes.io/managed-by: Helm
+data:
+  OTEL_RUN_MIGRATIONS: "false"
+  OTEL_TRACE_PIPELINE_MODE: "clickhouse"
+  OTEL_STORAGE_BACKEND: "clickhouse"
+  OTEL_TRACE_STORAGE_BACKEND: "clickhouse"
+  OTEL_CLICKHOUSE_ONLY_AGENT_TRACES: "false"
+  OTEL_DEMO_MODE: "false"
+  OTEL_CORS_ORIGINS: "http://localhost:30102,http://tracescope.local,https://trace.n2d.id.vn"
+  OTEL_MAX_INGEST_BYTES: "10485760"
+  OTEL_INGEST_MAX_BATCH_BYTES: "33554432"
+  OTEL_INTERNAL_REQUEST_TIMEOUT_SECONDS: "70"
+  OTEL_STORAGE_OWNER_URL: "http://tracescope-api:30102"
+
+---
+# Source: tracescope/templates/clickhouse-pvc.yaml
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: tracescope-clickhouse-data
+  namespace: tracescope
+  labels:
+    helm.sh/chart: tracescope-0.3.11
+    app.kubernetes.io/name: tracescope
+    app.kubernetes.io/instance: tracescope
+    app.kubernetes.io/part-of: tracescope
+    app.kubernetes.io/version: "0.4.7"
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/component: clickhouse
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 5Gi
+
+---
+# Source: tracescope/templates/api-service.yaml
+apiVersion: v1
+kind: Service
+metadata:
+  name: tracescope-api
+  namespace: tracescope
+  labels:
+    helm.sh/chart: tracescope-0.3.11
+    app.kubernetes.io/name: tracescope
+    app.kubernetes.io/instance: tracescope
+    app.kubernetes.io/part-of: tracescope
+    app.kubernetes.io/version: "0.4.7"
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/component: api
+  annotations:
+    prometheus.io/scrape: "true"
+    prometheus.io/port: "30102"
+    prometheus.io/path: "/metrics"
+spec:
+  type: NodePort
+  selector:
+    app.kubernetes.io/name: tracescope
+    app.kubernetes.io/instance: tracescope
+    app.kubernetes.io/component: app
+  ports:
+    - name: http
+      port: 30102
+      targetPort: http
+      protocol: TCP
+      nodePort: 30102
+
+---
+# Source: tracescope/templates/clickhouse-service.yaml
+apiVersion: v1
+kind: Service
+metadata:
+  name: tracescope-clickhouse
+  namespace: tracescope
+  labels:
+    helm.sh/chart: tracescope-0.3.11
+    app.kubernetes.io/name: tracescope
+    app.kubernetes.io/instance: tracescope
+    app.kubernetes.io/part-of: tracescope
+    app.kubernetes.io/version: "0.4.7"
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/component: clickhouse
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: tracescope
+    app.kubernetes.io/instance: tracescope
+    app.kubernetes.io/component: clickhouse
+  ports:
+    - name: http
+      port: 8123
+      targetPort: http
+      protocol: TCP
+    - name: native
+      port: 9000
+      targetPort: native
+      protocol: TCP
+
+---
+# Source: tracescope/templates/ingest-service.yaml
+apiVersion: v1
+kind: Service
+metadata:
+  name: tracescope-ingest
+  namespace: tracescope
+  labels:
+    helm.sh/chart: tracescope-0.3.11
+    app.kubernetes.io/name: tracescope
+    app.kubernetes.io/instance: tracescope
+    app.kubernetes.io/part-of: tracescope
+    app.kubernetes.io/version: "0.4.7"
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/component: ingest
+spec:
+  type: NodePort
+  selector:
+    app.kubernetes.io/name: tracescope
+    app.kubernetes.io/instance: tracescope
+    app.kubernetes.io/component: ingest
+  ports:
+    - name: http
+      port: 30103
+      targetPort: http
+      protocol: TCP
+      nodePort: 30103
+
+---
+# Source: tracescope/templates/storage-service.yaml
+apiVersion: v1
+kind: Service
+metadata:
+  name: tracescope-app
+  namespace: tracescope
+  labels:
+    helm.sh/chart: tracescope-0.3.11
+    app.kubernetes.io/name: tracescope
+    app.kubernetes.io/instance: tracescope
+    app.kubernetes.io/part-of: tracescope
+    app.kubernetes.io/version: "0.4.7"
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/component: app
+spec:
+  clusterIP: None
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: tracescope
+    app.kubernetes.io/instance: tracescope
+    app.kubernetes.io/component: app
+  ports:
+    - name: internal-http
+      port: 8000
+      targetPort: http
+      protocol: TCP
+
+
+---
+# Source: tracescope/templates/ingest-deployment.yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: tracescope-ingest
+  namespace: tracescope
+  labels:
+    helm.sh/chart: tracescope-0.3.11
+    app.kubernetes.io/name: tracescope
+    app.kubernetes.io/instance: tracescope
+    app.kubernetes.io/part-of: tracescope
+    app.kubernetes.io/version: "0.4.7"
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/component: ingest
+spec:
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 1
+      maxSurge: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: tracescope
+      app.kubernetes.io/instance: tracescope
+      app.kubernetes.io/component: ingest
+  template:
+    metadata:
+      annotations:
+        checksum/config: 26bc648928749c3093e306168b41c541a4a9d1987e40ddbd31db25bc820100e2
+        checksum/secret: 87298ea8e7b3ceb36d61cf9877d758150f2618d8ffe99b859b65200517337192
+      labels:
+        helm.sh/chart: tracescope-0.3.11
+        app.kubernetes.io/name: tracescope
+        app.kubernetes.io/instance: tracescope
+        app.kubernetes.io/part-of: tracescope
+        app.kubernetes.io/version: "0.4.7"
+        app.kubernetes.io/managed-by: Helm
+        app.kubernetes.io/component: ingest
+    spec:
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: kubernetes.io/hostname
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector:
+            matchLabels:
+              app.kubernetes.io/name: tracescope
+              app.kubernetes.io/instance: tracescope
+              app.kubernetes.io/component: ingest
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: ingest
+          image: "xhatsu101/tracescope:0.4.7"
+          imagePullPolicy: IfNotPresent
+          command:
+            - uvicorn
+            - backend.ingest_main:app
+            - --host
+            - 0.0.0.0
+            - --port
+            - "8000"
+          ports:
+            - name: http
+              containerPort: 8000
+          envFrom:
+            - configMapRef:
+                name: tracescope-edge-config
+          env:
+            - name: OTEL_RUN_MIGRATIONS
+              value: "false"
+            - name: OTEL_INTERNAL_API_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: tracescope-secrets
+                  key: OTEL_INTERNAL_API_TOKEN
+            - name: OTEL_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: tracescope-secrets
+                  key: OTEL_API_KEY
+          startupProbe:
+            httpGet:
+              path: /livez
+              port: http
+            periodSeconds: 2
+            failureThreshold: 20
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: http
+            periodSeconds: 10
+            timeoutSeconds: 3
+            failureThreshold: 3
+          livenessProbe:
+            httpGet:
+              path: /livez
+              port: http
+            periodSeconds: 20
+            timeoutSeconds: 3
+            failureThreshold: 3
+          resources:
+            limits:
+              cpu: "1"
+              memory: 2Gi
+            requests:
+              cpu: 200m
+              memory: 384Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: tmp
+          emptyDir: {}
+
+---
+# Source: tracescope/templates/ingest-hpa.yaml
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: tracescope-ingest
+  namespace: tracescope
+  labels:
+    helm.sh/chart: tracescope-0.3.11
+    app.kubernetes.io/name: tracescope
+    app.kubernetes.io/instance: tracescope
+    app.kubernetes.io/part-of: tracescope
+    app.kubernetes.io/version: "0.4.7"
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/component: ingest
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: tracescope-ingest
+  minReplicas: 1
+  maxReplicas: 12
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 75
+
+---
+# Source: tracescope/templates/clickhouse-statefulset.yaml
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: tracescope-clickhouse
+  namespace: tracescope
+  labels:
+    helm.sh/chart: tracescope-0.3.11
+    app.kubernetes.io/name: tracescope
+    app.kubernetes.io/instance: tracescope
+    app.kubernetes.io/part-of: tracescope
+    app.kubernetes.io/version: "0.4.7"
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/component: clickhouse
+spec:
+  serviceName: tracescope-clickhouse
+  replicas: 1
+  podManagementPolicy: OrderedReady
+  updateStrategy:
+    type: RollingUpdate
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: tracescope
+      app.kubernetes.io/instance: tracescope
+      app.kubernetes.io/component: clickhouse
+  template:
+    metadata:
+      labels:
+        helm.sh/chart: tracescope-0.3.11
+        app.kubernetes.io/name: tracescope
+        app.kubernetes.io/instance: tracescope
+        app.kubernetes.io/part-of: tracescope
+        app.kubernetes.io/version: "0.4.7"
+        app.kubernetes.io/managed-by: Helm
+        app.kubernetes.io/component: clickhouse
+    spec:
+      terminationGracePeriodSeconds: 60
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 101
+        runAsGroup: 101
+        fsGroup: 101
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: clickhouse
+          image: "clickhouse/clickhouse-server:24.8"
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 8123
+            - name: native
+              containerPort: 9000
+          env:
+            - name: CLICKHOUSE_DB
+              value: "tracescope"
+            - name: CLICKHOUSE_USER
+              value: "default"
+            - name: CLICKHOUSE_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: tracescope-secrets
+                  key: CLICKHOUSE_PASSWORD
+            - name: CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT
+              value: "1"
+          startupProbe:
+            httpGet:
+              path: /ping
+              port: http
+            periodSeconds: 2
+            failureThreshold: 30
+          readinessProbe:
+            httpGet:
+              path: /ping
+              port: http
+            periodSeconds: 5
+            timeoutSeconds: 3
+            failureThreshold: 3
+          livenessProbe:
+            httpGet:
+              path: /ping
+              port: http
+            periodSeconds: 15
+            timeoutSeconds: 3
+            failureThreshold: 3
+          resources:
+            limits:
+              cpu: "2"
+              memory: 4Gi
+            requests:
+              cpu: 300m
+              memory: 2Gi
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: false
+            capabilities:
+              drop: ["ALL"]
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/clickhouse
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: tracescope-clickhouse-data
+
+---
+# Source: tracescope/templates/storage-statefulset.yaml
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: tracescope-app
+  namespace: tracescope
+  labels:
+    helm.sh/chart: tracescope-0.3.11
+    app.kubernetes.io/name: tracescope
+    app.kubernetes.io/instance: tracescope
+    app.kubernetes.io/part-of: tracescope
+    app.kubernetes.io/version: "0.4.7"
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/component: app
+spec:
+  serviceName: tracescope-app
+  replicas: 1
+  podManagementPolicy: OrderedReady
+  updateStrategy:
+    type: RollingUpdate
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: tracescope
+      app.kubernetes.io/instance: tracescope
+      app.kubernetes.io/component: app
+  template:
+    metadata:
+      annotations:
+        checksum/config: 26bc648928749c3093e306168b41c541a4a9d1987e40ddbd31db25bc820100e2
+        checksum/secret: 87298ea8e7b3ceb36d61cf9877d758150f2618d8ffe99b859b65200517337192
+      labels:
+        helm.sh/chart: tracescope-0.3.11
+        app.kubernetes.io/name: tracescope
+        app.kubernetes.io/instance: tracescope
+        app.kubernetes.io/part-of: tracescope
+        app.kubernetes.io/version: "0.4.7"
+        app.kubernetes.io/managed-by: Helm
+        app.kubernetes.io/component: app
+    spec:
+      terminationGracePeriodSeconds: 90
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        fsGroup: 10001
+        seccompProfile:
+          type: RuntimeDefault
+      initContainers:
+        - name: migrate
+          image: "xhatsu101/tracescope:0.4.7"
+          imagePullPolicy: IfNotPresent
+          command: ["python", "-m", "backend.cli", "migrate"]
+          envFrom:
+            - configMapRef:
+                name: tracescope-config
+            - secretRef:
+                name: tracescope-secrets
+          env:
+            - name: OTEL_CLICKHOUSE_ROLE
+              value: "owner"
+            - name: OTEL_RUN_MIGRATIONS
+              value: "true"
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: "1"
+              memory: 512Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+      containers:
+        - name: api
+          image: "xhatsu101/tracescope:0.4.7"
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 8000
+          envFrom:
+            - configMapRef:
+                name: tracescope-config
+            - secretRef:
+                name: tracescope-secrets
+          env:
+            - name: OTEL_CLICKHOUSE_ROLE
+              value: "api"
+            - name: OTEL_RUN_MIGRATIONS
+              value: "false"
+          startupProbe:
+            httpGet:
+              path: /livez
+              port: http
+            periodSeconds: 2
+            failureThreshold: 30
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: http
+            periodSeconds: 10
+            timeoutSeconds: 3
+            failureThreshold: 3
+          livenessProbe:
+            httpGet:
+              path: /livez
+              port: http
+            periodSeconds: 20
+            timeoutSeconds: 3
+            failureThreshold: 3
+          resources:
+            limits:
+              cpu: "1.5"
+              memory: 1.5Gi
+            requests:
+              cpu: 300m
+              memory: 512Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+        - name: analytics-worker
+          image: "xhatsu101/tracescope:0.4.7"
+          imagePullPolicy: IfNotPresent
+          command: ["python", "-m", "backend.worker"]
+          args:
+            - "--interval"
+            - "60"
+          envFrom:
+            - configMapRef:
+                name: tracescope-config
+            - secretRef:
+                name: tracescope-secrets
+          env:
+            - name: OTEL_CLICKHOUSE_ROLE
+              value: "worker"
+            - name: OTEL_RUN_MIGRATIONS
+              value: "false"
+          livenessProbe:
+            exec:
+              command: ["/bin/sh", "-c", "kill -0 1"]
+            initialDelaySeconds: 30
+            periodSeconds: 20
+            failureThreshold: 3
+          resources:
+            limits:
+              cpu: "1"
+              memory: 1Gi
+            requests:
+              cpu: 150m
+              memory: 256Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: tmp
+          emptyDir: {}

@@ -147,11 +147,11 @@ export function episodeStatusLabel(state: Episode["state"], t: (key: string, fal
 }
 
 export function episodeStatusClass(state: Episode["state"]) {
-  if (state === "watch") return "border-[#b877d9]/60 bg-[#b877d9]/10 text-[#b877d9]";
-  if (state === "expected") return "border-[#73bf69]/60 bg-[#73bf69]/10 text-[#73bf69]";
-  if (state === "critical") return "border-[#f2495c]/60 bg-[#f2495c]/10 text-[#f2495c]";
-  if (state === "needs_attention") return "border-[#ff9830]/60 bg-[#ff9830]/10 text-[#ff9830]";
-  return "border-[#5794f2]/60 bg-[#5794f2]/10 text-[#5794f2]";
+  if (state === "watch") return "border-warn/40 bg-warn-bg text-warn rounded-full";
+  if (state === "expected") return "border-good/40 bg-good-bg text-good rounded-full";
+  if (state === "critical") return "border-bad/40 bg-bad-bg text-bad rounded-full";
+  if (state === "needs_attention") return "border-warn/40 bg-warn-bg text-warn rounded-full";
+  return "border-info/40 bg-info-bg text-info rounded-full";
 }
 
 export function episodeCategory(episode: Episode) {
@@ -241,23 +241,44 @@ export function formatHighlightDelta(highlight: EpisodeHighlight, t: (key: strin
   return highlight.delta == null ? "—" : `${Number(highlight.delta) >= 0 ? "+" : ""}${Number(highlight.delta).toFixed(1)}%`;
 }
 
-export function EpisodeStatusBadge({ episode }: { episode: Episode }) {
+export function episodeStatusTone(state: Episode["state"]) {
+  if (state === "watch") return "text-warn";
+  if (state === "expected") return "text-good";
+  if (state === "critical") return "text-bad";
+  if (state === "needs_attention") return "text-warn";
+  return "text-info";
+}
+
+export function EpisodeStatusBadge({ episode, className, box = false }: { episode: Episode; className?: string; box?: boolean }) {
   const { t } = useI18n();
   const Icon = episode.state === "expected" ? CheckCircle2 : episode.state === "critical" ? AlertTriangle : episode.state === "needs_attention" ? Activity : Clock3;
+  const tone = episodeStatusTone(episode.state);
   return (
-    <span className={`inline-flex items-center gap-1.5 border px-2 py-1 text-[10px] font-bold uppercase tracking-wide ${episodeStatusClass(episode.state)}`}>
-      <Icon size={11} /> {t("Priority", "Ưu tiên")}: {episodeStatusLabel(episode.state, t)}
+    <span
+      className={`inline-flex items-center justify-start gap-1.5 text-[10px] font-bold uppercase tracking-wider whitespace-nowrap shrink-0 ${box ? `border px-2 py-1 ${episodeStatusClass(episode.state)}` : tone} ${className || ""}`}
+      title={episodeStatusLabel(episode.state, t)}
+    >
+      <Icon size={12} className="shrink-0" />
+      <span className="truncate">{episodeStatusLabel(episode.state, t)}</span>
     </span>
   );
 }
 
-export function EpisodeWorkflowBadge({ episode }: { episode: Episode }) {
+export function EpisodeWorkflowBadge({ episode, className }: { episode: Episode; className?: string }) {
   const { t } = useI18n();
   const resolved = episode.status === "resolved";
   const monitoring = ["acknowledged", "investigating"].includes(episode.status);
   const label = resolved ? t("Resolved", "Đã xử lý") : monitoring ? t("Monitoring", "Đang theo dõi") : t("Open", "Đang mở");
-  const tone = resolved ? "text-[#73bf69]" : monitoring ? "text-[#ff9830]" : "text-[#a7a9ab]";
-  return <span className={`inline-flex items-center gap-1 text-[10px] font-semibold uppercase tracking-wide ${tone}`}><CircleDot size={10} />{t("Review status", "Trạng thái xử lý")}: {label}</span>;
+  const tone = resolved ? "text-good" : monitoring ? "text-warn" : "text-muted";
+  return (
+    <span
+      className={`inline-flex items-center justify-start gap-1 text-[10px] font-semibold uppercase tracking-wider whitespace-nowrap ${tone} ${className || ""}`}
+      title={label}
+    >
+      <CircleDot size={10} className="shrink-0" />
+      <span>{label}</span>
+    </span>
+  );
 }
 
 function assessmentCategoryLabel(category: NonNullable<SemanticAssessment["category"]>, t: (key: string, fallback?: string) => string) {
@@ -297,11 +318,11 @@ export function SemanticAssessmentBadge({ assessment }: { assessment?: SemanticA
       : status === "failed" ? t("AI unavailable", "AI không khả dụng")
         : status === "stale" ? t("AI stale", "AI đã cũ")
           : t("AI not evaluated", "AI chưa đánh giá");
-  const tone = status === "succeeded" ? "border-[#b877d9]/50 bg-[#b877d9]/10 text-[#d9b4ea]"
-    : status === "pending" ? "border-[#5794f2]/50 bg-[#5794f2]/10 text-[#8bb8fa]"
-      : status === "failed" || status === "stale" ? "border-[#ff9830]/50 bg-[#ff9830]/10 text-[#ffb767]"
-        : "border-[#34373b] bg-[#181b1f] text-[#a7a9ab]";
-  return <span className={`inline-flex shrink-0 items-center gap-1 whitespace-nowrap border px-2 py-1 text-[10px] font-semibold ${tone}`}><Sparkles size={11} aria-hidden="true" />{text}</span>;
+  const tone = status === "succeeded" ? "border-accent/40 bg-accent-soft text-accent"
+    : status === "pending" ? "border-info/40 bg-info-bg text-info"
+      : status === "failed" || status === "stale" ? "border-warn/40 bg-warn-bg text-warn"
+        : "border-line bg-surface-2 text-muted";
+  return <span className={`inline-flex shrink-0 items-center gap-1 whitespace-nowrap rounded-full border px-2 py-0.5 text-[11px] font-semibold ${tone}`}><Sparkles size={11} aria-hidden="true" />{text}</span>;
 }
 
 function recommendationLabel(value: NonNullable<SemanticAssessment["recommendation"]>, t: (en: string, vi: string) => string) {
@@ -329,45 +350,45 @@ export function SemanticAssessmentSummary({ episode, full = false, timezone = "l
 
   if (!full) {
     if (status !== "succeeded" || !assessment) return null;
-    return <div className="mt-2 border-l-2 border-[#b877d9]/60 pl-2">
-      <div className="text-[10px] font-semibold uppercase tracking-[.12em] text-[#b877d9]">{t("Assessment", "Đánh giá")}{assessment.category ? ` · ${assessmentCategoryLabel(assessment.category, t)}` : ""}{assessment.priority ? ` · ${assessmentPriorityLabel(assessment.priority, t)}` : ""}</div>
-      <p className="mt-0.5 line-clamp-2 text-[11px] leading-4 text-[#c9c1d1]">{(assessment.recommendation ? recommendationLabel(assessment.recommendation, t) : assessment.summary) || t("Typed decision from Jev; see the detail panel for category and priority probabilities.", "Jev trả về quyết định có kiểu dữ liệu; xem bảng chi tiết để biết xác suất danh mục và ưu tiên.")}</p>
+    return <div className="mt-2 border-l-2 border-entity-user/60 pl-2">
+      <div className="text-[10px] font-semibold uppercase tracking-[.12em] text-entity-user">{t("Assessment", "Đánh giá")}{assessment.category ? ` · ${assessmentCategoryLabel(assessment.category, t)}` : ""}{assessment.priority ? ` · ${assessmentPriorityLabel(assessment.priority, t)}` : ""}</div>
+      <p className="mt-0.5 line-clamp-2 text-[11px] leading-4 text-muted">{(assessment.recommendation ? recommendationLabel(assessment.recommendation, t) : assessment.summary) || t("Typed decision from Jev; see the detail panel for category and priority probabilities.", "Jev trả về quyết định có kiểu dữ liệu; xem bảng chi tiết để biết xác suất danh mục và ưu tiên.")}</p>
     </div>;
   }
 
-  return <section aria-labelledby={`semantic-assessment-${episode.id}`} className="min-w-0 h-full border border-[#34373b] bg-[#111217]">
-    <div className="flex flex-wrap items-center justify-between gap-2 border-b border-[#2a2d30] px-3 py-2.5">
-      <h2 id={`semantic-assessment-${episode.id}`} className="flex items-center gap-2 text-[11px] font-semibold uppercase tracking-[.12em] text-[#d9b4ea]"><Sparkles size={13} aria-hidden="true" />{t("Assessment", "Đánh giá")}</h2>
+  return <section aria-labelledby={`semantic-assessment-${episode.id}`} className="min-w-0 h-full border border-line-strong bg-surface">
+    <div className="flex flex-wrap items-center justify-between gap-2 border-b border-line px-3 py-2.5">
+      <h2 id={`semantic-assessment-${episode.id}`} className="flex items-center gap-2 text-[11px] font-semibold uppercase tracking-[.12em] text-entity-user"><Sparkles size={13} aria-hidden="true" />{t("Assessment", "Đánh giá")}</h2>
       <SemanticAssessmentBadge assessment={assessment} />
     </div>
     {succeeded && assessment ? <div className="space-y-3 p-3">
-      {stale && <p role="status" className="border-l-2 border-[#ff9830] pl-2 text-[11px] text-[#ffb767]">{t("This assessment uses an earlier evidence version and may no longer match the current episode.", "Đánh giá này dùng phiên bản bằng chứng trước đó và có thể không còn khớp với episode hiện tại.")}</p>}
+      {stale && <p role="status" className="border-l-2 border-warn pl-2 text-[11px] text-warn">{t("This assessment uses an earlier evidence version and may no longer match the current episode.", "Đánh giá này dùng phiên bản bằng chứng trước đó và có thể không còn khớp với episode hiện tại.")}</p>}
       <div className="flex flex-wrap gap-x-6 gap-y-2 text-[11px]">
-        {assessment.abnormal_probability != null && <div><div className="text-[10px] uppercase tracking-wide text-[#7b7d80]">{t("Abnormal probability", "Xác suất bất thường")}</div><div className="mt-1 font-mono text-lg font-semibold text-[#d9b4ea]">{Math.round(assessment.abnormal_probability * 100)}%</div></div>}
-        {assessment.category && <div><div className="text-[10px] uppercase tracking-wide text-[#7b7d80]">{t("Category · confidence", "Danh mục · độ tin cậy")}</div><div className="mt-1 text-xs text-[#d8d9da]">{assessmentCategoryLabel(assessment.category, t)}{assessment.category_confidence != null ? ` · ${Math.round(assessment.category_confidence * 100)}%` : ""}</div></div>}
-        {assessment.priority && <div><div className="text-[10px] uppercase tracking-wide text-[#7b7d80]">{t("Priority · confidence", "Ưu tiên · độ tin cậy")}</div><div className="mt-1 text-xs text-[#d8d9da]">{assessmentPriorityLabel(assessment.priority, t)}{assessment.priority_confidence != null ? ` · ${Math.round(assessment.priority_confidence * 100)}%` : ""}</div></div>}
+        {assessment.abnormal_probability != null && <div><div className="text-[10px] uppercase tracking-wide text-muted">{t("Abnormal probability", "Xác suất bất thường")}</div><div className="mt-1 font-mono text-lg font-semibold text-entity-user">{Math.round(assessment.abnormal_probability * 100)}%</div></div>}
+        {assessment.category && <div><div className="text-[10px] uppercase tracking-wide text-muted">{t("Category · confidence", "Danh mục · độ tin cậy")}</div><div className="mt-1 text-xs text-ink">{assessmentCategoryLabel(assessment.category, t)}{assessment.category_confidence != null ? ` · ${Math.round(assessment.category_confidence * 100)}%` : ""}</div></div>}
+        {assessment.priority && <div><div className="text-[10px] uppercase tracking-wide text-muted">{t("Priority · confidence", "Ưu tiên · độ tin cậy")}</div><div className="mt-1 text-xs text-ink">{assessmentPriorityLabel(assessment.priority, t)}{assessment.priority_confidence != null ? ` · ${Math.round(assessment.priority_confidence * 100)}%` : ""}</div></div>}
       </div>
-      {assessment.recommendation && <div className="space-y-1 text-xs leading-5 text-[#d8d9da]">
+      {assessment.recommendation && <div className="space-y-1 text-xs leading-5 text-ink">
         <div className="font-semibold">{stale ? t("Previous next step", "Bước tiếp theo trước đây") : t("Next step", "Bước tiếp theo")}{assessment.recommendation_confidence != null ? ` · ${Math.round(assessment.recommendation_confidence * 100)}%` : ""}</div>
         <p>{recommendationLabel(assessment.recommendation, t)}</p>
-        <p className="text-[11px] text-[#a7a9ab]">{t("Advisory only. TraceScope state and severity remain authoritative; no action is executed.", "Chỉ mang tính tham khảo. Trạng thái và mức độ nghiêm trọng của TraceScope vẫn là căn cứ chính; không có hành động tự động.")}</p>
-        {!!assessment.input_signal_ids?.length && <details className="text-[11px] text-[#a7a9ab]"><summary className="cursor-pointer">{t("Submitted evidence", "Bằng chứng đã gửi")} ({assessment.input_signal_ids.length})</summary><p className="mt-1 break-words">{assessment.input_signal_ids.join(", ")}</p></details>}
+        <p className="text-[11px] text-muted">{t("Advisory only. TraceScope state and severity remain authoritative; no action is executed.", "Chỉ mang tính tham khảo. Trạng thái và mức độ nghiêm trọng của TraceScope vẫn là căn cứ chính; không có hành động tự động.")}</p>
+        {!!assessment.input_signal_ids?.length && <details className="text-[11px] text-muted"><summary className="cursor-pointer">{t("Submitted evidence", "Bằng chứng đã gửi")} ({assessment.input_signal_ids.length})</summary><p className="mt-1 break-words">{assessment.input_signal_ids.join(", ")}</p></details>}
       </div>}
-      {assessment.summary && <p className="max-w-4xl text-xs leading-5 text-[#d8d9da]">{assessment.summary}</p>}
+      {assessment.summary && <p className="max-w-4xl text-xs leading-5 text-ink">{assessment.summary}</p>}
       {(categoryProbabilities.length > 0 || priorityProbabilities.length > 0) && <div className="grid gap-3 sm:grid-cols-2">
         {categoryProbabilities.length > 0 && <div>
-          <div className="mb-1.5 text-[10px] font-semibold uppercase tracking-wide text-[#7b7d80]">{t("Category probabilities", "Xác suất danh mục")}</div>
-          <ul className="space-y-1">{categoryProbabilities.map(([category, probability]) => <li key={category} className="flex items-center justify-between gap-2 text-[10px] text-[#c4bdd9]"><span>{assessmentCategoryLabel(category as NonNullable<SemanticAssessment["category"]>, t)}</span><span className="font-mono">{Math.round(probability * 100)}%</span></li>)}</ul>
+          <div className="mb-1.5 text-[10px] font-semibold uppercase tracking-wide text-muted">{t("Category probabilities", "Xác suất danh mục")}</div>
+          <ul className="space-y-1">{categoryProbabilities.map(([category, probability]) => <li key={category} className="flex items-center justify-between gap-2 text-[10px] text-muted"><span>{assessmentCategoryLabel(category as NonNullable<SemanticAssessment["category"]>, t)}</span><span className="font-mono">{Math.round(probability * 100)}%</span></li>)}</ul>
         </div>}
         {priorityProbabilities.length > 0 && <div>
-          <div className="mb-1.5 text-[10px] font-semibold uppercase tracking-wide text-[#7b7d80]">{t("Priority probabilities", "Xác suất ưu tiên")}</div>
-          <ul className="space-y-1">{priorityProbabilities.map(([priority, probability]) => <li key={priority} className="flex items-center justify-between gap-2 text-[10px] text-[#c4bdd9]"><span>{assessmentPriorityLabel(priority as NonNullable<SemanticAssessment["priority"]>, t)}</span><span className="font-mono">{Math.round(probability * 100)}%</span></li>)}</ul>
+          <div className="mb-1.5 text-[10px] font-semibold uppercase tracking-wide text-muted">{t("Priority probabilities", "Xác suất ưu tiên")}</div>
+          <ul className="space-y-1">{priorityProbabilities.map(([priority, probability]) => <li key={priority} className="flex items-center justify-between gap-2 text-[10px] text-muted"><span>{assessmentPriorityLabel(priority as NonNullable<SemanticAssessment["priority"]>, t)}</span><span className="font-mono">{Math.round(probability * 100)}%</span></li>)}</ul>
         </div>}
       </div>}
-      <p className="max-w-4xl border-l-2 border-[#5794f2]/50 pl-2 text-[10px] leading-4 text-[#a7a9ab]">{t("Jev returns typed decisions and probabilities, not a generated explanation or per-signal attribution. Use the L3 evidence and rationale for the underlying facts.", "Jev trả về quyết định và xác suất có kiểu dữ liệu, không tạo giải thích bằng văn bản hoặc gán theo từng tín hiệu. Xem bằng chứng và lý do L3 để biết các dữ kiện nền.")}</p>
-      {!!assessment.caveats?.length && <div><div className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-[#7b7d80]">{t("Caveats", "Lưu ý")}</div><ul className="space-y-1">{assessment.caveats.map((caveat, index) => <li key={`${caveat}-${index}`} className="border-l-2 border-[#ff9830]/60 pl-2 text-[11px] leading-4 text-[#c4bdd9]">{caveat}</li>)}</ul></div>}
-      <div className="border-t border-[#2a2d30] pt-2 text-[10px] text-[#7b7d80]">{t("Assessed by", "Đánh giá bởi")}: {assessment.provider === "jev" ? "Jev" : t("Semantic provider", "Nhà cung cấp ngữ nghĩa")} · {assessment.provider_model || assessment.assessment_version}{assessment.evaluated_at ? ` · ${formatEpisodeTime(assessment.evaluated_at, true, timezone)}` : ""}{assessment.input_tokens != null ? ` · ${assessment.input_tokens} ${t("input tokens", "token đầu vào")}` : ""}{assessment.cost_usd != null ? ` · $${assessment.cost_usd.toFixed(6)}` : ""}</div>
-    </div> : <div className="p-3 text-[11px] leading-4 text-[#a7a9ab]">
+      <p className="max-w-4xl border-l-2 border-accent/50 pl-2 text-[10px] leading-4 text-muted">{t("Jev returns typed decisions and probabilities, not a generated explanation or per-signal attribution. Use the L3 evidence and rationale for the underlying facts.", "Jev trả về quyết định và xác suất có kiểu dữ liệu, không tạo giải thích bằng văn bản hoặc gán theo từng tín hiệu. Xem bằng chứng và lý do L3 để biết các dữ kiện nền.")}</p>
+      {!!assessment.caveats?.length && <div><div className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-muted">{t("Caveats", "Lưu ý")}</div><ul className="space-y-1">{assessment.caveats.map((caveat, index) => <li key={`${caveat}-${index}`} className="border-l-2 border-warn/60 pl-2 text-[11px] leading-4 text-muted">{caveat}</li>)}</ul></div>}
+      <div className="border-t border-line pt-2 text-[10px] text-muted">{t("Assessed by", "Đánh giá bởi")}: {assessment.provider === "jev" ? "Jev" : t("Semantic provider", "Nhà cung cấp ngữ nghĩa")} · {assessment.provider_model || assessment.assessment_version}{assessment.evaluated_at ? ` · ${formatEpisodeTime(assessment.evaluated_at, true, timezone)}` : ""}{assessment.input_tokens != null ? ` · ${assessment.input_tokens} ${t("input tokens", "token đầu vào")}` : ""}{assessment.cost_usd != null ? ` · $${assessment.cost_usd.toFixed(6)}` : ""}</div>
+    </div> : <div className="p-3 text-[11px] leading-4 text-muted">
       {status === "pending" ? t("An automatic semantic assessment is in progress.", "Đang thực hiện đánh giá ngữ nghĩa tự động.")
         : status === "failed" ? t("The semantic assessment could not be completed. Deterministic L3 state remains authoritative.", "Không thể hoàn tất đánh giá ngữ nghĩa. Trạng thái L3 xác định vẫn là căn cứ chính.")
           : t("No semantic assessment is stored for this episode version yet.", "Chưa có đánh giá ngữ nghĩa được lưu cho phiên bản episode này.")}
@@ -378,10 +399,10 @@ export function SemanticAssessmentSummary({ episode, full = false, timezone = "l
 export type EntityKind = "user" | "service" | "api" | "ip";
 
 export function entityTokenClass(kind: EntityKind) {
-  if (kind === "user") return "border-[#b877d9]/55 bg-[#b877d9]/10 text-[#d9b4ea]";
-  if (kind === "service") return "border-[#5794f2]/55 bg-[#5794f2]/10 text-[#8db7fa]";
-  if (kind === "api") return "border-[#56b9a8]/55 bg-[#56b9a8]/10 text-[#82d5c4]";
-  return "border-[#34373b] bg-[#181b1f] text-[#a7a9ab]";
+  if (kind === "user") return "border-entity-user/55 bg-entity-user/10 text-entity-user";
+  if (kind === "service") return "border-entity-service/55 bg-accent-soft text-entity-service";
+  if (kind === "api") return "border-entity-api/55 bg-entity-api/10 text-entity-api";
+  return "border-line bg-surface-2 text-muted";
 }
 
 export function EntityToken({ kind, entity, children }: { kind: EntityKind; entity?: EntityRef; children: ReactNode }) {
@@ -423,17 +444,17 @@ export function EpisodePath({ episode, compact = false }: { episode: Episode; co
   return (
     <div className={compact ? "" : "py-1"}>
       {isPrincipalEpisode && (
-        <div className="mb-2 flex min-w-0 flex-wrap items-center gap-2 text-[10px] text-[#a7a9ab]">
-          <span className="inline-flex items-center gap-1 font-semibold uppercase tracking-[.1em] text-[#7b7d80]"><KeyRound size={11} className="text-[#d9b4ea]" />{t("Credential observed on this call", "Credential quan sát trên call này")}</span>
+        <div className="mb-2 flex min-w-0 flex-wrap items-center gap-2 text-[10px] text-muted">
+          <span className="inline-flex items-center gap-1 font-semibold uppercase tracking-[.1em] text-muted"><KeyRound size={11} className="text-entity-user" />{t("Credential observed on this call", "Credential quan sát trên call này")}</span>
           <EntityToken kind="user" entity={{ kind: "user", principal: episode.subject.name }}>{episode.subject.name}</EntityToken>
         </div>
       )}
       <div className="flex flex-wrap items-end gap-1.5 text-[11px]">
         {nodes.length ? nodes.map((node, index) => (
           <span key={`${node.label}-${node.value}-${index}`} className="flex items-end gap-1.5">
-            {index > 0 && <ArrowRight size={12} className="mb-1.5 shrink-0 text-[#7b7d80]" aria-hidden="true" />}
+            {index > 0 && <ArrowRight size={12} className="mb-1.5 shrink-0 text-muted" aria-hidden="true" />}
             <span className="min-w-0">
-              <span className="mb-1 block text-[10px] font-semibold uppercase tracking-[.12em] text-[#7b7d80]">{node.label}</span>
+              <span className="mb-1 block text-[10px] font-semibold uppercase tracking-[.12em] text-muted">{node.label}</span>
               <EntityToken
                 kind={node.kind}
                 entity={node.kind === "user"
@@ -446,10 +467,10 @@ export function EpisodePath({ episode, compact = false }: { episode: Episode; co
               >{node.value}</EntityToken>
             </span>
           </span>
-        )) : <span className="text-[#7b7d80]">{t("Relationship context unavailable", "Chưa có ngữ cảnh quan hệ")}</span>}
+        )) : <span className="text-muted">{t("Relationship context unavailable", "Chưa có ngữ cảnh quan hệ")}</span>}
       </div>
       {!compact && nodes.length > 1 && (
-        <p className="mt-3 max-w-4xl text-[10px] leading-4 text-[#7b7d80]">
+        <p className="mt-3 max-w-4xl text-[10px] leading-4 text-muted">
           {isPrincipalEpisode
             ? t(
               "The Caller Service used or forwarded this observed credential when calling the Target Service and API. Open a related Trace to confirm the exact request chain and credential propagation.",
@@ -469,41 +490,41 @@ export function EpisodeCard({ episode, onInvestigate, detailSearch = "", timezon
   const { t } = useI18n();
   const Icon = episode.subject.type === "user" ? UserRound : Boxes;
   return (
-    <article className="border-b border-[#2a2d30] bg-[#111217] p-4 transition hover:bg-[#181b1f]">
+    <article className="border-b border-line bg-surface p-4 transition hover:bg-hover">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-center gap-2">
             <EpisodeStatusBadge episode={episode} />
             <EpisodeWorkflowBadge episode={episode} />
             <SemanticAssessmentBadge assessment={episode.semantic_assessment} />
-            <span className="text-[10px] text-[#7b7d80]">{t("Last observed", "Quan sát gần nhất")} {formatEpisodeTime(episode.last_seen_at, true, timezone)}</span>
+            <span className="text-[10px] text-muted text-muted">{t("Last observed", "Quan sát gần nhất")} {formatEpisodeTime(episode.last_seen_at, true, timezone)}</span>
           </div>
-          <h3 className="mt-2 flex items-center gap-2 text-sm font-semibold text-[#d8d9da]"><Icon size={14} className="text-[#5794f2]" />{episodeTitle(episode, t)}</h3>
+          <h3 className="mt-2 flex items-center gap-2 text-sm font-semibold text-ink"><Icon size={14} className="text-accent" />{episodeTitle(episode, t)}</h3>
           <div className="mt-2"><EpisodePath episode={episode} compact /></div>
-          {episode.abnormality?.reasons?.[0] && <p className="mt-2 text-[11px] text-[#a7a9ab]">{episode.abnormality.reasons[0]}</p>}
+          {episode.abnormality?.reasons?.[0] && <p className="mt-2 text-[11px] text-muted">{episode.abnormality.reasons[0]}</p>}
           <SemanticAssessmentSummary episode={episode} />
         </div>
         <div className="flex shrink-0 gap-2">
           <EntityLink entity={{ kind: "change", id: episode.id }} search={detailSearch} className="btn h-7 px-2.5 text-[11px]">
             {t("View details", "Xem chi tiết")} <ArrowRight size={12} />
           </EntityLink>
-          {onInvestigate && <button type="button" onClick={onInvestigate} className="btn h-7 border-[#b877d9]/50 px-2.5 text-[11px] text-[#b877d9]">{t("Deep investigate", "Điều tra chuyên sâu")}</button>}
+          {onInvestigate && <button type="button" onClick={onInvestigate} className="btn h-7 border-entity-user/50 px-2.5 text-[11px] text-entity-user">{t("Deep investigate", "Điều tra chuyên sâu")}</button>}
         </div>
       </div>
       {episode.highlights.length > 0 && (
-        <div className="mt-3 grid gap-2 border-t border-[#2a2d30] pt-3 sm:grid-cols-2">
+        <div className="mt-3 grid gap-2 border-t border-line pt-3 sm:grid-cols-2">
           {episode.highlights.slice(0, 2).map((highlight) => (
-            <div key={`${highlight.label}-${String(highlight.after)}`} className="border-l-2 border-[#34373b] pl-2">
-              <div className="text-[10px] uppercase tracking-wide text-[#7b7d80]">{t(highlight.label, highlight.label)}</div>
-              <div className="mt-1 font-mono text-xs text-[#d8d9da]">{displayValue(highlight.before, highlight.unit)} <span className="text-[#7b7d80]">→</span> {displayValue(highlight.after, highlight.unit)}</div>
+            <div key={`${highlight.label}-${String(highlight.after)}`} className="border-l-2 border-line-strong pl-2">
+              <div className="text-[10px] uppercase tracking-wide text-muted">{t(highlight.label, highlight.label)}</div>
+              <div className="mt-1 font-mono text-xs text-ink">{displayValue(highlight.before, highlight.unit)} <span className="text-muted">→</span> {displayValue(highlight.after, highlight.unit)}</div>
               {highlight.before == null && highlight.after != null
-                ? <div className="mt-0.5 text-[10px] font-semibold uppercase text-[#5794f2]">{t("Added", "Mới xuất hiện")}</div>
-                : highlight.delta != null && <div className="mt-0.5 font-mono text-[10px] text-[#a7a9ab]">{Number(highlight.delta) >= 0 ? "+" : ""}{Number(highlight.delta).toFixed(1)}%</div>}
+                ? <div className="mt-0.5 text-[10px] font-semibold uppercase text-accent">{t("Added", "Mới xuất hiện")}</div>
+                : highlight.delta != null && <div className="mt-0.5 font-mono text-[10px] text-muted">{Number(highlight.delta) >= 0 ? "+" : ""}{Number(highlight.delta).toFixed(1)}%</div>}
             </div>
           ))}
         </div>
       )}
-      <div className="mt-3 flex flex-wrap items-center gap-3 text-[10px] text-[#7b7d80]">
+      <div className="mt-3 flex flex-wrap items-center gap-3 text-[10px] text-muted">
         <span>{episode.signal_count} {t("detected signals", "tín hiệu đã phát hiện")}</span>
       </div>
     </article>
@@ -513,13 +534,13 @@ export function EpisodeCard({ episode, onInvestigate, detailSearch = "", timezon
 export function EpisodeMetricTable({ episode }: { episode: Episode }) {
   const { t } = useI18n();
   const highlights = dedupeEpisodeHighlights(episode);
-  if (!highlights.length) return <div className="p-4 text-xs text-[#7b7d80]">{t("No metric comparison available", "Chưa có so sánh chỉ số")}</div>;
+  if (!highlights.length) return <div className="p-4 text-xs text-muted">{t("No metric comparison available", "Chưa có so sánh chỉ số")}</div>;
   return (
     <div className="overflow-x-auto">
       <table className="w-full min-w-[560px] text-left text-xs">
-        <thead><tr className="border-b border-[#2a2d30] text-[10px] uppercase tracking-wide text-[#7b7d80]"><th className="px-3 py-2">{t("Metric", "Chỉ số")}</th><th className="px-3 py-2">{t("Baseline", "Baseline")}</th><th className="px-3 py-2">{t("Observed", "Quan sát được")}</th><th className="px-3 py-2 text-right">{t("Difference", "Chênh lệch")}</th></tr></thead>
-        <tbody className="divide-y divide-[#2a2d30]">
-          {highlights.map((highlight) => <tr key={`${highlight.label}-${highlight.unit || ""}`}><td className="px-3 py-2 font-semibold text-[#d8d9da]">{t(highlight.label, highlight.label)}</td><td className="px-3 py-2 font-mono text-[#a7a9ab]">{displayValue(highlight.before, highlight.unit)}</td><td className="px-3 py-2 font-mono text-[#d8d9da]">{displayValue(highlight.after, highlight.unit)}{highlight.before == null && highlight.after != null && <span className="ml-2 text-[10px] font-sans font-semibold uppercase text-[#5794f2]">{t("Added", "Mới")}</span>}</td><td className="px-3 py-2 text-right font-mono text-[#a7a9ab]">{formatHighlightDelta(highlight, t)}</td></tr>)}
+        <thead><tr className="border-b border-line text-[10px] uppercase tracking-wide text-muted"><th className="px-3 py-2">{t("Metric", "Chỉ số")}</th><th className="px-3 py-2">{t("Baseline", "Baseline")}</th><th className="px-3 py-2">{t("Observed", "Quan sát được")}</th><th className="px-3 py-2 text-right">{t("Difference", "Chênh lệch")}</th></tr></thead>
+        <tbody className="divide-y divide-line">
+          {highlights.map((highlight) => <tr key={`${highlight.label}-${highlight.unit || ""}`}><td className="px-3 py-2 font-semibold text-ink">{t(highlight.label, highlight.label)}</td><td className="px-3 py-2 font-mono text-muted">{displayValue(highlight.before, highlight.unit)}</td><td className="px-3 py-2 font-mono text-ink">{displayValue(highlight.after, highlight.unit)}{highlight.before == null && highlight.after != null && <span className="ml-2 text-[10px] font-sans font-semibold uppercase text-accent">{t("Added", "Mới")}</span>}</td><td className="px-3 py-2 text-right font-mono text-muted">{formatHighlightDelta(highlight, t)}</td></tr>)}
         </tbody>
       </table>
     </div>
@@ -530,8 +551,8 @@ export function EpisodeTimeline({ episode, timezone = "local" }: { episode: Epis
   const { t } = useI18n();
   const timeline = episode.timeline || (episode.signals || []).map((signal) => ({ at: signal.detected_at, type: signal.type, source: signal.source }));
   return (
-    <div className="divide-y divide-[#2a2d30]">
-      {timeline.length ? timeline.map((item, index) => <div key={`${item.type}-${item.at}-${index}`} className="flex items-center gap-3 px-3 py-2.5 text-[11px]"><span className="w-32 shrink-0 font-mono text-[#7b7d80]">{formatEpisodeTime(item.at, true, timezone)}</span><span className="h-1.5 w-1.5 rounded-full bg-[#5794f2]" /><span className="text-[#d8d9da]">{changeTypeLabel(item.type, t)}</span><span className="ml-auto text-[10px] uppercase text-[#7b7d80]">{item.source}</span></div>) : <div className="p-4 text-xs text-[#7b7d80]">{t("No timeline evidence available", "Chưa có bằng chứng dòng thời gian")}</div>}
+    <div className="divide-y divide-line">
+      {timeline.length ? timeline.map((item, index) => <div key={`${item.type}-${item.at}-${index}`} className="flex items-center gap-3 px-3 py-2.5 text-[11px]"><span className="w-32 shrink-0 font-mono text-muted">{formatEpisodeTime(item.at, true, timezone)}</span><span className="h-1.5 w-1.5 rounded-full bg-accent" /><span className="text-ink">{changeTypeLabel(item.type, t)}</span><span className="ml-auto text-[10px] uppercase text-muted">{item.source}</span></div>) : <div className="p-4 text-xs text-muted">{t("No timeline evidence available", "Chưa có bằng chứng dòng thời gian")}</div>}
     </div>
   );
 }
@@ -539,13 +560,13 @@ export function EpisodeTimeline({ episode, timezone = "local" }: { episode: Epis
 export function EpisodeEvidence({ episode }: { episode: Episode }) {
   const { t } = useI18n();
   return (
-    <div className="divide-y divide-[#2a2d30]">
-      {episode.evidence.length ? episode.evidence.map((item) => <div key={`${item.detector}-${item.label}`} className="flex gap-2.5 p-3"><CircleDot size={14} className="mt-0.5 shrink-0 text-[#5794f2]" /><div className="min-w-0"><div className="text-xs font-semibold text-[#d8d9da]">{changeTypeLabel(item.detector, t)}</div><div className="mt-1 text-[11px] text-[#a7a9ab]">{item.detail}</div><details className="mt-1"><summary className="cursor-pointer text-[10px] text-[#7b7d80]">{t("Technical detector detail", "Chi tiết detector kỹ thuật")}</summary><div className="mt-1 font-mono text-[10px] text-[#7b7d80]">{item.detector}</div></details></div></div>) : <div className="p-4 text-xs text-[#7b7d80]">{t("No evidence available", "Chưa có bằng chứng")}</div>}
+    <div className="divide-y divide-line">
+      {episode.evidence.length ? episode.evidence.map((item) => <div key={`${item.detector}-${item.label}`} className="flex gap-2.5 p-3"><CircleDot size={14} className="mt-0.5 shrink-0 text-accent" /><div className="min-w-0"><div className="text-xs font-semibold text-ink">{changeTypeLabel(item.detector, t)}</div><div className="mt-1 text-[11px] text-muted">{item.detail}</div><details className="mt-1"><summary className="cursor-pointer text-[10px] text-muted">{t("Technical detector detail", "Chi tiết detector kỹ thuật")}</summary><div className="mt-1 font-mono text-[10px] text-muted">{item.detector}</div></details></div></div>) : <div className="p-4 text-xs text-muted">{t("No evidence available", "Chưa có bằng chứng")}</div>}
     </div>
   );
 }
 
 export function EpisodeBaselineNote({ episode }: { episode: Episode }) {
   const { t } = useI18n();
-  return <div className="border border-[#34373b] bg-[#181b1f] p-3 text-[11px] text-[#a7a9ab]"><span className="font-semibold text-[#d8d9da]">{t("Baseline context", "Ngữ cảnh baseline")}: </span>{episode.explanation || t("Compared with the established operating pattern.", "So với mô hình vận hành đã thiết lập.")}</div>;
+  return <div className="border border-line-strong bg-surface-2 p-3 text-[11px] text-muted"><span className="font-semibold text-ink">{t("Baseline context", "Ngữ cảnh baseline")}: </span>{episode.explanation || t("Compared with the established operating pattern.", "So với mô hình vận hành đã thiết lập.")}</div>;
 }

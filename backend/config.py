@@ -13,12 +13,17 @@ import time
 from datetime import datetime
 
 
+from dotenv import load_dotenv
+
+load_dotenv(Path(__file__).resolve().parent.parent / ".env")
+
+
 def _detect_clickhouse_host() -> str:
     env_host = os.getenv("OTEL_CLICKHOUSE_HOST")
     if env_host:
         return env_host
     import socket
-    for candidate in ("127.0.0.1", "10.98.6.4", "10.105.101.253", "10.244.0.118"):
+    for candidate in ("127.0.0.1", "10.98.4.14", "10.98.6.4", "10.105.101.253", "10.244.0.118"):
         try:
             with socket.create_connection((candidate, 8123), timeout=0.2):
                 return candidate
@@ -214,9 +219,25 @@ class Settings:
     # 300 restores the former fixed one-window lag.
     behavior_learn_grace_seconds: int = max(30, min(300, int(os.getenv("OTEL_BEHAVIOR_LEARN_GRACE_SECONDS", "90"))))
 
+    # Caller resolution for OTLP traces already stored in ClickHouse (see
+    # backend/app/services/trace_edge_resolution.py). ``auto`` enables it in the
+    # direct ``clickhouse`` pipeline, where no APM server resolves callers.
+    trace_edge_resolution: str = os.getenv("OTEL_TRACE_EDGE_RESOLUTION", "auto").strip().lower()
+    # Operator map for callers that propagate no trace context: "10.1.2.3=billing,10.9.0.0/24=batch".
+    service_ip_map: str = os.getenv("OTEL_SERVICE_IP_MAP", "")
+    trace_edge_skew_ms: float = float(os.getenv("OTEL_TRACE_EDGE_SKEW_MS", "250") or 250)
+
     semantic_batch_size: int = int(os.getenv("OTEL_SEMANTIC_BATCH_SIZE", "2"))
     semantic_budget_seconds: int = int(os.getenv("OTEL_SEMANTIC_BUDGET_SECONDS", "20"))
     semantic_retry_seconds: int = int(os.getenv("OTEL_SEMANTIC_RETRY_SECONDS", "900"))
+
+    @property
+    def trace_edge_resolution_enabled(self) -> bool:
+        if self.trace_edge_resolution in ("true", "1", "yes", "on"):
+            return True
+        if self.trace_edge_resolution in ("false", "0", "no", "off"):
+            return False
+        return self.trace_pipeline_mode == "clickhouse"
 
     @property
     def worker_start_time_ms(self) -> int | None:

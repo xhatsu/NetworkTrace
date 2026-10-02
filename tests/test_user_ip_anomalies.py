@@ -14,6 +14,7 @@ from backend.app.repositories.anomaly_repository import AnomalyRepository
 from backend.app.repositories.db_context import get_connection
 from backend.app.services.aggregation import aggregate_traces
 from backend.app.services.anomaly_detection import detect_anomalies
+from backend.app.services.principal_activity import materialize_principal_activity
 from backend.app.services.principal_relationships import process_principal_intelligence
 from backend.repository import StorageRepository
 
@@ -396,6 +397,8 @@ def test_existing_user_only_behavior_preserved():
         created_at=now,
     )
     trace_repo.insert_traces([t])
+    # User behavior reads the activity rollup the worker builds from raw traces.
+    materialize_principal_activity(now, now + 1)
     process_principal_intelligence()
     with get_connection() as db:
         change = db.execute(

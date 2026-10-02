@@ -320,6 +320,7 @@ async def filters_model(
     service: str | None = None,
     operation: str | None = None,
     account: str | None = None,
+    caller: str | None = None,
     comparison: str = "previous",
 ) -> QueryFilters:
     now_dt = datetime.now(dt_timezone.utc)
@@ -348,6 +349,7 @@ async def filters_model(
         service=service,
         operation=operation,
         account=account,
+        caller=caller,
         comparison=comp_val,
     )
 
@@ -365,6 +367,7 @@ def filter_dict(f: QueryFilters) -> dict[str, str | None]:
             "service",
             "operation",
             "account",
+            "caller",
             "comparison",
         )
     }

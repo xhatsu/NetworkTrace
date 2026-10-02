@@ -1368,10 +1368,10 @@ export function LanguageSwitcher() {
       type="button"
       onClick={toggleLang}
       title={lang === "vi" ? "Chuyển sang Tiếng Anh (Switch to English)" : "Switch to Vietnamese (Chuyển sang Tiếng Việt)"}
-      className="flex items-center gap-1.5 rounded-lg border border-[#262838] bg-[#141622] px-2.5 py-1 text-xs font-bold text-white transition hover:border-cyan-400/60 hover:bg-[#1a1d2e] focus:outline-none"
+      className="flex items-center gap-1.5 rounded border border-line bg-surface px-2.5 py-1 text-xs font-bold text-ink transition hover:border-line-strong hover:bg-hover focus:outline-none"
     >
       <span className="text-sm leading-none">{lang === "vi" ? "🇻🇳" : "🇬🇧"}</span>
-      <span className="font-mono text-[11px] font-bold uppercase tracking-wider text-cyan-300">
+      <span className="font-mono text-[11px] font-bold uppercase tracking-wider text-accent">
         {lang === "vi" ? "VI" : "EN"}
       </span>
     </button>

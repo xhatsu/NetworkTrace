@@ -336,11 +336,11 @@ def compute_domain_metrics_snapshot(db_path=None) -> Dict[str, Any]:
 
     try:
         with get_connection(db_path) as conn:
-            t_row = conn.execute("SELECT count() FROM traces").fetchone()
+            t_row = conn.execute("SELECT sum(request_count) FROM metric_buckets FINAL WHERE bucket_size = 60").fetchone()
             total_spans = int(t_row[0]) if (t_row and t_row[0] is not None) else 0
 
             n_rows = conn.execute(
-                "SELECT DISTINCT service_instance AS node FROM traces WHERE service_instance IS NOT NULL LIMIT 50"
+                "SELECT DISTINCT target_service AS node FROM metric_buckets FINAL WHERE bucket_size = 300 AND target_service != '' LIMIT 50"
             ).fetchall()
             nodes_rows = [str(r[0]) for r in n_rows if r and r[0]] if n_rows else []
             nodes_reporting = max(1, len(nodes_rows))

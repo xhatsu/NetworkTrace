@@ -2,6 +2,7 @@ apiVersion: v1
 kind: ConfigMap
 metadata:
   name: {{ include "tracescope.fullname" . }}-config
+  namespace: {{ .Release.Namespace }}
   labels:
     {{- include "tracescope.labels" . | nindent 4 }}
 data:
@@ -13,6 +14,9 @@ data:
   OTEL_CLICKHOUSE_SECURE: {{ .Values.clickhouse.secure | quote }}
   OTEL_TRACE_PIPELINE_MODE: {{ default "elk_to_clickhouse" .Values.storage.pipelineMode | quote }}
   OTEL_STORAGE_BACKEND: {{ default "clickhouse" .Values.storage.backend | quote }}
+  OTEL_TRACE_EDGE_RESOLUTION: {{ default "auto" .Values.storage.traceEdge.resolution | quote }}
+  OTEL_TRACE_EDGE_SKEW_MS: {{ default 250 .Values.storage.traceEdge.skewMs | quote }}
+  OTEL_SERVICE_IP_MAP: {{ default "" .Values.storage.traceEdge.ipMap | quote }}
   OTEL_TRACE_STORAGE_BACKEND: "clickhouse"
   OTEL_CLICKHOUSE_ONLY_AGENT_TRACES: {{ .Values.storage.clickhouseOnlyAgentTraces | quote }}
   OTEL_ES_SYNC_ENABLED: {{ .Values.elasticsearch.syncEnabled | quote }}
@@ -55,5 +59,5 @@ data:
   OTEL_SEMANTIC_BUDGET_SECONDS: {{ default 20 (default dict .Values.semantic).budgetSeconds | quote }}
   OTEL_SEMANTIC_RETRY_SECONDS: {{ default 900 (default dict .Values.semantic).retrySeconds | quote }}
 
-  OTEL_BEHAVIOR_LEARNING_ENABLED: {{ default false (default dict .Values.behavior).enabled | quote }}
+  OTEL_BEHAVIOR_LEARNING_ENABLED: {{ default true (default dict .Values.behavior).enabled | quote }}
   OTEL_BEHAVIOR_BUDGET_SECONDS: {{ default 20 (default dict .Values.behavior).budgetSeconds | quote }}

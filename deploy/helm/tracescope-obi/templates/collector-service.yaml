@@ -1,0 +1,31 @@
+{{- if .Values.collector.enabled }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "tracescope-obi.collectorName" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "tracescope-obi.labels" . | nindent 4 }}
+    app.kubernetes.io/name: tracescope-obi-collector
+spec:
+  type: {{ (default dict .Values.collector.service).type | default "ClusterIP" }}
+  selector:
+    app.kubernetes.io/name: tracescope-obi-collector
+    app.kubernetes.io/instance: {{ .Release.Name }}
+  ports:
+    - name: otlp-grpc
+      port: 4317
+      targetPort: 4317
+      {{- if and (eq ((default dict .Values.collector.service).type | default "ClusterIP") "NodePort") (default dict .Values.collector.service).nodePortGrpc }}
+      nodePort: {{ .Values.collector.service.nodePortGrpc }}
+      {{- end }}
+    - name: otlp-http
+      port: 4318
+      targetPort: 4318
+      {{- if and (eq ((default dict .Values.collector.service).type | default "ClusterIP") "NodePort") (default dict .Values.collector.service).nodePortHttp }}
+      nodePort: {{ .Values.collector.service.nodePortHttp }}
+      {{- end }}
+    - name: metrics
+      port: 8888
+      targetPort: 8888
+{{- end }}

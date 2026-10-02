@@ -8,6 +8,7 @@ export type Filters = {
   service?: string;
   operation?: string;
   account?: string;
+  caller?: string;
   comparison: string;
 };
 export type Summary = {

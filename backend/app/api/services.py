@@ -106,7 +106,7 @@ def list_services(
               ROUND(MAX(latency_p95), 2) as p95_latency,
               COUNT(DISTINCT operation) as operations_count,
               COUNT(DISTINCT principal_name) as principal_count
-            FROM metric_buckets
+            FROM metric_buckets FINAL
             WHERE bucket_size = 60 AND bucket_start >= ? AND bucket_start < ?
         """
         params: List[Any] = [start_sec, end_sec]
@@ -141,6 +141,59 @@ def list_services(
                 r["anomaly_status"] = "normal"
         return {"items": rows, "count": len(rows)}
 
+
+ANONYMOUS_PRINCIPALS = ("", "-anonymous-", "unknown", "anonymous")
+
+
+@router.get("/apis")
+def list_apis(
+    from_time: Optional[int] = Query(None, alias="from"),
+    to_time: Optional[int] = Query(None, alias="to"),
+    q: Optional[str] = None,
+    service: Optional[str] = None,
+    limit: int = Query(1000, ge=1, le=5000),
+) -> Dict[str, Any]:
+    """API inventory across every Service, read from worker metric buckets only."""
+    start_sec, end_sec = _time_window(from_time, to_time)
+    time_span = max(1, end_sec - start_sec)
+    query = """
+        SELECT
+          target_service AS service,
+          operation AS name,
+          SUM(request_count) AS total_requests,
+          SUM(error_count) AS total_errors,
+          ROUND(SUM(error_count)*1.0 / NULLIF(SUM(request_count),0), 4) AS error_rate,
+          ROUND(MAX(latency_p95), 2) AS p95_latency,
+          uniqExactIf(caller_service, caller_service != '') AS caller_count,
+          uniqExactIf(principal_name, NOT has(?, principal_name)) AS principal_count,
+          MIN(bucket_start) * 1000 AS first_seen_ms,
+          (MAX(bucket_start) + 60) * 1000 AS last_seen_ms
+        FROM metric_buckets FINAL
+        WHERE bucket_size = 60 AND bucket_start >= ? AND bucket_start < ? AND operation != ''
+    """
+    params: List[Any] = [list(ANONYMOUS_PRINCIPALS), start_sec, end_sec]
+    if service:
+        query += " AND target_service = ?"
+        params.append(service)
+    if q:
+        query += " AND (operation ILIKE ? OR target_service ILIKE ?)"
+        params.extend([f"%{q}%", f"%{q}%"])
+    query += " GROUP BY target_service, operation ORDER BY total_requests DESC LIMIT ?"
+    params.append(limit)
+
+    with get_connection() as db:
+        rows = [dict(r) for r in db.execute(query, params).fetchall()]
+        abnormal = {
+            (r[0], r[1]) for r in db.execute(
+                "SELECT target_service, operation FROM anomaly_events FINAL "
+                "WHERE status = 'open' AND target_service IS NOT NULL AND operation IS NOT NULL"
+            ).fetchall()
+        }
+    for r in rows:
+        r["rps"] = round((r["total_requests"] or 0) / time_span, 4)
+        r["anomaly_status"] = "abnormal" if (r["service"], r["name"]) in abnormal else "normal"
+    return {"items": rows, "count": len(rows), "limit": limit}
+
 @router.get("/services/{service}")
 def get_service_detail(
     service: str,
@@ -160,7 +213,7 @@ def get_service_detail(
               ROUND(SUM(error_count)*1.0 / NULLIF(SUM(request_count),0), 4) as error_rate,
               ROUND(MAX(latency_p95), 2) as p95_latency,
               ROUND(AVG(latency_avg), 2) as avg_latency
-            FROM metric_buckets
+            FROM metric_buckets FINAL
             WHERE target_service = ? AND bucket_size = 60 AND bucket_start >= ? AND bucket_start < ?
         """, (service, start_sec, end_sec)).fetchone()
 
@@ -179,7 +232,7 @@ def get_service_detail(
                    ROUND(MAX(latency_p95), 2) as p95_ms,
                    ROUND(MAX(latency_p99), 2) as p99_ms,
                    ROUND(MAX(latency_p95), 2) as p95_latency
-            FROM metric_buckets
+            FROM metric_buckets FINAL
             WHERE target_service = ? AND bucket_size = 60 AND bucket_start >= ? AND bucket_start < ?
             GROUP BY operation ORDER BY requests DESC
         """, (service, start_sec, end_sec)).fetchall()]
@@ -201,7 +254,7 @@ def get_service_detail(
             SELECT principal_name as name, SUM(request_count) as requests,
                    ROUND(SUM(error_count)*1.0 / NULLIF(SUM(request_count),0), 4) as error_rate,
                    ROUND(MAX(latency_p95), 2) as p95_latency
-            FROM metric_buckets
+            FROM metric_buckets FINAL
             WHERE target_service = ? AND bucket_size = 60 AND bucket_start >= ? AND bucket_start < ?
               AND principal_name != ''
             GROUP BY principal_name ORDER BY requests DESC

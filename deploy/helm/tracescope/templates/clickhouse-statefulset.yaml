@@ -3,6 +3,7 @@ apiVersion: apps/v1
 kind: StatefulSet
 metadata:
   name: {{ include "tracescope.fullname" . }}-clickhouse
+  namespace: {{ .Release.Namespace }}
   labels:
     {{- include "tracescope.labels" . | nindent 4 }}
     app.kubernetes.io/component: clickhouse
@@ -83,6 +84,10 @@ spec:
               mountPath: /var/lib/clickhouse
       volumes:
         - name: data
+          {{- if .Values.clickhouse.persistence.enabled }}
           persistentVolumeClaim:
             claimName: {{ include "tracescope.fullname" . }}-clickhouse-data
+          {{- else }}
+          emptyDir: {}
+          {{- end }}
 {{- end }}

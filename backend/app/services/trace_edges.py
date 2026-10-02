@@ -229,11 +229,18 @@ def resolve(
     targets: Optional[Iterable[str]] = None,
     ip_map: Optional[List[Tuple[Any, str]]] = None,
     skew_us: int = DEFAULT_SKEW_US,
+    exit_clients: bool = False,
 ) -> ResolvedSlice:
     """Resolve callers for server transactions and root client documents.
 
     ``targets`` limits which document IDs receive resolutions; other documents
     only provide context (for example spans just before the slice).
+
+    With ``exit_clients`` a client span made in the middle of a request (it has a
+    parent) is treated like a root client: skipped when the callee's server span
+    already counts the call, otherwise recorded as ``caller -> peer``
+    (``client_exit``). Callers that store every span as a row (OTLP in ClickHouse)
+    need this; the ELK path aggregates transactions only and leaves it off.
     """
     by_trace: Dict[str, List[TraceDoc]] = {}
     for doc in docs:
@@ -242,7 +249,7 @@ def resolve(
     result = ResolvedSlice()
     stats = {key: 0 for key in (
         "trace_parent", "trace_intermediary", "trace_peer_match", "network_ip", "time_correlated",
-        "explicit", "unresolved", "client_skipped", "client_retargeted",
+        "explicit", "unresolved", "client_skipped", "client_retargeted", "client_exit",
     )}
     pending: List[TraceDoc] = []
     learned: Dict[str, set] = {}
@@ -347,17 +354,24 @@ def resolve(
 
     for docs_ in by_trace.values():
         for client in docs_:
-            if not client.root_client or not client.peer or (wanted is not None and client.doc_id not in wanted):
+            if client.kind != "client" or not client.peer or (wanted is not None and client.doc_id not in wanted):
+                continue
+            if not client.root_client and not exit_clients:
                 continue
             if client.doc_id in used:
                 # The callee's server transaction already counts this request.
                 result.resolutions[client.doc_id] = Resolution(skip=True, method="client_skipped")
                 stats["client_skipped"] += 1
+            elif not client.root_client and normalize_peer(client.service) == client.peer:
+                # A service calling itself through its own address is not an edge.
+                result.resolutions[client.doc_id] = Resolution(skip=True, method="client_skipped")
+                stats["client_skipped"] += 1
             else:
                 # Only record of a call into an uninstrumented service.
+                method = "client_retargeted" if client.root_client else "client_exit"
                 result.resolutions[client.doc_id] = Resolution(
-                    client.service, "client_retargeted", target=display(client),
+                    client.service, method, target=display(client),
                 )
-                stats["client_retargeted"] += 1
+                stats[method] += 1
     result.stats = stats
     return result

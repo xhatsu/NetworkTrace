@@ -78,6 +78,60 @@ def learned_topology_detail(object_id: str=Query(...,min_length=64,max_length=64
             'backend':'learned_graph','version':graph['version']}
 
 
+@router.get('/access')
+def access_map(view: Literal['flow','matrix','lists']='flow',
+               source: Literal['legacy_metrics']='legacy_metrics',
+               environment: str=Query('',max_length=200),
+               focus_type: Literal['service','api','credential','caller','ip']='service',
+               focus: str=Query('',max_length=500),
+               service: str=Query('',max_length=200), api: str=Query('',max_length=500),
+               credential: str=Query('',max_length=200), caller: str=Query('',max_length=200),
+               ip: str=Query('',max_length=64),
+               top: int=Query(12,ge=1,le=50), basis: Literal['observed','baseline']='observed',
+               window_minutes: int=Query(60,ge=5,le=1440),
+               ip_role: str=Query('',max_length=32), ip_offset: int=Query(0,ge=0,le=100000), ip_limit: int=Query(12,ge=1,le=100),
+               order: Literal['similarity','traffic']='similarity',
+               row_offset: int=Query(0,ge=0,le=100000), row_limit: int=Query(50,ge=1,le=200),
+               col_offset: int=Query(0,ge=0,le=100000), col_limit: int=Query(50,ge=1,le=200),
+               q_caller: str=Query('',max_length=200), q_credential: str=Query('',max_length=200), q_api: str=Query('',max_length=500),
+               q_service: str=Query('',max_length=200),
+               caller_offset: int=Query(0,ge=0,le=100000), credential_offset: int=Query(0,ge=0,le=100000), api_offset: int=Query(0,ge=0,le=100000),
+               service_offset: int=Query(0,ge=0,le=100000),
+               scope: Literal['service','credential']='service',
+               limit: int=Query(100,ge=1,le=200), sort: Literal['tps','name']='tps',
+               select_type: Literal['','caller','credential','service','api']='', select: str=Query('',max_length=500),
+               repo=Depends(repository)):
+    """Learned graph joined with current-window observation state for Sankey/matrix views.
+
+    Reads only the persisted learned-graph snapshot and profile/deviation read models.
+    """
+    from backend.app.services.behavior_access import project_flow, project_lists, project_matrix
+    from backend.app.services.behavior_topology import project_topology
+    graph=repo.graph_state(source)
+    environment=environment or (project_topology(graph,'')['environment'] if graph else '')
+    profiles=repo.items('profiles',source) if graph else []
+    deviations=repo.items('deviations',source) if graph else []
+    if view=='lists':
+        # scope=service: `service` is the Service being explored; scope=credential: `credential` is the user
+        # being explored across Services and `service` is an ordinary column filter.
+        if scope=='service' and not service:raise HTTPException(422,'service is required for the lists view')
+        if scope=='credential' and not credential:raise HTTPException(422,'credential is required for credential scope')
+        result=project_lists(graph,profiles,deviations,environment,service,
+            {'caller':caller,'credential':credential,'service':service,'api':api},window_minutes,basis,
+            {'caller':q_caller,'credential':q_credential,'service':q_service,'api':q_api},
+            {'caller':caller_offset,'credential':credential_offset,'service':service_offset,'api':api_offset},
+            limit,sort,select_type,select,scope=scope)
+    elif view=='matrix':
+        result=project_matrix(graph,profiles,deviations,environment,service,order,basis,row_offset,row_limit,col_offset,col_limit,window_minutes)
+    else:
+        if not focus:raise HTTPException(422,'focus is required for the flow view')
+        result=project_flow(graph,profiles,deviations,environment,focus_type,focus,
+            {'service':service,'api':api,'credential':credential,'caller':caller,'ip':ip},
+            top,window_minutes,basis,ip_role,ip_offset,ip_limit)
+    result['source']=source
+    return result
+
+
 @router.get('/graph')
 def graph_view(source: Literal['legacy_metrics']='legacy_metrics',
                q: str=Query('',max_length=200), node: str=Query('',max_length=64),

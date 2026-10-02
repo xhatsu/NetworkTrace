@@ -74,16 +74,16 @@ export function PrincipalsPage() {
       actions={
         <div className="flex items-center gap-2">
           <div className="relative">
-            <Search className="absolute left-2.5 top-2 text-[#9e96b8]" size={13} />
+            <Search className="absolute left-2.5 top-2 text-muted" size={13} />
             <input
               type="text"
               placeholder="Search principals..."
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
-              className="h-8 rounded-lg border border-[rgba(255,255,255,0.14)] bg-white/[0.04] pl-8 pr-3 text-xs text-[#f5f3fa] placeholder:text-[#9e96b8] focus:border-violet-400 focus:outline-none"
+              className="h-8 rounded-lg border border-line bg-surface-2 pl-8 pr-3 text-xs text-ink placeholder:text-muted focus:border-accent focus:outline-none"
             />
           </div>
-          <div className="chip font-mono text-[10px] text-emerald-300 border-emerald-500/30">
+          <div className="chip font-mono text-[10px] text-good border-good/30">
             <span>In-Memory Sanitized</span>
           </div>
         </div>
@@ -101,7 +101,7 @@ export function PrincipalsPage() {
           <div className="overflow-auto scrollbar">
             <table className="w-full min-w-[900px] text-left">
               <thead>
-                <tr className="border-b border-[rgba(255,255,255,0.12)] bg-white/[0.02] text-[11px] font-semibold uppercase tracking-wider text-[#9e96b8]">
+                <tr className="border-b border-line bg-surface-2 text-[11px] font-semibold uppercase tracking-wider text-muted">
                   <th className="px-4 py-3">Principal Name</th>
                   <th className="px-4 py-3 text-right">Total Requests</th>
                   <th className="px-4 py-3 text-right">Error Rate</th>
@@ -111,40 +111,40 @@ export function PrincipalsPage() {
                   <th className="px-4 py-3 text-right">Action</th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-[rgba(255,255,255,0.08)] text-xs">
+              <tbody className="divide-y divide-line text-xs">
                 {filteredItems.map((p) => (
                   <tr
                     key={p.principal_name}
                     onClick={() => nav(`/principals/${encodeURIComponent(p.principal_name)}?${queryString(filters)}`)}
-                    className="cursor-pointer transition hover:bg-white/[0.05]"
+                    className="cursor-pointer transition hover:bg-hover"
                   >
-                    <td className="px-4 py-3 font-medium text-[#f5f3fa]">
+                    <td className="px-4 py-3 font-medium text-ink">
                       <div className="flex items-center gap-2">
-                        <div className="grid h-7 w-7 place-items-center rounded bg-violet-500/15 text-violet-300">
+                        <div className="grid h-7 w-7 place-items-center rounded bg-accent/15 text-entity-user">
                           <KeyRound size={13} />
                         </div>
-                        <span className="font-mono text-violet-300 font-medium">{p.principal_name}</span>
+                        <span className="font-mono text-entity-user font-medium">{p.principal_name}</span>
                       </div>
                     </td>
-                    <td className="px-4 py-3 text-right font-mono text-[#f5f3fa]">
+                    <td className="px-4 py-3 text-right font-mono text-ink">
                       {n(p.total_requests)}
                     </td>
                     <td className="px-4 py-3 text-right font-mono">
-                      <span className={p.error_rate > 0.05 ? "text-rose-300 font-semibold" : p.error_rate > 0 ? "text-amber-300 font-medium" : "text-emerald-300"}>
+                      <span className={p.error_rate > 0.05 ? "text-bad font-semibold" : p.error_rate > 0 ? "text-warn font-medium" : "text-good"}>
                         {pct(p.error_rate)}
                       </span>
                     </td>
-                    <td className="px-4 py-3 text-right font-mono text-[#c4bdd9]">
+                    <td className="px-4 py-3 text-right font-mono text-muted">
                       {Number(p.p95_latency || 0).toFixed(1)} ms
                     </td>
-                    <td className="px-4 py-3 text-right font-mono text-[#c4bdd9]">
+                    <td className="px-4 py-3 text-right font-mono text-muted">
                       {p.target_count || 1}
                     </td>
-                    <td className="px-4 py-3 text-right font-mono text-[#c4bdd9]">
+                    <td className="px-4 py-3 text-right font-mono text-muted">
                       {p.operation_count || 1}
                     </td>
                     <td className="px-4 py-3 text-right">
-                      <span className="inline-flex items-center gap-1 text-[11px] text-violet-300 hover:text-white">
+                      <span className="inline-flex items-center gap-1 text-[11px] text-entity-user hover:text-ink">
                         View Profile <ExternalLink size={11} />
                       </span>
                     </td>
@@ -152,7 +152,7 @@ export function PrincipalsPage() {
                 ))}
                 {filteredItems.length === 0 && (
                   <tr>
-                    <td colSpan={7} className="px-4 py-8 text-center text-xs text-[#c4bdd9]">
+                    <td colSpan={7} className="px-4 py-8 text-center text-xs text-muted">
                       No principals found matching query.
                     </td>
                   </tr>
@@ -254,16 +254,16 @@ export function PrincipalDetailPage() {
           <div className="h-44 w-full">
             <ResponsiveContainer width="100%" height="100%">
               <BarChart data={hourlyProfile} margin={{ top: 8, right: 12, left: -16, bottom: 0 }}>
-                <CartesianGrid stroke="rgba(255,255,255,0.04)" vertical={false} />
+                <CartesianGrid stroke="var(--grid)" vertical={false} />
                 <XAxis
                   dataKey="hour_of_day"
-                  stroke="#484f58"
+                  stroke="var(--text-muted)"
                   fontSize={10}
                   tickFormatter={(h) => `${String(h).padStart(2, "0")}:00`}
                 />
-                <YAxis stroke="#484f58" fontSize={10} />
+                <YAxis stroke="var(--text-muted)" fontSize={10} />
                 <Tooltip {...chartTooltip} />
-                <Bar dataKey="requests" name="Requests" fill="#6366f1" radius={[3, 3, 0, 0]} />
+                <Bar dataKey="requests" name="Requests" fill="var(--accent)" radius={[3, 3, 0, 0]} />
               </BarChart>
             </ResponsiveContainer>
           </div>
@@ -279,7 +279,7 @@ export function PrincipalDetailPage() {
           <div className="overflow-auto scrollbar">
             <table className="w-full text-left text-xs">
               <thead>
-                <tr className="border-b border-[rgba(255,255,255,0.06)] text-[10px] font-semibold uppercase tracking-wider text-[#8b949e]">
+                <tr className="border-b border-[rgba(255,255,255,0.06)] text-[10px] font-semibold uppercase tracking-wider text-muted">
                   <th className="pb-2">Service</th>
                   <th className="pb-2 text-right">Requests</th>
                   <th className="pb-2 text-right">Error Rate</th>
@@ -293,14 +293,14 @@ export function PrincipalDetailPage() {
                     onClick={() => nav(entityPath({ kind: "service", name: t.target_service }) + `?${queryString(filters)}`)}
                     className="cursor-pointer hover:bg-white/[0.03]"
                   >
-                    <td className="py-2.5 font-mono text-indigo-300"><EntityLink entity={{ kind: "service", name: t.target_service }} search={`?${queryString(filters)}`} className="hover:underline">{t.target_service}</EntityLink></td>
-                    <td className="py-2.5 text-right font-mono text-[#c9d1d9]">{n(t.requests)}</td>
+                    <td className="py-2.5 font-mono text-entity-user"><EntityLink entity={{ kind: "service", name: t.target_service }} search={`?${queryString(filters)}`} className="hover:underline">{t.target_service}</EntityLink></td>
+                    <td className="py-2.5 text-right font-mono text-ink">{n(t.requests)}</td>
                     <td className="py-2.5 text-right font-mono">
-                      <span className={t.error_rate > 0.05 ? "text-rose-400" : "text-emerald-400"}>
+                      <span className={t.error_rate > 0.05 ? "text-bad" : "text-good"}>
                         {pct(t.error_rate)}
                       </span>
                     </td>
-                    <td className="py-2.5 text-right font-mono text-[#8b949e]">{Number(t.p95_latency || 0).toFixed(1)} ms</td>
+                    <td className="py-2.5 text-right font-mono text-muted">{Number(t.p95_latency || 0).toFixed(1)} ms</td>
                   </tr>
                 ))}
               </tbody>
@@ -315,7 +315,7 @@ export function PrincipalDetailPage() {
           <div className="overflow-auto scrollbar">
             <table className="w-full text-left text-xs">
               <thead>
-                <tr className="border-b border-[rgba(255,255,255,0.06)] text-[10px] font-semibold uppercase tracking-wider text-[#8b949e]">
+                <tr className="border-b border-[rgba(255,255,255,0.06)] text-[10px] font-semibold uppercase tracking-wider text-muted">
                   <th className="pb-2">Operation</th>
                   <th className="pb-2 text-right">Requests</th>
                   <th className="pb-2 text-right">Error Rate</th>
@@ -325,14 +325,14 @@ export function PrincipalDetailPage() {
               <tbody className="divide-y divide-[rgba(255,255,255,0.04)]">
                 {operations.map((o) => (
                   <tr key={o.operation} className="hover:bg-white/[0.03]">
-                    <td className="py-2.5 font-mono text-[#f0f3f6]">{o.operation}</td>
-                    <td className="py-2.5 text-right font-mono text-[#c9d1d9]">{n(o.requests)}</td>
+                    <td className="py-2.5 font-mono text-ink">{o.operation}</td>
+                    <td className="py-2.5 text-right font-mono text-ink">{n(o.requests)}</td>
                     <td className="py-2.5 text-right font-mono">
-                      <span className={o.error_rate > 0.05 ? "text-rose-400" : "text-emerald-400"}>
+                      <span className={o.error_rate > 0.05 ? "text-bad" : "text-good"}>
                         {pct(o.error_rate)}
                       </span>
                     </td>
-                    <td className="py-2.5 text-right font-mono text-[#8b949e]">{Number(o.p95_latency || 0).toFixed(1)} ms</td>
+                    <td className="py-2.5 text-right font-mono text-muted">{Number(o.p95_latency || 0).toFixed(1)} ms</td>
                   </tr>
                 ))}
               </tbody>
@@ -351,11 +351,11 @@ export function PrincipalDetailPage() {
             {callers.map((c) => (
               <div
                 key={c.caller_service}
-                className="flex items-center gap-2 rounded-lg border border-[rgba(255,255,255,0.08)] bg-white/[0.02] px-3 py-2 text-xs"
+                className="flex items-center gap-2 rounded-lg border border-line bg-surface-2 px-3 py-2 text-xs"
               >
-                <Workflow size={14} className="text-indigo-400" />
-                <span className="font-mono text-[#f0f3f6]">{c.caller_service || "external-client"}</span>
-                <span className="rounded bg-white/[0.06] px-1.5 py-0.5 font-mono text-[10px] text-[#8b949e]">
+                <Workflow size={14} className="text-entity-user" />
+                <span className="font-mono text-ink">{c.caller_service || "external-client"}</span>
+                <span className="rounded bg-surface-2 px-1.5 py-0.5 font-mono text-[10px] text-muted">
                   {n(c.requests)} reqs
                 </span>
               </div>

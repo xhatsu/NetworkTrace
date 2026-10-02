@@ -267,13 +267,13 @@ function LegacyAnomaliesPage() {
       title={t("User + IP Anomalies")}
       description={t("Investigate identity and source-address deviations: new callers, new targets, foreign IPs, dormant reactivation, and authentication bursts.")}
       actions={
-        <div className="flex items-center rounded-lg border border-[rgba(255,255,255,0.14)] bg-white/[0.04] p-0.5">
+        <div className="flex items-center rounded-lg border border-line bg-surface-2 p-0.5">
           {[
-            { label: t("All"), val: "", activeClass: "bg-violet-600 text-white" },
-            { label: t("Open"), val: "open", activeClass: "bg-rose-600 text-white" },
-            { label: t("Acknowledge"), val: "acknowledged", activeClass: "bg-amber-600 text-white" },
-            { label: t("Resolved"), val: "resolved", activeClass: "bg-emerald-600 text-white" },
-            { label: t("Suppressed"), val: "suppressed", activeClass: "bg-purple-600 text-white" },
+            { label: t("All"), val: "", activeClass: "bg-accent text-white" },
+            { label: t("Open"), val: "open", activeClass: "bg-bad text-white" },
+            { label: t("Acknowledge"), val: "acknowledged", activeClass: "bg-warn text-white" },
+            { label: t("Resolved"), val: "resolved", activeClass: "bg-good text-white" },
+            { label: t("Suppressed"), val: "suppressed", activeClass: "bg-accent text-white" },
           ].map(({ label, val, activeClass }) => (
             <button
               key={val}
@@ -281,7 +281,7 @@ function LegacyAnomaliesPage() {
               className={`rounded-md px-2.5 py-1 text-xs font-medium transition ${
                 status === val
                   ? `${activeClass} shadow-sm font-semibold`
-                  : "text-[#c4bdd9] hover:text-white"
+                  : "text-muted hover:text-ink"
               }`}
             >
               {label}
@@ -320,31 +320,31 @@ function LegacyAnomaliesPage() {
       </div>
 
       {/* Perspective Switcher & Search Bar */}
-      <div className="flex flex-wrap items-center justify-between gap-3 mb-4 rounded-xl border border-[rgba(255,255,255,0.08)] bg-[#161424] p-3">
-        <div className="flex items-center gap-1.5 rounded-lg border border-[rgba(255,255,255,0.1)] bg-white/[0.02] p-1">
+      <div className="flex flex-wrap items-center justify-between gap-3 mb-4 rounded-xl border border-line bg-surface p-3">
+        <div className="flex items-center gap-1.5 rounded-lg border border-line bg-surface-2 p-1">
           <button
             onClick={() => setPerspective("all")}
             className={`flex items-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-semibold transition ${
               perspective === "all"
-                ? "bg-violet-600 text-white shadow-sm"
-                : "text-[#c4bdd9] hover:text-white hover:bg-white/[0.04]"
+                ? "bg-accent text-white shadow-sm"
+                : "text-muted hover:text-ink hover:bg-white/[0.04]"
             }`}
           >
             <span>{t("All Findings")}</span>
-            <span className="rounded-full bg-white/20 px-1.5 py-0.2 text-[10px]">{rawItems.length}</span>
+            <span className="rounded-full bg-surface-2 px-1.5 py-0.2 text-[10px]">{rawItems.length}</span>
           </button>
 
           <button
             onClick={() => setPerspective("user")}
             className={`flex items-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-semibold transition ${
               perspective === "user"
-                ? "bg-cyan-500 text-slate-950 font-bold"
-                : "text-cyan-300 hover:text-cyan-100 hover:bg-cyan-500/10"
+                ? "bg-accent text-ink font-bold"
+                : "text-entity-api hover:text-accent hover:bg-accent/10"
             }`}
           >
             <UserRoundSearch size={13} />
             <span>{t("User & Identity Centric")}</span>
-            <span className={`rounded-full px-1.5 py-0.2 text-[10px] ${perspective === "user" ? "bg-slate-950/30 text-slate-900" : "bg-cyan-500/20 text-cyan-200"}`}>
+            <span className={`rounded-full px-1.5 py-0.2 text-[10px] ${perspective === "user" ? "bg-surface/30 text-ink" : "bg-accent/20 text-accent"}`}>
               {userCount}
             </span>
           </button>
@@ -353,31 +353,31 @@ function LegacyAnomaliesPage() {
             onClick={() => setPerspective("service")}
             className={`flex items-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-semibold transition ${
               perspective === "service"
-                ? "bg-indigo-600 text-white shadow-sm"
-                : "text-[#c4bdd9] hover:text-white hover:bg-white/[0.04]"
+                ? "bg-accent text-white shadow-sm"
+                : "text-muted hover:text-ink hover:bg-white/[0.04]"
             }`}
           >
             <span>{t("Service & Fleet")}</span>
-            <span className="rounded-full bg-white/20 px-1.5 py-0.2 text-[10px]">{rawItems.length - userCount}</span>
+            <span className="rounded-full bg-surface-2 px-1.5 py-0.2 text-[10px]">{rawItems.length - userCount}</span>
           </button>
         </div>
 
         {/* Grouping / Incident Episode Mode Toggle */}
-        <div className="flex items-center rounded-lg border border-[rgba(255,255,255,0.14)] bg-white/[0.04] p-0.5 text-xs">
+        <div className="flex items-center rounded-lg border border-line bg-surface-2 p-0.5 text-xs">
           <button
             type="button"
             onClick={() => setGrouped(true)}
             className={`flex items-center gap-1.5 rounded-md px-2.5 py-1 text-xs font-medium transition ${
               grouped
-                ? "bg-cyan-500/20 text-cyan-200 border border-cyan-500/40 font-bold shadow-sm"
-                : "text-[#c4bdd9] hover:text-white"
+                ? "bg-accent/20 text-accent border border-line/40 font-bold shadow-sm"
+                : "text-muted hover:text-ink"
             }`}
             title={t("Group contiguous recurring anomalies into single incidents", "Gom các bất thường lặp lại liên tục thành các sự cố duy nhất")}
           >
-            <Layers size={12} className={grouped ? "text-cyan-400" : "text-[#8b949e]"} />
+            <Layers size={12} className={grouped ? "text-entity-api" : "text-muted"} />
             <span>{t("Group Incidents", "Gom nhóm Sự cố")}</span>
             {groupCount > 0 && grouped && (
-              <span className="rounded-full bg-cyan-500/30 px-1.5 py-0.2 text-[10px] font-bold text-cyan-200">{groupCount}</span>
+              <span className="rounded-full bg-accent/30 px-1.5 py-0.2 text-[10px] font-bold text-accent">{groupCount}</span>
             )}
           </button>
           <button
@@ -385,26 +385,26 @@ function LegacyAnomaliesPage() {
             onClick={() => setGrouped(false)}
             className={`flex items-center gap-1.5 rounded-md px-2.5 py-1 text-xs font-medium transition ${
               !grouped
-                ? "bg-violet-600 text-white font-bold shadow-sm"
-                : "text-[#c4bdd9] hover:text-white"
+                ? "bg-accent text-white font-bold shadow-sm"
+                : "text-muted hover:text-ink"
             }`}
             title={t("Show all raw anomaly findings flatly", "Hiển thị toàn bộ phát hiện riêng lẻ")}
           >
-            <SlidersHorizontal size={12} className={!grouped ? "text-white" : "text-[#8b949e]"} />
+            <SlidersHorizontal size={12} className={!grouped ? "text-white" : "text-muted"} />
             <span>{t("Raw Findings", "Tất cả Bản ghi")}</span>
-            <span className="rounded-full bg-white/20 px-1.5 py-0.2 text-[10px]">{filteredItems.length}</span>
+            <span className="rounded-full bg-surface-2 px-1.5 py-0.2 text-[10px]">{filteredItems.length}</span>
           </button>
         </div>
 
         {/* Real-time search filter */}
         <div className="relative min-w-[240px] flex-1 max-w-md">
-          <Search size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-[#8b949e]" />
+          <Search size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted" />
           <input
             type="text"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             placeholder={t("Search user, service, or trace ID...")}
-            className="w-full rounded-lg border border-[rgba(255,255,255,0.12)] bg-black/40 py-1.5 pl-8 pr-3 text-xs text-white placeholder-[#8b949e] outline-none transition focus:border-cyan-500 focus:ring-1 focus:ring-cyan-500"
+            className="w-full rounded-lg border border-line bg-black/40 py-1.5 pl-8 pr-3 text-xs text-white placeholder:text-muted outline-none transition focus:border-accent focus:ring-1 focus:ring-accent"
           />
         </div>
       </div>
@@ -466,26 +466,26 @@ function LegacyAnomaliesPage() {
 
                     const detectorType = a.anomaly_type || "";
                     const detectorBadgeColor = detectorType.includes("user") || detectorType.includes("cred") || detectorType.includes("auth") || detectorType.includes("access")
-                      ? "text-cyan-300 bg-cyan-500/15 border-cyan-500/30"
+                      ? "text-entity-api bg-accent/15 border-line/30"
                       : detectorType.includes("spike")
-                        ? "text-sky-300 bg-sky-500/15 border-sky-500/30"
+                        ? "text-entity-service bg-accent/15 border-line/30"
                         : detectorType.includes("drop")
-                          ? "text-indigo-300 bg-indigo-500/15 border-indigo-500/30"
+                          ? "text-entity-user bg-accent/15 border-line/30"
                           : detectorType.includes("latency") || detectorType.includes("slow")
-                            ? "text-violet-300 bg-violet-500/15 border-violet-500/30"
+                            ? "text-entity-user bg-accent/15 border-line/30"
                             : detectorType.includes("cascading") || detectorType.includes("error")
-                              ? "text-rose-300 bg-rose-500/15 border-rose-500/30"
+                              ? "text-bad bg-bad/15 border-bad/30"
                               : detectorType.includes("relationship") || detectorType.includes("edge")
-                                ? "text-amber-300 bg-amber-500/15 border-amber-500/30"
-                                : "text-[#c4bdd9] bg-white/[0.05] border-white/10";
+                                ? "text-warn bg-warn/15 border-warn/30"
+                                : "text-muted bg-surface-2 border-line";
 
                     const statusClasses: Record<string, string> = {
-                      open: "border-rose-500/40 bg-rose-500/15 text-rose-300",
-                      acknowledged: "border-amber-500/40 bg-amber-500/15 text-amber-300",
-                      resolved: "border-emerald-500/40 bg-emerald-500/15 text-emerald-300",
-                      suppressed: "border-purple-500/40 bg-purple-500/15 text-purple-300",
+                      open: "border-bad/40 bg-bad/15 text-bad",
+                      acknowledged: "border-warn/40 bg-warn/15 text-warn",
+                      resolved: "border-good/40 bg-good/15 text-good",
+                      suppressed: "border-line/40 bg-accent/15 text-entity-user",
                     };
-                    const statusStyle = statusClasses[a.status || "open"] || "border-rose-500/40 bg-rose-500/15 text-rose-300";
+                    const statusStyle = statusClasses[a.status || "open"] || "border-bad/40 bg-bad/15 text-bad";
 
                     const rawStart = Number(grp.earliestDetectedMs || a.first_seen || a.detected_at || Date.now());
                     const rawEnd = Number(grp.latestDetectedMs || a.last_seen || a.detected_at || Date.now());
@@ -498,17 +498,17 @@ function LegacyAnomaliesPage() {
                       <Fragment key={grp.groupKey}>
                         <tr
                           onClick={() => nav(`/anomalies/${a.id}?${queryString(filters)}`)}
-                          className={`cursor-pointer transition hover:bg-white/[0.05] border-b border-[rgba(255,255,255,0.08)] ${isExpanded ? "bg-white/[0.03]" : ""}`}
+                          className={`cursor-pointer transition hover:bg-hover border-b border-line ${isExpanded ? "bg-white/[0.03]" : ""}`}
                         >
                           {/* Severity */}
                           <td className="px-4 py-3">
                             <span
                               className={`inline-flex items-center gap-1 rounded px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider ${
                                 grp.maxSeverity === "critical"
-                                  ? "border border-rose-500/40 bg-rose-500/15 text-rose-300"
+                                  ? "border border-bad/40 bg-bad/15 text-bad"
                                   : grp.maxSeverity === "high"
-                                    ? "border border-amber-500/40 bg-amber-500/15 text-amber-300"
-                                    : "border border-violet-500/40 bg-violet-500/15 text-violet-300"
+                                    ? "border border-warn/40 bg-warn/15 text-warn"
+                                    : "border border-line/40 bg-accent/15 text-entity-user"
                               }`}
                             >
                               {t(grp.maxSeverity, grp.maxSeverity)}
@@ -525,34 +525,34 @@ function LegacyAnomaliesPage() {
                                     e.stopPropagation();
                                     nav(`/users/${encodeURIComponent(a.principal_name!)}`);
                                   }}
-                                  className="inline-flex items-center gap-1.5 rounded-md border border-cyan-500/40 bg-cyan-500/15 px-2 py-0.5 text-xs font-semibold text-cyan-200 transition hover:bg-cyan-500/25 hover:border-cyan-400 hover:text-white"
+                                  className="inline-flex items-center gap-1.5 rounded-md border border-line/40 bg-accent/15 px-2 py-0.5 text-xs font-semibold text-accent transition hover:bg-accent/25 hover:border-accent hover:text-ink"
                                   title={t("Investigate User Profile")}
                                 >
-                                  <User size={11} className="text-cyan-400" />
+                                  <User size={11} className="text-entity-api" />
                                   <span>{a.principal_name}</span>
-                                  <ExternalLink size={10} className="text-cyan-400" />
+                                  <ExternalLink size={10} className="text-entity-api" />
                                 </button>
                                 {a.source_ip && (
-                                  <span className="inline-block text-[10px] font-mono text-cyan-300/80">
+                                  <span className="inline-block text-[10px] font-mono text-entity-api/80">
                                     IP: {a.source_ip}
                                   </span>
                                 )}
                               </div>
                             ) : a.source_ip ? (
-                              <div className="text-xs font-semibold text-cyan-300 font-mono">
+                              <div className="text-xs font-semibold text-entity-api font-mono">
                                 IP: {a.source_ip}
                               </div>
                             ) : a.blast_radius?.affected_principals && a.blast_radius.affected_principals.length > 0 ? (
-                              <div className="text-xs font-mono text-violet-300">
+                              <div className="text-xs font-mono text-entity-user">
                                 <span className="font-semibold">{getEntityName(a.blast_radius.affected_principals[0])}</span>
                                 {a.blast_radius.affected_principals.length > 1 && (
-                                  <span className="ml-1 text-[10px] text-[#8b949e]">
+                                  <span className="ml-1 text-[10px] text-muted">
                                     +{a.blast_radius.affected_principals.length - 1} more
                                   </span>
                                 )}
                               </div>
                             ) : (
-                              <span className="text-[11px] text-[#766e92] italic">
+                              <span className="text-[11px] text-muted italic">
                                 {t("System / Service")}
                               </span>
                             )}
@@ -560,11 +560,11 @@ function LegacyAnomaliesPage() {
 
                           {/* Entity & Service */}
                           <td className="px-4 font-mono">
-                            <div className="text-xs font-semibold text-[#f5f3fa]">
+                            <div className="text-xs font-semibold text-ink">
                               {a.target_service || a.caller_service || a.entity_id || "Service"}
                             </div>
                             {a.operation && (
-                              <div className="text-[10px] text-violet-300/80 truncate max-w-[180px]">
+                              <div className="text-[10px] text-entity-user/80 truncate max-w-[180px]">
                                 {a.operation}
                               </div>
                             )}
@@ -578,7 +578,7 @@ function LegacyAnomaliesPage() {
                               </span>
                               {grp.occurrences > 1 && (
                                 <span
-                                  className="inline-flex items-center gap-1 rounded-md border border-cyan-500/40 bg-cyan-500/20 px-1.5 py-0.5 text-[10px] font-bold text-cyan-200 font-mono"
+                                  className="inline-flex items-center gap-1 rounded-md border border-line/40 bg-accent/20 px-1.5 py-0.5 text-[10px] font-bold text-accent font-mono"
                                   title={t("Recurring continuous anomaly across multiple time windows")}
                                 >
                                   <Repeat size={9} />
@@ -589,23 +589,23 @@ function LegacyAnomaliesPage() {
                           </td>
 
                           {/* Window Timing */}
-                          <td className="px-4 font-mono text-[10px] text-[#c4bdd9]">
+                          <td className="px-4 font-mono text-[10px] text-muted">
                             {isSpan ? (
                               <div>
-                                <span className="font-semibold text-[#f5f3fa]">
+                                <span className="font-semibold text-ink">
                                   {dStart.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })} – {dEnd.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                                 </span>
-                                <span className="block text-[10px] font-mono text-cyan-300 font-bold">
+                                <span className="block text-[10px] font-mono text-entity-api font-bold">
                                   {durationMins >= 60 ? `${(durationMins / 60).toFixed(1)}h` : `${durationMins}m`} {t("continuous")}
                                 </span>
-                                <span className="block text-[10px] text-[#9e96b8]">
+                                <span className="block text-[10px] text-muted">
                                   {dEnd.toLocaleDateString()}
                                 </span>
                               </div>
                             ) : (
                               <div>
                                 <span>{dEnd.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
-                                <span className="block text-[10px] text-[#9e96b8]">
+                                <span className="block text-[10px] text-muted">
                                   {dEnd.toLocaleDateString()}
                                 </span>
                               </div>
@@ -613,11 +613,11 @@ function LegacyAnomaliesPage() {
                           </td>
 
                           {/* Current Value */}
-                          <td className="px-4 font-mono text-xs tabular-nums font-medium text-[#f5f3fa]">
+                          <td className="px-4 font-mono text-xs tabular-nums font-medium text-ink">
                             <div>
                               <span>{n(grp.latestValue || 0)} {a.unit || ""}</span>
                               {grp.peakValue > grp.latestValue && (
-                                <span className="block text-[10px] text-[#9e96b8] font-normal">
+                                <span className="block text-[10px] text-muted font-normal">
                                   peak {n(grp.peakValue)} {a.unit || ""}
                                 </span>
                               )}
@@ -625,14 +625,14 @@ function LegacyAnomaliesPage() {
                           </td>
 
                           {/* Expected Baseline */}
-                          <td className="px-4 font-mono text-xs tabular-nums text-[#c4bdd9]">
+                          <td className="px-4 font-mono text-xs tabular-nums text-muted">
                             {a.baseline_value == null
                               ? "—"
                               : `${n(a.normal_low ?? a.baseline_value)}–${n(a.normal_high ?? a.baseline_value)} ${a.unit || ""}`}
                           </td>
 
                           {/* Absolute Delta */}
-                          <td className="px-4 font-mono text-xs tabular-nums text-[#fb7185] font-semibold">
+                          <td className="px-4 font-mono text-xs tabular-nums text-bad font-semibold">
                             {(a.absolute_difference || 0) > 0 ? "+" : ""}
                             {n(a.absolute_difference ?? Math.abs((grp.latestValue || 0) - (a.baseline_value || 0)))}
                           </td>
@@ -640,12 +640,12 @@ function LegacyAnomaliesPage() {
                           {/* Relative Change */}
                           <td className="px-4 font-mono text-xs tabular-nums">
                             {a.percent_change == null && a.delta_percentage == null ? (
-                              <span className="text-[#9e96b8]">n/a</span>
+                              <span className="text-muted">n/a</span>
                             ) : (
                               (() => {
                                 const pct = Number(a.percent_change ?? a.delta_percentage ?? 0);
                                 return (
-                                  <span className={pct > 0 ? "text-[#fb7185] font-semibold" : "text-[#34d399] font-semibold"}>
+                                  <span className={pct > 0 ? "text-bad font-semibold" : "text-good font-semibold"}>
                                     {pct > 0 ? "+" : ""}
                                     {pct.toFixed(0)}%
                                   </span>
@@ -656,7 +656,7 @@ function LegacyAnomaliesPage() {
 
                           {/* Samples */}
                           <td
-                            className="px-4 font-mono text-xs tabular-nums text-[#c4bdd9]"
+                            className="px-4 font-mono text-xs tabular-nums text-muted"
                             title={t("Current evaluation samples / Historical baseline sample buckets", "Mẫu cửa sổ hiện tại / Số mẫu baseline lịch sử")}
                           >
                             {n(a.current_samples ?? 1)} / {n(a.baseline_samples ?? grp.items.length)}
@@ -676,7 +676,7 @@ function LegacyAnomaliesPage() {
                                 <button
                                   type="button"
                                   onClick={(e) => toggleGroupExpand(grp.groupKey, e)}
-                                  className="inline-flex items-center gap-1 rounded border border-cyan-500/40 bg-cyan-500/10 px-2 py-1 text-[11px] font-semibold text-cyan-200 hover:bg-cyan-500/25 transition"
+                                  className="inline-flex items-center gap-1 rounded border border-line/40 bg-accent/10 px-2 py-1 text-[11px] font-semibold text-accent hover:bg-accent/25 transition"
                                   title={isExpanded ? t("Collapse Slices") : t("Expand Slices")}
                                 >
                                   {isExpanded ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
@@ -689,7 +689,7 @@ function LegacyAnomaliesPage() {
                                   e.stopPropagation();
                                   nav(`/anomalies/${a.id}?${queryString(filters)}`);
                                 }}
-                                className="inline-flex items-center gap-1 rounded border border-[rgba(255,255,255,0.1)] bg-white/[0.03] px-2 py-1 text-[11px] font-medium text-[#c4bdd9] hover:bg-white/[0.08] hover:text-white"
+                                className="inline-flex items-center gap-1 rounded border border-line bg-white/[0.03] px-2 py-1 text-[11px] font-medium text-muted hover:bg-hover hover:text-ink"
                               >
                                 <span>{t("Inspect")}</span>
                                 <ArrowRight size={11} />
@@ -707,43 +707,43 @@ function LegacyAnomaliesPage() {
                             <tr
                               key={`sub-${sub.id}-${sIdx}`}
                               onClick={() => nav(`/anomalies/${sub.id}?${queryString(filters)}`)}
-                              className="cursor-pointer border-b border-white/[0.04] bg-cyan-500/[0.03] hover:bg-cyan-500/[0.07] transition text-xs"
+                              className="cursor-pointer border-b border-white/[0.04] bg-accent/[0.03] hover:bg-accent/[0.07] transition text-xs"
                             >
                               <td className="px-4 py-2 pl-8">
-                                <span className="font-mono text-[10px] text-[#8b949e]">#{sIdx + 1}</span>
+                                <span className="font-mono text-[10px] text-muted">#{sIdx + 1}</span>
                               </td>
-                              <td className="px-4 py-2 font-mono text-[11px] text-[#c4bdd9]">
+                              <td className="px-4 py-2 font-mono text-[11px] text-muted">
                                 {sub.principal_name || "—"}
                               </td>
-                              <td className="px-4 py-2 font-mono text-[11px] text-[#8b949e] truncate max-w-[160px]">
+                              <td className="px-4 py-2 font-mono text-[11px] text-muted truncate max-w-[160px]">
                                 {sub.operation || sub.target_service}
                               </td>
-                              <td className="px-4 py-2 text-[10px] text-[#8b949e]">
+                              <td className="px-4 py-2 text-[10px] text-muted">
                                 {t(sub.anomaly_type || "")}
                               </td>
-                              <td className="px-4 py-2 font-mono text-[10px] text-cyan-200">
+                              <td className="px-4 py-2 font-mono text-[10px] text-accent">
                                 {subTime.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                               </td>
                               <td className="px-4 py-2 font-mono text-[11px] text-white font-medium">
                                 {n(sub.current_value || 0)} {sub.unit || ""}
                               </td>
-                              <td className="px-4 py-2 font-mono text-[11px] text-[#8b949e]">
+                              <td className="px-4 py-2 font-mono text-[11px] text-muted">
                                 {sub.baseline_value != null ? n(sub.baseline_value) : "—"}
                               </td>
-                              <td className="px-4 py-2 font-mono text-[11px] text-[#fb7185]">
+                              <td className="px-4 py-2 font-mono text-[11px] text-bad">
                                 +{n(sub.absolute_difference || 0)}
                               </td>
-                              <td className="px-4 py-2 font-mono text-[11px] text-[#8b949e]">
+                              <td className="px-4 py-2 font-mono text-[11px] text-muted">
                                 {subPct != null ? `${subPct > 0 ? "+" : ""}${subPct.toFixed(0)}%` : "—"}
                               </td>
-                              <td className="px-4 py-2 font-mono text-[10px] text-[#8b949e]">
+                              <td className="px-4 py-2 font-mono text-[10px] text-muted">
                                 {sub.current_samples ?? 1} / {sub.baseline_samples ?? 5}
                               </td>
-                              <td className="px-4 py-2 text-[10px] text-[#8b949e]">
+                              <td className="px-4 py-2 text-[10px] text-muted">
                                 {t(sub.status || "open")}
                               </td>
                               <td className="px-4 py-2 text-right">
-                                <span className="text-[10px] text-cyan-400 hover:underline inline-flex items-center gap-0.5">
+                                <span className="text-[10px] text-entity-api hover:underline inline-flex items-center gap-0.5">
                                   {t("Inspect Slice")} <ArrowRight size={9} />
                                 </span>
                               </td>
@@ -757,42 +757,42 @@ function LegacyAnomaliesPage() {
                   filteredItems.map((a) => {
                     const detectorType = a.anomaly_type || "";
                     const detectorBadgeColor = detectorType.includes("user") || detectorType.includes("cred") || detectorType.includes("auth") || detectorType.includes("access")
-                      ? "text-cyan-300 bg-cyan-500/15 border-cyan-500/30"
+                      ? "text-entity-api bg-accent/15 border-line/30"
                       : detectorType.includes("spike")
-                        ? "text-sky-300 bg-sky-500/15 border-sky-500/30"
+                        ? "text-entity-service bg-accent/15 border-line/30"
                         : detectorType.includes("drop")
-                          ? "text-indigo-300 bg-indigo-500/15 border-indigo-500/30"
+                          ? "text-entity-user bg-accent/15 border-line/30"
                           : detectorType.includes("latency") || detectorType.includes("slow")
-                            ? "text-violet-300 bg-violet-500/15 border-violet-500/30"
+                            ? "text-entity-user bg-accent/15 border-line/30"
                             : detectorType.includes("cascading") || detectorType.includes("error")
-                              ? "text-rose-300 bg-rose-500/15 border-rose-500/30"
+                              ? "text-bad bg-bad/15 border-bad/30"
                               : detectorType.includes("relationship") || detectorType.includes("edge")
-                                ? "text-amber-300 bg-amber-500/15 border-amber-500/30"
-                                : "text-[#c4bdd9] bg-white/[0.05] border-white/10";
+                                ? "text-warn bg-warn/15 border-warn/30"
+                                : "text-muted bg-surface-2 border-line";
 
                     const statusClasses: Record<string, string> = {
-                      open: "border-rose-500/40 bg-rose-500/15 text-rose-300",
-                      acknowledged: "border-amber-500/40 bg-amber-500/15 text-amber-300",
-                      resolved: "border-emerald-500/40 bg-emerald-500/15 text-emerald-300",
-                      suppressed: "border-purple-500/40 bg-purple-500/15 text-purple-300",
+                      open: "border-bad/40 bg-bad/15 text-bad",
+                      acknowledged: "border-warn/40 bg-warn/15 text-warn",
+                      resolved: "border-good/40 bg-good/15 text-good",
+                      suppressed: "border-line/40 bg-accent/15 text-entity-user",
                     };
-                    const statusStyle = statusClasses[a.status || "open"] || "border-rose-500/40 bg-rose-500/15 text-rose-300";
+                    const statusStyle = statusClasses[a.status || "open"] || "border-bad/40 bg-bad/15 text-bad";
 
                     return (
                       <tr
                         key={a.id}
                         onClick={() => nav(`/anomalies/${a.id}?${queryString(filters)}`)}
-                        className="cursor-pointer border-b border-[rgba(255,255,255,0.08)] transition hover:bg-white/[0.05]"
+                        className="cursor-pointer border-b border-line transition hover:bg-hover"
                       >
                         {/* Severity */}
                         <td className="px-4 py-3">
                           <span
                             className={`inline-flex items-center gap-1 rounded px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider ${
                               a.severity === "critical"
-                                ? "border border-rose-500/40 bg-rose-500/15 text-rose-300"
+                                ? "border border-bad/40 bg-bad/15 text-bad"
                                 : a.severity === "high"
-                                  ? "border border-amber-500/40 bg-amber-500/15 text-amber-300"
-                                  : "border border-violet-500/40 bg-violet-500/15 text-violet-300"
+                                  ? "border border-warn/40 bg-warn/15 text-warn"
+                                  : "border border-line/40 bg-accent/15 text-entity-user"
                             }`}
                           >
                             {t(a.severity, a.severity)}
@@ -809,34 +809,34 @@ function LegacyAnomaliesPage() {
                                   e.stopPropagation();
                                   nav(`/users/${encodeURIComponent(a.principal_name!)}`);
                                 }}
-                                className="inline-flex items-center gap-1.5 rounded-md border border-cyan-500/40 bg-cyan-500/15 px-2 py-0.5 text-xs font-semibold text-cyan-200 transition hover:bg-cyan-500/25 hover:border-cyan-400 hover:text-white"
+                                className="inline-flex items-center gap-1.5 rounded-md border border-line/40 bg-accent/15 px-2 py-0.5 text-xs font-semibold text-accent transition hover:bg-accent/25 hover:border-accent hover:text-ink"
                                 title={t("Investigate User Profile")}
                               >
-                                <User size={11} className="text-cyan-400" />
+                                <User size={11} className="text-entity-api" />
                                 <span>{a.principal_name}</span>
-                                <ExternalLink size={10} className="text-cyan-400" />
+                                <ExternalLink size={10} className="text-entity-api" />
                               </button>
                               {a.source_ip && (
-                                <span className="inline-block text-[10px] font-mono text-cyan-300/80">
+                                <span className="inline-block text-[10px] font-mono text-entity-api/80">
                                   IP: {a.source_ip}
                                 </span>
                               )}
                             </div>
                           ) : a.source_ip ? (
-                            <div className="text-xs font-semibold text-cyan-300 font-mono">
+                            <div className="text-xs font-semibold text-entity-api font-mono">
                               IP: {a.source_ip}
                             </div>
                           ) : a.blast_radius?.affected_principals && a.blast_radius.affected_principals.length > 0 ? (
-                            <div className="text-xs font-mono text-violet-300">
+                            <div className="text-xs font-mono text-entity-user">
                               <span className="font-semibold">{getEntityName(a.blast_radius.affected_principals[0])}</span>
                               {a.blast_radius.affected_principals.length > 1 && (
-                                <span className="ml-1 text-[10px] text-[#8b949e]">
+                                <span className="ml-1 text-[10px] text-muted">
                                   +{a.blast_radius.affected_principals.length - 1} more
                                 </span>
                               )}
                             </div>
                           ) : (
-                            <span className="text-[11px] text-[#766e92] italic">
+                            <span className="text-[11px] text-muted italic">
                               {t("System / Service")}
                             </span>
                           )}
@@ -844,11 +844,11 @@ function LegacyAnomaliesPage() {
 
                         {/* Entity & Service */}
                         <td className="px-4 font-mono">
-                          <div className="text-xs font-semibold text-[#f5f3fa]">
+                          <div className="text-xs font-semibold text-ink">
                             {a.target_service || a.caller_service || a.entity_id || "Service"}
                           </div>
                           {a.operation && (
-                            <div className="text-[10px] text-violet-300/80 truncate max-w-[180px]">
+                            <div className="text-[10px] text-entity-user/80 truncate max-w-[180px]">
                               {a.operation}
                             </div>
                           )}
@@ -862,27 +862,27 @@ function LegacyAnomaliesPage() {
                         </td>
 
                         {/* Window Timing */}
-                        <td className="px-4 font-mono text-[10px] text-[#c4bdd9]">
+                        <td className="px-4 font-mono text-[10px] text-muted">
                           {new Date(a.last_detected_ms || a.detected_at || Date.now()).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                          <span className="block text-[10px] text-[#9e96b8]">
+                          <span className="block text-[10px] text-muted">
                             {new Date(a.last_detected_ms || a.detected_at || Date.now()).toLocaleDateString()}
                           </span>
                         </td>
 
                         {/* Current Value */}
-                        <td className="px-4 font-mono text-xs tabular-nums font-medium text-[#f5f3fa]">
+                        <td className="px-4 font-mono text-xs tabular-nums font-medium text-ink">
                           {n(a.current_value || 0)} {a.unit || ""}
                         </td>
 
                         {/* Expected Baseline */}
-                        <td className="px-4 font-mono text-xs tabular-nums text-[#c4bdd9]">
+                        <td className="px-4 font-mono text-xs tabular-nums text-muted">
                           {a.baseline_value == null
                             ? "—"
                             : `${n(a.normal_low ?? a.baseline_value)}–${n(a.normal_high ?? a.baseline_value)} ${a.unit || ""}`}
                         </td>
 
                         {/* Absolute Delta */}
-                        <td className="px-4 font-mono text-xs tabular-nums text-[#fb7185] font-semibold">
+                        <td className="px-4 font-mono text-xs tabular-nums text-bad font-semibold">
                           {(a.absolute_difference || 0) > 0 ? "+" : ""}
                           {n(a.absolute_difference ?? Math.abs((a.current_value || 0) - (a.baseline_value || 0)))}
                         </td>
@@ -890,12 +890,12 @@ function LegacyAnomaliesPage() {
                         {/* Relative Change */}
                         <td className="px-4 font-mono text-xs tabular-nums">
                           {a.percent_change == null && a.delta_percentage == null ? (
-                            <span className="text-[#9e96b8]">n/a</span>
+                            <span className="text-muted">n/a</span>
                           ) : (
                             (() => {
                               const pct = Number(a.percent_change ?? a.delta_percentage ?? 0);
                               return (
-                                <span className={pct > 0 ? "text-[#fb7185] font-semibold" : "text-[#34d399] font-semibold"}>
+                                <span className={pct > 0 ? "text-bad font-semibold" : "text-good font-semibold"}>
                                   {pct > 0 ? "+" : ""}
                                   {pct.toFixed(0)}%
                                 </span>
@@ -906,7 +906,7 @@ function LegacyAnomaliesPage() {
 
                         {/* Samples */}
                         <td
-                          className="px-4 font-mono text-xs tabular-nums text-[#c4bdd9]"
+                          className="px-4 font-mono text-xs tabular-nums text-muted"
                           title={t("Current evaluation samples / Historical baseline sample buckets", "Mẫu cửa sổ hiện tại / Số mẫu baseline lịch sử")}
                         >
                           {n(a.current_samples ?? 0)} / {n(a.baseline_samples ?? 0)}
@@ -927,7 +927,7 @@ function LegacyAnomaliesPage() {
                               e.stopPropagation();
                               nav(`/anomalies/${a.id}?${queryString(filters)}`);
                             }}
-                            className="inline-flex items-center gap-1 rounded border border-[rgba(255,255,255,0.1)] bg-white/[0.03] px-2 py-1 text-[11px] font-medium text-[#c4bdd9] hover:bg-white/[0.08] hover:text-white"
+                            className="inline-flex items-center gap-1 rounded border border-line bg-white/[0.03] px-2 py-1 text-[11px] font-medium text-muted hover:bg-hover hover:text-ink"
                           >
                             <span>{t("Inspect")}</span>
                             <ArrowRight size={11} />
@@ -941,7 +941,7 @@ function LegacyAnomaliesPage() {
                   <tr>
                     <td
                       colSpan={12}
-                      className="p-12 text-center text-xs text-[#c4bdd9]"
+                      className="p-12 text-center text-xs text-muted"
                     >
                       {t("No anomalies detected matching this perspective and search filter.")}
                     </td>
@@ -982,10 +982,10 @@ function anomalySubject(a: Anomaly) {
 }
 
 function anomalySeverityClass(severity?: string) {
-  if (severity === "critical") return "border-rose-500/40 bg-rose-500/15 text-rose-300";
-  if (severity === "high") return "border-amber-500/40 bg-amber-500/15 text-amber-300";
-  if (severity === "medium") return "border-violet-500/40 bg-violet-500/15 text-violet-300";
-  return "border-cyan-500/40 bg-cyan-500/15 text-cyan-300";
+  if (severity === "critical") return "border-bad/40 bg-bad/15 text-bad";
+  if (severity === "high") return "border-warn/40 bg-warn/15 text-warn";
+  if (severity === "medium") return "border-line/40 bg-accent/15 text-entity-user";
+  return "border-line/40 bg-accent/15 text-entity-api";
 }
 
 function AnomalyValue({ anomaly, latestValue }: { anomaly: Anomaly; latestValue?: number }) {
@@ -994,9 +994,9 @@ function AnomalyValue({ anomaly, latestValue }: { anomaly: Anomaly; latestValue?
   const pct = anomaly.percent_change ?? anomaly.delta_percentage;
   return (
     <div className="font-mono text-[11px] tabular-nums">
-      <div className="font-semibold text-[#f5f3fa]">{n(current)} {anomaly.unit || ""}</div>
-      <div className="text-[10px] text-[#94a3b8]">{baseline == null ? "—" : `${n(baseline)} ${anomaly.unit || ""} baseline`}</div>
-      {pct != null && <div className={Number(pct) > 0 ? "text-rose-300" : "text-emerald-300"}>{Number(pct) > 0 ? "+" : ""}{Number(pct).toFixed(0)}%</div>}
+      <div className="font-semibold text-ink">{n(current)} {anomaly.unit || ""}</div>
+      <div className="text-[10px] text-faint">{baseline == null ? "—" : `${n(baseline)} ${anomaly.unit || ""} baseline`}</div>
+      {pct != null && <div className={Number(pct) > 0 ? "text-bad" : "text-good"}>{Number(pct) > 0 ? "+" : ""}{Number(pct).toFixed(0)}%</div>}
     </div>
   );
 }
@@ -1058,15 +1058,15 @@ export function AnomaliesPage() {
     return next;
   });
   const statusFilters = [
-    { label: t("All"), value: "", active: "bg-violet-600 text-white" },
-    { label: t("Open"), value: "open", active: "bg-rose-600 text-white" },
-    { label: t("Acknowledge"), value: "acknowledged", active: "bg-amber-600 text-white" },
-    { label: t("Resolved"), value: "resolved", active: "bg-emerald-600 text-white" },
-    { label: t("Suppressed"), value: "suppressed", active: "bg-purple-600 text-white" },
+    { label: t("All"), value: "", active: "bg-accent text-white" },
+    { label: t("Open"), value: "open", active: "bg-bad text-white" },
+    { label: t("Acknowledge"), value: "acknowledged", active: "bg-warn text-white" },
+    { label: t("Resolved"), value: "resolved", active: "bg-good text-white" },
+    { label: t("Suppressed"), value: "suppressed", active: "bg-accent text-white" },
   ];
 
   return (
-    <Page eyebrow={t("Changes")} title={t("Anomalies & Investigations")} description={t("What changed, where it happened, and the identity or service context supporting the finding.")} actions={<div className="flex items-center rounded-lg border border-[rgba(255,255,255,0.14)] bg-white/[0.04] p-0.5">{statusFilters.map((item) => <button key={item.value} onClick={() => setStatus(item.value)} className={`rounded-md px-2.5 py-1 text-xs font-medium transition ${status === item.value ? `${item.active} font-semibold shadow-sm` : "text-[#c4bdd9] hover:text-white"}`}>{item.label}</button>)}</div>}>
+    <Page eyebrow={t("Changes")} title={t("Anomalies & Investigations")} description={t("What changed, where it happened, and the identity or service context supporting the finding.")} actions={<div className="flex items-center rounded-lg border border-line bg-surface-2 p-0.5">{statusFilters.map((item) => <button key={item.value} onClick={() => setStatus(item.value)} className={`rounded-md px-2.5 py-1 text-xs font-medium transition ${status === item.value ? `${item.active} font-semibold shadow-sm` : "text-muted hover:text-ink"}`}>{item.label}</button>)}</div>}>
       <div className="mb-4 grid grid-cols-2 gap-3 md:grid-cols-4">
         <MetricCard label={t("Findings")} value={String(filteredItems.length)} detail={grouped ? `${groupedEpisodes.length} ${t("incident episodes")}` : t("Raw findings mode")} accent="purple" />
         <MetricCard label={t("High impact")} value={String(severityCount)} detail={t("High and critical findings")} tone={severityCount ? "bad" : "good"} accent="rose" />
@@ -1074,18 +1074,18 @@ export function AnomaliesPage() {
         <MetricCard label={t("Status") } value={status ? t(status) : t("All")} detail={t("Use filters to focus triage")} accent="amber" />
       </div>
 
-      <div className="mb-4 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-[rgba(255,255,255,0.08)] bg-[#161424] p-3">
+      <div className="mb-4 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-line bg-surface p-3">
         <div className="flex flex-wrap items-center gap-2">
-          <div className="flex items-center gap-1.5 rounded-lg border border-[rgba(255,255,255,0.1)] bg-white/[0.02] p-1"><button onClick={() => setPerspective("all")} className={`rounded-md px-3 py-1.5 text-xs font-semibold ${perspective === "all" ? "bg-violet-600 text-white" : "text-[#c4bdd9] hover:text-white"}`}>{t("All Findings")} <span className="ml-1 rounded-full bg-white/20 px-1.5 text-[10px]">{rawItems.length}</span></button><button onClick={() => setPerspective("user")} className={`rounded-md px-3 py-1.5 text-xs font-semibold ${perspective === "user" ? "bg-cyan-500 text-slate-950" : "text-cyan-300 hover:text-white"}`}>{t("User & Identity Centric")} <span className="ml-1 rounded-full bg-cyan-500/20 px-1.5 text-[10px]">{userCount}</span></button><button onClick={() => setPerspective("service")} className={`rounded-md px-3 py-1.5 text-xs font-semibold ${perspective === "service" ? "bg-indigo-600 text-white" : "text-[#c4bdd9] hover:text-white"}`}>{t("Service & Fleet")} <span className="ml-1 rounded-full bg-white/20 px-1.5 text-[10px]">{rawItems.length - userCount}</span></button></div>
-          <div className="flex items-center rounded-lg border border-[rgba(255,255,255,0.14)] bg-white/[0.04] p-0.5 text-xs"><button type="button" onClick={() => setGrouped(true)} className={`inline-flex items-center gap-1.5 rounded-md px-2.5 py-1 font-medium ${grouped ? "bg-cyan-500/20 text-cyan-200 border border-cyan-500/40 font-bold" : "text-[#c4bdd9] hover:text-white"}`}><Layers size={12} />{t("Group Incidents", "Gom nhóm Sự cố")} {grouped && <span className="rounded-full bg-cyan-500/30 px-1.5 text-[10px]">{groupedEpisodes.length}</span>}</button><button type="button" onClick={() => setGrouped(false)} className={`inline-flex items-center gap-1.5 rounded-md px-2.5 py-1 font-medium ${!grouped ? "bg-violet-600 text-white font-bold" : "text-[#c4bdd9] hover:text-white"}`}><SlidersHorizontal size={12} />{t("Raw Findings", "Tất cả Bản ghi")} <span className="rounded-full bg-white/20 px-1.5 text-[10px]">{filteredItems.length}</span></button></div>
+          <div className="flex items-center gap-1.5 rounded-lg border border-line bg-surface-2 p-1"><button onClick={() => setPerspective("all")} className={`rounded-md px-3 py-1.5 text-xs font-semibold ${perspective === "all" ? "bg-accent text-white" : "text-muted hover:text-ink"}`}>{t("All Findings")} <span className="ml-1 rounded-full bg-surface-2 px-1.5 text-[10px]">{rawItems.length}</span></button><button onClick={() => setPerspective("user")} className={`rounded-md px-3 py-1.5 text-xs font-semibold ${perspective === "user" ? "bg-accent text-ink" : "text-entity-api hover:text-ink"}`}>{t("User & Identity Centric")} <span className="ml-1 rounded-full bg-accent/20 px-1.5 text-[10px]">{userCount}</span></button><button onClick={() => setPerspective("service")} className={`rounded-md px-3 py-1.5 text-xs font-semibold ${perspective === "service" ? "bg-accent text-white" : "text-muted hover:text-ink"}`}>{t("Service & Fleet")} <span className="ml-1 rounded-full bg-surface-2 px-1.5 text-[10px]">{rawItems.length - userCount}</span></button></div>
+          <div className="flex items-center rounded-lg border border-line bg-surface-2 p-0.5 text-xs"><button type="button" onClick={() => setGrouped(true)} className={`inline-flex items-center gap-1.5 rounded-md px-2.5 py-1 font-medium ${grouped ? "bg-accent/20 text-accent border border-line/40 font-bold" : "text-muted hover:text-ink"}`}><Layers size={12} />{t("Group Incidents", "Gom nhóm Sự cố")} {grouped && <span className="rounded-full bg-accent/30 px-1.5 text-[10px]">{groupedEpisodes.length}</span>}</button><button type="button" onClick={() => setGrouped(false)} className={`inline-flex items-center gap-1.5 rounded-md px-2.5 py-1 font-medium ${!grouped ? "bg-accent text-white font-bold" : "text-muted hover:text-ink"}`}><SlidersHorizontal size={12} />{t("Raw Findings", "Tất cả Bản ghi")} <span className="rounded-full bg-surface-2 px-1.5 text-[10px]">{filteredItems.length}</span></button></div>
         </div>
-        <div className="relative min-w-[240px] max-w-md flex-1"><Search size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-[#8b949e]" /><input type="text" value={search} onChange={(event) => setSearch(event.target.value)} placeholder={t("Search user, service, or trace ID...")} className="w-full rounded-lg border border-[rgba(255,255,255,0.12)] bg-black/40 py-1.5 pl-8 pr-3 text-xs text-white placeholder-[#8b949e] outline-none focus:border-cyan-500" /></div>
+        <div className="relative min-w-[240px] max-w-md flex-1"><Search size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted" /><input type="text" value={search} onChange={(event) => setSearch(event.target.value)} placeholder={t("Search user, service, or trace ID...")} className="w-full rounded-lg border border-line bg-black/40 py-1.5 pl-8 pr-3 text-xs text-white placeholder:text-muted outline-none focus:border-accent" /></div>
       </div>
 
       {q.isLoading ? <Loading /> : q.error ? <ErrorState message={q.error.message} /> : <Panel title={grouped ? `${groupedEpisodes.length} ${t("Incident Episodes", "Sự cố Bất thường")}` : `${filteredItems.length} ${t("Detected Findings")}`} subtitle={grouped ? t("Grouped incidents emphasize what changed and when; expand a row for its time slices.") : t("Raw findings preserve each detector result for detailed investigation.")}>
         <div className="overflow-auto scrollbar"><table className="w-full min-w-[980px]"><thead><tr className="border-b border-[rgba(255,255,255,0.06)] bg-white/[0.01]">{[t("Severity"), t("What changed"), t("Identity"), t("Service / API"), t("Current vs baseline"), t("Since / duration"), t("Status"), t("Actions")].map((heading) => <th key={heading} className="table-head px-4 py-2.5 text-left">{heading}</th>)}</tr></thead><tbody>
-          {grouped ? groupedEpisodes.map((episode) => { const a = episode.master; const expanded = expandedGroupKeys.has(episode.groupKey); const start = new Date(episode.earliest || anomalyTime(a.detected_at) || Date.now()); const end = new Date(episode.latest || anomalyTime(a.detected_at) || Date.now()); const duration = Math.max(0, Math.round((episode.latest - episode.earliest) / 60000)); return <Fragment key={episode.groupKey}><tr onClick={() => nav(`/anomalies/${a.id}?${queryString(filters)}`)} className="cursor-pointer border-b border-[rgba(255,255,255,0.08)] transition hover:bg-white/[0.05]"><td className="px-4 py-3"><span className={`rounded border px-2 py-0.5 text-[10px] font-semibold uppercase ${anomalySeverityClass(episode.maxSeverity)}`}>{t(episode.maxSeverity, episode.maxSeverity)}</span></td><td className="px-4 py-3"><div className="text-xs font-semibold text-[#f5f3fa]">{anomalyLabel(a)}</div><div className="mt-1 text-[10px] text-[#94a3b8]">{episode.occurrences > 1 ? `${episode.occurrences}x ${t("recurring")}` : t("Detected change")}</div></td><td className="px-4 py-3 font-mono">{a.principal_name && a.principal_name !== "unknown" ? <button type="button" onClick={(event) => { event.stopPropagation(); nav(`/users/${encodeURIComponent(a.principal_name!)}`); }} className="inline-flex items-center gap-1 text-xs font-semibold text-cyan-300 hover:text-white"><User size={12} />{a.principal_name}</button> : a.source_ip ? <span className="text-xs text-cyan-300">{a.source_ip}</span> : <span className="text-[11px] italic text-[#766e92]">{t("Unattributed")}</span>}</td><td className="px-4 py-3 font-mono"><div className="text-xs font-semibold text-[#f5f3fa]">{anomalySubject(a)}</div>{a.operation && <div className="mt-1 max-w-[190px] truncate text-[10px] text-violet-300">{a.operation}</div>}</td><td className="px-4 py-3"><AnomalyValue anomaly={a} latestValue={a.current_value} /></td><td className="px-4 py-3 font-mono text-[10px] text-[#c4bdd9]"><div>{start.toLocaleDateString()}</div><div>{start.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}{duration > 0 && ` → ${end.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}`}</div>{duration > 0 && <span className="text-cyan-300">{duration >= 60 ? `${(duration / 60).toFixed(1)}h` : `${duration}m`}</span>}</td><td className="px-4 py-3"><span className="rounded border border-white/10 bg-white/[0.04] px-2 py-0.5 text-[10px] font-semibold uppercase text-[#c4bdd9]">{t(a.status || "open")}</span></td><td className="px-4 py-3 text-right"><div className="inline-flex items-center gap-1.5">{episode.items.length > 1 && <button type="button" onClick={(event) => { event.stopPropagation(); toggleGroupExpand(episode.groupKey); }} className="inline-flex items-center gap-1 rounded border border-cyan-500/40 bg-cyan-500/10 px-2 py-1 text-[10px] font-semibold text-cyan-200">{expanded ? <ChevronDown size={11} /> : <ChevronRight size={11} />}{episode.items.length} {t("slices")}</button>}<button type="button" onClick={(event) => { event.stopPropagation(); nav(`/anomalies/${a.id}?${queryString(filters)}`); }} className="inline-flex items-center gap-1 rounded border border-white/10 bg-white/[0.03] px-2 py-1 text-[11px] text-[#c4bdd9] hover:text-white">{t("Inspect")} <ArrowRight size={11} /></button></div></td></tr>{expanded && <tr className="border-b border-white/[0.04] bg-cyan-500/[0.03]"><td colSpan={8} className="px-5 py-3"><div className="grid gap-2 md:grid-cols-2">{episode.items.map((slice, index) => <button key={`${slice.id}-${index}`} onClick={() => nav(`/anomalies/${slice.id}?${queryString(filters)}`)} className="flex items-center justify-between rounded border border-cyan-500/20 px-3 py-2 text-left text-[11px] hover:bg-cyan-500/[0.07]"><span className="font-mono text-[#c4bdd9]">#{index + 1} · {new Date(anomalyTime(slice.last_detected_ms || slice.detected_at) || Date.now()).toLocaleString()}</span><span className="text-cyan-300">{t("Inspect Slice")} <ArrowRight size={10} className="inline" /></span></button>)}</div></td></tr>}</Fragment>; }) : filteredItems.map((a) => { const when = new Date(anomalyTime(a.last_detected_ms || a.detected_at) || Date.now()); return <tr key={a.id} onClick={() => nav(`/anomalies/${a.id}?${queryString(filters)}`)} className="cursor-pointer border-b border-[rgba(255,255,255,0.08)] transition hover:bg-white/[0.05]"><td className="px-4 py-3"><span className={`rounded border px-2 py-0.5 text-[10px] font-semibold uppercase ${anomalySeverityClass(a.severity)}`}>{t(a.severity, a.severity)}</span></td><td className="px-4 py-3"><div className="text-xs font-semibold text-[#f5f3fa]">{anomalyLabel(a)}</div><div className="mt-1 text-[10px] text-[#94a3b8]">{a.explanation || t("Detected change")}</div></td><td className="px-4 py-3 font-mono">{a.principal_name && a.principal_name !== "unknown" ? <button type="button" onClick={(event) => { event.stopPropagation(); nav(`/users/${encodeURIComponent(a.principal_name!)}`); }} className="inline-flex items-center gap-1 text-xs font-semibold text-cyan-300 hover:text-white"><User size={12} />{a.principal_name}</button> : a.source_ip ? <span className="text-xs text-cyan-300">{a.source_ip}</span> : <span className="text-[11px] italic text-[#766e92]">{t("Unattributed")}</span>}</td><td className="px-4 py-3 font-mono"><div className="text-xs font-semibold text-[#f5f3fa]">{anomalySubject(a)}</div>{a.operation && <div className="mt-1 max-w-[190px] truncate text-[10px] text-violet-300">{a.operation}</div>}</td><td className="px-4 py-3"><AnomalyValue anomaly={a} /></td><td className="px-4 py-3 font-mono text-[10px] text-[#c4bdd9]">{when.toLocaleDateString()}<span className="block">{when.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</span></td><td className="px-4 py-3"><span className="rounded border border-white/10 bg-white/[0.04] px-2 py-0.5 text-[10px] font-semibold uppercase text-[#c4bdd9]">{t(a.status || "open")}</span></td><td className="px-4 py-3 text-right"><button type="button" onClick={(event) => { event.stopPropagation(); nav(`/anomalies/${a.id}?${queryString(filters)}`); }} className="inline-flex items-center gap-1 rounded border border-white/10 bg-white/[0.03] px-2 py-1 text-[11px] text-[#c4bdd9] hover:text-white">{t("Inspect")} <ArrowRight size={11} /></button></td></tr>; })}
-          {!filteredItems.length && <tr><td colSpan={8} className="p-12 text-center text-xs text-[#c4bdd9]">{t("No anomalies detected matching this perspective and search filter.")}</td></tr>}
+          {grouped ? groupedEpisodes.map((episode) => { const a = episode.master; const expanded = expandedGroupKeys.has(episode.groupKey); const start = new Date(episode.earliest || anomalyTime(a.detected_at) || Date.now()); const end = new Date(episode.latest || anomalyTime(a.detected_at) || Date.now()); const duration = Math.max(0, Math.round((episode.latest - episode.earliest) / 60000)); return <Fragment key={episode.groupKey}><tr onClick={() => nav(`/anomalies/${a.id}?${queryString(filters)}`)} className="cursor-pointer border-b border-line transition hover:bg-hover"><td className="px-4 py-3"><span className={`rounded border px-2 py-0.5 text-[10px] font-semibold uppercase ${anomalySeverityClass(episode.maxSeverity)}`}>{t(episode.maxSeverity, episode.maxSeverity)}</span></td><td className="px-4 py-3"><div className="text-xs font-semibold text-ink">{anomalyLabel(a)}</div><div className="mt-1 text-[10px] text-faint">{episode.occurrences > 1 ? `${episode.occurrences}x ${t("recurring")}` : t("Detected change")}</div></td><td className="px-4 py-3 font-mono">{a.principal_name && a.principal_name !== "unknown" ? <button type="button" onClick={(event) => { event.stopPropagation(); nav(`/users/${encodeURIComponent(a.principal_name!)}`); }} className="inline-flex items-center gap-1 text-xs font-semibold text-entity-api hover:text-ink"><User size={12} />{a.principal_name}</button> : a.source_ip ? <span className="text-xs text-entity-api">{a.source_ip}</span> : <span className="text-[11px] italic text-muted">{t("Unattributed")}</span>}</td><td className="px-4 py-3 font-mono"><div className="text-xs font-semibold text-ink">{anomalySubject(a)}</div>{a.operation && <div className="mt-1 max-w-[190px] truncate text-[10px] text-entity-user">{a.operation}</div>}</td><td className="px-4 py-3"><AnomalyValue anomaly={a} latestValue={a.current_value} /></td><td className="px-4 py-3 font-mono text-[10px] text-muted"><div>{start.toLocaleDateString()}</div><div>{start.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}{duration > 0 && ` → ${end.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}`}</div>{duration > 0 && <span className="text-entity-api">{duration >= 60 ? `${(duration / 60).toFixed(1)}h` : `${duration}m`}</span>}</td><td className="px-4 py-3"><span className="rounded border border-line bg-surface-2 px-2 py-0.5 text-[10px] font-semibold uppercase text-muted">{t(a.status || "open")}</span></td><td className="px-4 py-3 text-right"><div className="inline-flex items-center gap-1.5">{episode.items.length > 1 && <button type="button" onClick={(event) => { event.stopPropagation(); toggleGroupExpand(episode.groupKey); }} className="inline-flex items-center gap-1 rounded border border-line/40 bg-accent/10 px-2 py-1 text-[10px] font-semibold text-accent">{expanded ? <ChevronDown size={11} /> : <ChevronRight size={11} />}{episode.items.length} {t("slices")}</button>}<button type="button" onClick={(event) => { event.stopPropagation(); nav(`/anomalies/${a.id}?${queryString(filters)}`); }} className="inline-flex items-center gap-1 rounded border border-line bg-white/[0.03] px-2 py-1 text-[11px] text-muted hover:text-ink">{t("Inspect")} <ArrowRight size={11} /></button></div></td></tr>{expanded && <tr className="border-b border-white/[0.04] bg-accent/[0.03]"><td colSpan={8} className="px-5 py-3"><div className="grid gap-2 md:grid-cols-2">{episode.items.map((slice, index) => <button key={`${slice.id}-${index}`} onClick={() => nav(`/anomalies/${slice.id}?${queryString(filters)}`)} className="flex items-center justify-between rounded border border-line/20 px-3 py-2 text-left text-[11px] hover:bg-accent/[0.07]"><span className="font-mono text-muted">#{index + 1} · {new Date(anomalyTime(slice.last_detected_ms || slice.detected_at) || Date.now()).toLocaleString()}</span><span className="text-entity-api">{t("Inspect Slice")} <ArrowRight size={10} className="inline" /></span></button>)}</div></td></tr>}</Fragment>; }) : filteredItems.map((a) => { const when = new Date(anomalyTime(a.last_detected_ms || a.detected_at) || Date.now()); return <tr key={a.id} onClick={() => nav(`/anomalies/${a.id}?${queryString(filters)}`)} className="cursor-pointer border-b border-line transition hover:bg-hover"><td className="px-4 py-3"><span className={`rounded border px-2 py-0.5 text-[10px] font-semibold uppercase ${anomalySeverityClass(a.severity)}`}>{t(a.severity, a.severity)}</span></td><td className="px-4 py-3"><div className="text-xs font-semibold text-ink">{anomalyLabel(a)}</div><div className="mt-1 text-[10px] text-faint">{a.explanation || t("Detected change")}</div></td><td className="px-4 py-3 font-mono">{a.principal_name && a.principal_name !== "unknown" ? <button type="button" onClick={(event) => { event.stopPropagation(); nav(`/users/${encodeURIComponent(a.principal_name!)}`); }} className="inline-flex items-center gap-1 text-xs font-semibold text-entity-api hover:text-ink"><User size={12} />{a.principal_name}</button> : a.source_ip ? <span className="text-xs text-entity-api">{a.source_ip}</span> : <span className="text-[11px] italic text-muted">{t("Unattributed")}</span>}</td><td className="px-4 py-3 font-mono"><div className="text-xs font-semibold text-ink">{anomalySubject(a)}</div>{a.operation && <div className="mt-1 max-w-[190px] truncate text-[10px] text-entity-user">{a.operation}</div>}</td><td className="px-4 py-3"><AnomalyValue anomaly={a} /></td><td className="px-4 py-3 font-mono text-[10px] text-muted">{when.toLocaleDateString()}<span className="block">{when.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</span></td><td className="px-4 py-3"><span className="rounded border border-line bg-surface-2 px-2 py-0.5 text-[10px] font-semibold uppercase text-muted">{t(a.status || "open")}</span></td><td className="px-4 py-3 text-right"><button type="button" onClick={(event) => { event.stopPropagation(); nav(`/anomalies/${a.id}?${queryString(filters)}`); }} className="inline-flex items-center gap-1 rounded border border-line bg-white/[0.03] px-2 py-1 text-[11px] text-muted hover:text-ink">{t("Inspect")} <ArrowRight size={11} /></button></td></tr>; })}
+          {!filteredItems.length && <tr><td colSpan={8} className="p-12 text-center text-xs text-muted">{t("No anomalies detected matching this perspective and search filter.")}</td></tr>}
         </tbody></table></div>
       </Panel>}
     </Page>
@@ -1216,7 +1216,7 @@ export function AnomalyDetailPage() {
             {t("Back")}
           </button>
           <button
-            className="btn hover:border-violet-500/40 hover:bg-violet-500/10 hover:text-violet-300"
+            className="btn hover:border-accent/40 hover:bg-accent/10 hover:text-entity-user"
             onClick={() => {
               const el = document.getElementById("investigation-section");
               if (el) {
@@ -1224,25 +1224,25 @@ export function AnomalyDetailPage() {
               }
             }}
           >
-            <Sparkles size={13} className="text-violet-400" />
+            <Sparkles size={13} className="text-entity-user" />
             <span>{t("Investigate Finding", "Investigate finding")}</span>
           </button>
           <button
-            className="btn hover:border-indigo-500/40 hover:bg-indigo-500/10 hover:text-indigo-300"
+            className="btn hover:border-accent/40 hover:bg-accent/10 hover:text-accent"
             onClick={() => mutate.mutate("acknowledged")}
           >
             <Eye size={13} />
             {t("Acknowledge")}
           </button>
           <button
-            className="btn hover:border-emerald-500/40 hover:bg-emerald-500/10 hover:text-emerald-300"
+            className="btn hover:border-good/40 hover:bg-good/10 hover:text-good"
             onClick={() => mutate.mutate("resolved")}
           >
             <Check size={13} />
             {t("Mark Resolved")}
           </button>
           <button
-            className="btn hover:border-amber-500/40 hover:bg-amber-500/10 hover:text-amber-300"
+            className="btn hover:border-warn/40 hover:bg-warn/10 hover:text-warn"
             onClick={() => mutate.mutate("suppressed")}
           >
             <Clock size={13} />
@@ -1253,20 +1253,20 @@ export function AnomalyDetailPage() {
     >
       {/* User-Centric Attributed Identity Profile Card */}
       {Boolean(a.principal_name || a.source_ip || (a.blast_radius?.affected_principals && a.blast_radius.affected_principals.length > 0)) && (
-        <div className="mb-4 rounded-xl border border-cyan-500/30 bg-[#141624] p-5">
+        <div className="mb-4 rounded-xl border border-line/30 bg-surface p-5">
           <div className="flex items-center justify-between flex-wrap gap-3">
             <div className="flex items-center gap-3">
-              <div className="flex h-10 w-10 items-center justify-center rounded-lg border border-cyan-400/40 bg-cyan-500/20 text-cyan-300">
+              <div className="flex h-10 w-10 items-center justify-center rounded-lg border border-line/40 bg-accent/20 text-entity-api">
                 <UserRoundSearch size={22} />
               </div>
               <div>
-                <div className="text-[10px] font-bold uppercase tracking-wider text-cyan-300">
+                <div className="text-[10px] font-bold uppercase tracking-wider text-entity-api">
                   {t("User Intelligence & Identity Context")}
                 </div>
                 <div className="text-base font-bold text-white flex items-center gap-2 mt-0.5">
                   <span>{a.principal_name && a.principal_name !== "unknown" ? a.principal_name : t("Attributed Identity / User")}</span>
                   {a.source_ip && (
-                    <span className="rounded border border-cyan-400/40 bg-cyan-400/10 px-2 py-0.5 font-mono text-xs text-cyan-200">
+                    <span className="rounded border border-line/40 bg-accent/10 px-2 py-0.5 font-mono text-xs text-accent">
                       IP: {a.source_ip}
                     </span>
                   )}
@@ -1278,7 +1278,7 @@ export function AnomalyDetailPage() {
               {a.principal_name && a.principal_name !== "unknown" && (
                 <button
                   onClick={() => nav(`/users/${encodeURIComponent(a.principal_name!)}`)}
-                  className="inline-flex items-center gap-1.5 rounded-lg border border-cyan-500/50 bg-cyan-500/20 px-3 py-1.5 text-xs font-semibold text-cyan-200 transition hover:bg-cyan-500/30 hover:border-cyan-300 hover:text-white"
+                  className="inline-flex items-center gap-1.5 rounded-lg border border-line/50 bg-accent/20 px-3 py-1.5 text-xs font-semibold text-accent transition hover:bg-accent/30 hover:border-accent hover:text-ink"
                 >
                   <User size={13} />
                   <span>{t("Investigate User Profile")}</span>
@@ -1287,13 +1287,13 @@ export function AnomalyDetailPage() {
               )}
               <button
                 onClick={() => nav("/user-analytics")}
-                className="inline-flex items-center gap-1.5 rounded-lg border border-violet-500/40 bg-violet-500/15 px-3 py-1.5 text-xs font-medium text-violet-200 transition hover:bg-violet-500/25 hover:text-white"
+                className="inline-flex items-center gap-1.5 rounded-lg border border-line/40 bg-accent/15 px-3 py-1.5 text-xs font-medium text-entity-user transition hover:bg-accent/25 hover:text-ink"
               >
                 <span>{t("View User Graph")}</span>
               </button>
               <button
                 onClick={() => nav("/user-changes")}
-                className="inline-flex items-center gap-1.5 rounded-lg border border-amber-500/40 bg-amber-500/15 px-3 py-1.5 text-xs font-medium text-amber-200 transition hover:bg-amber-500/25 hover:text-white"
+                className="inline-flex items-center gap-1.5 rounded-lg border border-warn/40 bg-warn/15 px-3 py-1.5 text-xs font-medium text-warn transition hover:bg-warn/25 hover:text-ink"
               >
                 <span>{t("User Changes Feed")}</span>
               </button>
@@ -1302,8 +1302,8 @@ export function AnomalyDetailPage() {
 
           {/* Affected Principals summary if present */}
           {Boolean(a.blast_radius?.affected_principals && a.blast_radius.affected_principals.length > 0) && (
-            <div className="mt-4 pt-3 border-t border-cyan-500/20 flex items-center gap-2 flex-wrap">
-              <span className="text-[11px] font-semibold text-[#c4bdd9]">
+            <div className="mt-4 pt-3 border-t border-line/20 flex items-center gap-2 flex-wrap">
+              <span className="text-[11px] font-semibold text-muted">
                 {t("Affected Principals in Blast Radius:")}
               </span>
               {(a.blast_radius?.affected_principals || []).map((p, idx) => {
@@ -1312,7 +1312,7 @@ export function AnomalyDetailPage() {
                   <button
                     key={pName || idx}
                     onClick={() => nav(`/users/${encodeURIComponent(pName)}`)}
-                    className="rounded-md border border-cyan-500/30 bg-cyan-500/10 px-2 py-0.5 font-mono text-[11px] text-cyan-300 transition hover:bg-cyan-500/20 hover:text-white"
+                    className="rounded-md border border-line/30 bg-accent/10 px-2 py-0.5 font-mono text-[11px] text-entity-api transition hover:bg-accent/20 hover:text-ink"
                   >
                     {pName}
                   </button>
@@ -1324,20 +1324,20 @@ export function AnomalyDetailPage() {
       )}
 
       {/* What Changed Compared With Normal Explainability Card */}
-      <div className="rounded-xl border border-violet-500/30 bg-[#141624] p-5">
+      <div className="rounded-xl border border-line/30 bg-surface p-5">
         <div className="flex items-center gap-2 mb-2">
-          <ShieldAlert className="text-violet-400" size={18} />
-          <h3 className="text-sm font-semibold uppercase tracking-wider text-violet-200">
+          <ShieldAlert className="text-entity-user" size={18} />
+          <h3 className="text-sm font-semibold uppercase tracking-wider text-entity-user">
             {t("What Changed Compared With Normal?")}
           </h3>
         </div>
-        <p className="text-xs text-[#f5f3fa] leading-relaxed">
+        <p className="text-xs text-ink leading-relaxed">
           {a.explanation}
         </p>
 
-        <div className="mt-4 grid grid-cols-1 gap-4 lg:grid-cols-2 pt-3 border-t border-[rgba(255,255,255,0.12)]">
-          <div className="rounded-lg border border-[rgba(255,255,255,0.12)] bg-white/[0.04] p-3.5 text-xs">
-            <span className="text-[10px] font-semibold uppercase tracking-wider text-amber-300 flex items-center gap-1.5">
+        <div className="mt-4 grid grid-cols-1 gap-4 lg:grid-cols-2 pt-3 border-t border-line">
+          <div className="rounded-lg border border-line bg-surface-2 p-3.5 text-xs">
+            <span className="text-[10px] font-semibold uppercase tracking-wider text-warn flex items-center gap-1.5">
               <AlertTriangle size={12} /> {t("Probable Incident Origin")}
             </span>
             <div className="mt-2 flex items-baseline gap-2">
@@ -1345,40 +1345,40 @@ export function AnomalyDetailPage() {
                 {a.root_cause?.origin_service || a.entity_id}
               </span>
               {a.root_cause?.confidence_score != null && (
-                <span className="text-[10px] font-mono text-[#c4bdd9]">
+                <span className="text-[10px] font-mono text-muted">
                   (confidence: {(Number(a.root_cause.confidence_score) * 100).toFixed(0)}%)
                 </span>
               )}
             </div>
-            <p className="mt-1 text-[11px] text-[#c4bdd9]">
+            <p className="mt-1 text-[11px] text-muted">
               {a.root_cause?.reason || "Observed baseline deviation originated on this service component."}
             </p>
           </div>
 
-          <div className="rounded-lg border border-[rgba(255,255,255,0.12)] bg-white/[0.04] p-3.5 text-xs">
-            <span className="text-[10px] font-semibold uppercase tracking-wider text-rose-300 flex items-center gap-1.5">
+          <div className="rounded-lg border border-line bg-surface-2 p-3.5 text-xs">
+            <span className="text-[10px] font-semibold uppercase tracking-wider text-bad flex items-center gap-1.5">
               <AlertOctagon size={12} /> {t("Incident Blast Radius")}
             </span>
             <div className="mt-2 space-y-1.5 text-[11px]">
               <div className="flex items-center justify-between">
-                <span className="text-[#c4bdd9]">{t("Upstream Callers:")}</span>
-                <span className="font-mono text-[#f5f3fa]">
+                <span className="text-muted">{t("Upstream Callers:")}</span>
+                <span className="font-mono text-ink">
                   {a.blast_radius?.direct_callers?.length
                     ? a.blast_radius.direct_callers.map(getEntityName).filter(Boolean).join(", ")
                     : t("None detected")}
                 </span>
               </div>
               <div className="flex items-center justify-between">
-                <span className="text-[#c4bdd9]">{t("Affected Principals:")}</span>
-                <span className="font-mono text-cyan-300">
+                <span className="text-muted">{t("Affected Principals:")}</span>
+                <span className="font-mono text-entity-api">
                   {a.blast_radius?.affected_principals?.length
                     ? a.blast_radius.affected_principals.map(getEntityName).filter(Boolean).join(", ")
                     : t("None identified")}
                 </span>
               </div>
               <div className="flex items-center justify-between">
-                <span className="text-[#c4bdd9]">{t("Impacted Operations:")}</span>
-                <span className="font-mono text-[#f5f3fa]">
+                <span className="text-muted">{t("Impacted Operations:")}</span>
+                <span className="font-mono text-ink">
                   {a.blast_radius?.affected_operations?.length || 1} {t("Operations").toLowerCase()}
                 </span>
               </div>
@@ -1442,38 +1442,38 @@ export function AnomalyDetailPage() {
         title={t("Incident Time Horizon: Actual vs Expected Baseline")}
         subtitle={`${t("Shaded region highlights the anomaly window")} (${a.unit || "metrics"})`}
         className="mt-4"
-        action={<span className="rounded-lg border border-[#262838] bg-[#0c0d14] px-3 py-1.5 text-[11px] font-semibold text-[#94a3b8]">{t("5-minute buckets · 7-day history")}</span>}
+        action={<span className="rounded-lg border border-line bg-page px-3 py-1.5 text-[11px] font-semibold text-faint">{t("5-minute buckets · 7-day history")}</span>}
       >
         <div className="h-[340px] p-4">
           <ResponsiveContainer>
             <ComposedChart data={chartData}>
-              <CartesianGrid stroke="rgba(255,255,255,0.08)" vertical={false} />
+              <CartesianGrid stroke="var(--grid)" vertical={false} />
               <XAxis
                 dataKey="timestamp_ms"
                 tickFormatter={(v) => {
                   const d = new Date(v);
                   return `${d.getMonth() + 1}/${d.getDate()} ${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
                 }}
-                stroke="#766e92"
+                stroke="var(--text-muted)"
               />
-              <YAxis stroke="#766e92" />
+              <YAxis stroke="var(--text-muted)" />
               <Tooltip {...chartTooltip} />
               <ReferenceArea
                 x1={a.window_start_ms}
                 x2={a.window_end_ms}
-                fill="#fb7185"
+                fill="var(--bad)"
                 fillOpacity={0.2}
               />
               <Area
                 dataKey={metric}
-                stroke="#a78bfa"
-                fill="#8b5cf6"
+                stroke="var(--accent)"
+                fill="var(--accent)"
                 fillOpacity={0.2}
                 name={t("Actual Observed")}
               />
               <Line
                 dataKey="expected"
-                stroke="#34d399"
+                stroke="var(--good)"
                 strokeDasharray="4 4"
                 strokeWidth={1.5}
                 dot={false}
@@ -1490,7 +1490,7 @@ export function AnomalyDetailPage() {
           subtitle={t("Wilson score & MAD threshold specifics")}
         >
           <div className="p-5 space-y-4">
-            <div className="rounded-lg border border-[rgba(255,255,255,0.08)] bg-white/[0.02] p-4 text-xs leading-relaxed text-[#c9d1d9] font-mono">
+            <div className="rounded-lg border border-line bg-surface-2 p-4 text-xs leading-relaxed text-ink font-mono">
               {a.rule || "Baseline MAD & rolling statistics thresholding"}
             </div>
             <div className="grid grid-cols-2 gap-3">
@@ -1516,7 +1516,7 @@ export function AnomalyDetailPage() {
         >
           <div className="p-5 space-y-4">
             <div>
-              <div className="text-[10px] font-semibold uppercase tracking-wider text-[#8b949e] mb-2">
+              <div className="text-[10px] font-semibold uppercase tracking-wider text-muted mb-2">
                 {t("Documented Limitations")}
               </div>
               <div className="space-y-1.5">
@@ -1526,9 +1526,9 @@ export function AnomalyDetailPage() {
                 ]).map((l) => (
                   <div
                     key={l}
-                    className="flex items-start gap-2 rounded-md border border-amber-500/20 bg-amber-500/5 p-2.5 text-xs text-amber-200/80"
+                    className="flex items-start gap-2 rounded-md border border-warn/20 bg-warn/5 p-2.5 text-xs text-warn/80"
                   >
-                    <ShieldAlert size={14} className="mt-0.5 shrink-0 text-amber-400" />
+                    <ShieldAlert size={14} className="mt-0.5 shrink-0 text-warn" />
                     <span>{l}</span>
                   </div>
                 ))}
@@ -1536,7 +1536,7 @@ export function AnomalyDetailPage() {
             </div>
 
             <div>
-              <div className="text-[10px] font-semibold uppercase tracking-wider text-[#8b949e] mb-2">
+              <div className="text-[10px] font-semibold uppercase tracking-wider text-muted mb-2">
                 {t("Representative Traces")}
               </div>
               {Boolean(a.trace_ids && a.trace_ids.length > 0) ? (
@@ -1547,7 +1547,7 @@ export function AnomalyDetailPage() {
                       href={`/api/v1/traces/${encodeURIComponent(trace)}`}
                       target="_blank"
                       rel="noreferrer"
-                      className="inline-flex items-center gap-1 rounded-md border border-[rgba(255,255,255,0.08)] bg-white/[0.03] px-2.5 py-1 font-mono text-xs text-indigo-400 hover:border-indigo-500/40 hover:bg-white/[0.06]"
+                      className="inline-flex items-center gap-1 rounded-md border border-line bg-white/[0.03] px-2.5 py-1 font-mono text-xs text-entity-user hover:border-accent/40 hover:bg-white/[0.06]"
                     >
                       <span>{trace.slice(0, 16)}…</span>
                       <ExternalLink size={11} />
@@ -1555,7 +1555,7 @@ export function AnomalyDetailPage() {
                   ))}
                 </div>
               ) : (
-                <div className="text-xs text-[#8b949e]">
+                <div className="text-xs text-muted">
                   {t("No data")}
                 </div>
               )}
@@ -1579,13 +1579,13 @@ export function AnomalyDetailPage() {
                 className="flex w-full items-center justify-between gap-4 p-4 text-left transition hover:bg-white/[.04]"
               >
                 <div className="flex items-start gap-3">
-                  <div className="mt-0.5 flex h-8 w-8 items-center justify-center rounded-lg border border-cyan-500/30 bg-cyan-500/10 text-cyan-300">
+                  <div className="mt-0.5 flex h-8 w-8 items-center justify-center rounded-lg border border-line/30 bg-accent/10 text-entity-api">
                     <User size={15} />
                   </div>
                   <div>
-                    <div className="font-mono text-xs font-semibold text-cyan-300 flex items-center gap-2">
+                    <div className="font-mono text-xs font-semibold text-entity-api flex items-center gap-2">
                       <span>{user.principal_name}</span>
-                      <ExternalLink size={10} className="text-[#8b949e]" />
+                      <ExternalLink size={10} className="text-muted" />
                     </div>
                     <div className="mt-1 flex flex-wrap gap-1.5">
                       {user.changes.length ? (
@@ -1594,17 +1594,17 @@ export function AnomalyDetailPage() {
                             key={c.id}
                             className={`rounded px-1.5 py-0.2 text-[10px] font-medium uppercase tracking-wide ${
                               c.severity === "critical"
-                                ? "border border-rose-500/40 bg-rose-500/20 text-rose-300"
+                                ? "border border-bad/40 bg-bad/20 text-bad"
                                 : c.severity === "high"
-                                  ? "border border-amber-500/40 bg-amber-500/20 text-amber-300"
-                                  : "border border-cyan-500/40 bg-cyan-500/20 text-cyan-300"
+                                  ? "border border-warn/40 bg-warn/20 text-warn"
+                                  : "border border-line/40 bg-accent/20 text-entity-api"
                             }`}
                           >
                             {t(c.change_type, c.change_type.replaceAll("_", " "))}
                           </span>
                         ))
                       ) : (
-                        <span className="text-[10px] text-[#8b949e]">
+                        <span className="text-[10px] text-muted">
                           {t("Normal behavior pattern during window")}
                         </span>
                       )}
@@ -1616,7 +1616,7 @@ export function AnomalyDetailPage() {
                   <div className="font-mono text-sm font-semibold text-white">
                     {(user.traffic_share * 100).toFixed(1)}%
                   </div>
-                  <div className="text-[10px] text-[#8b949e]">
+                  <div className="text-[10px] text-muted">
                     {n(user.requests)} {t("requests")}
                   </div>
                 </div>
@@ -1624,7 +1624,7 @@ export function AnomalyDetailPage() {
             ))}
           </div>
         ) : (
-          <div className="p-8 text-center text-xs text-[#8b949e]">
+          <div className="p-8 text-center text-xs text-muted">
             {t("No user-specific traffic records were attributed to this anomaly window.")}
           </div>
         )}
@@ -1635,9 +1635,9 @@ export function AnomalyDetailPage() {
 
 function Fact({ k, v }: { k: string; v: string }) {
   return (
-    <div className="rounded-lg border border-[rgba(255,255,255,0.06)] bg-white/[0.02] p-3">
-      <div className="text-[10px] font-semibold uppercase tracking-wider text-[#8b949e]">{k}</div>
-      <div className="mt-1 text-xs font-medium text-[#f0f3f6]">{v}</div>
+    <div className="rounded-lg border border-[rgba(255,255,255,0.06)] bg-surface-2 p-3">
+      <div className="text-[10px] font-semibold uppercase tracking-wider text-muted">{k}</div>
+      <div className="mt-1 text-xs font-medium text-ink">{v}</div>
     </div>
   );
 }

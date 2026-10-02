@@ -44,6 +44,7 @@ from backend.app.services.aggregation import aggregate_traces
 from backend.app.services.anomaly_detection import detect_anomalies
 from backend.app.services.baseline import rebuild_baselines
 from backend.app.services.normalization import normalize_otel_record
+from backend.app.services.principal_activity import materialize_principal_activity
 from backend.app.services.principal_relationships import process_principal_intelligence
 from backend.app.services.prometheus_metrics import update_worker_prometheus_metrics
 from backend.scripts.reset_testbed import wipe_clickhouse, wipe_elasticsearch, truncate_system_logs
@@ -438,6 +439,8 @@ def derive_analytics(now_sec: float):
 
     t2 = time.time()
     print("Stage 3/5: Deriving principal behavioral profiles, shifts & incidents...")
+    # User behavior reads the activity rollup, so build it from the loaded traces first.
+    materialize_principal_activity(0, 4_102_444_800_000)
     p_result = process_principal_intelligence(force_bootstrap=True)
     print(f"  Principals processed: {p_result} in {round(time.time() - t2, 2)}s")
 

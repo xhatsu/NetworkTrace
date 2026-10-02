@@ -18,7 +18,7 @@
 # ---------------------------------------------------------------------------
 # Stage 1 — build the React/TypeScript SPA
 # ---------------------------------------------------------------------------
-FROM node:22-alpine AS ui-builder
+FROM --platform=$BUILDPLATFORM node:22-alpine AS ui-builder
 WORKDIR /src/frontend
 COPY frontend/package.json frontend/package-lock.json* ./
 RUN npm ci --no-audit --no-fund || npm install --no-audit --no-fund

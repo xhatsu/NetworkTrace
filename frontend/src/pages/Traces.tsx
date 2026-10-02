@@ -79,13 +79,13 @@ export function TracesPage() {
       actions={
         <div className="flex flex-wrap items-center gap-2">
           <div className="relative">
-            <Search className="absolute left-2.5 top-2 text-[#8b949e]" size={13} />
+            <Search className="absolute left-2.5 top-2 text-muted" size={13} />
             <input
               type="text"
               placeholder={t("Filter by Trace ID...")}
               value={traceIdFilter}
               onChange={(e) => setTraceIdFilter(e.target.value)}
-              className="h-8 w-48 rounded-lg border border-[rgba(255,255,255,0.08)] bg-white/[0.02] pl-8 pr-3 text-xs text-[#f0f3f6] placeholder:text-[#6e7681] focus:border-indigo-500/50 focus:outline-none"
+              className="h-8 w-48 rounded-lg border border-line bg-surface-2 pl-8 pr-3 text-xs text-ink placeholder:text-muted focus:border-accent/50 focus:outline-none"
             />
           </div>
           <div className="relative">
@@ -94,7 +94,7 @@ export function TracesPage() {
               placeholder={`${t("Service")}...`}
               value={serviceFilter}
               onChange={(e) => setServiceFilter(e.target.value)}
-              className="h-8 w-32 rounded-lg border border-[rgba(255,255,255,0.08)] bg-white/[0.02] px-3 text-xs text-[#f0f3f6] placeholder:text-[#6e7681] focus:border-indigo-500/50 focus:outline-none"
+              className="h-8 w-32 rounded-lg border border-line bg-surface-2 px-3 text-xs text-ink placeholder:text-muted focus:border-accent/50 focus:outline-none"
             />
           </div>
           <div className="relative">
@@ -103,17 +103,17 @@ export function TracesPage() {
               placeholder={`${t("Principal")}...`}
               value={principalFilter}
               onChange={(e) => setPrincipalFilter(e.target.value)}
-              className="h-8 w-28 rounded-lg border border-[rgba(255,255,255,0.08)] bg-white/[0.02] px-3 text-xs text-[#f0f3f6] placeholder:text-[#6e7681] focus:border-indigo-500/50 focus:outline-none"
+              className="h-8 w-28 rounded-lg border border-line bg-surface-2 px-3 text-xs text-ink placeholder:text-muted focus:border-accent/50 focus:outline-none"
             />
           </div>
           <select
             value={statusFilter}
             onChange={(e) => setStatusFilter(e.target.value)}
-            className="btn h-8 bg-[rgba(255,255,255,0.02)] text-xs cursor-pointer"
+            className="btn h-8 bg-surface-2 text-xs cursor-pointer"
           >
-            <option value="" className="bg-[#12151a]">{t("All Statuses")}</option>
-            <option value="error" className="bg-[#12151a]">{t("Errors Only (5xx/Failure)")}</option>
-            <option value="ok" className="bg-[#12151a]">{t("Success (2xx)")}</option>
+            <option value="" className="bg-surface">{t("All Statuses")}</option>
+            <option value="error" className="bg-surface">{t("Errors Only (5xx/Failure)")}</option>
+            <option value="ok" className="bg-surface">{t("Success (2xx)")}</option>
           </select>
         </div>
       }
@@ -130,7 +130,7 @@ export function TracesPage() {
           <div className="overflow-auto scrollbar">
             <table className="w-full min-w-[1000px] text-left">
               <thead>
-                <tr className="border-b border-[rgba(255,255,255,0.06)] bg-white/[0.01] text-[11px] font-semibold uppercase tracking-wider text-[#8b949e]">
+                <tr className="border-b border-[rgba(255,255,255,0.06)] bg-white/[0.01] text-[11px] font-semibold uppercase tracking-wider text-muted">
                   <th className="px-4 py-3">{t("Trace ID")}</th>
                   <th className="px-4 py-3">{t("Timestamp")}</th>
                   <th className="px-4 py-3">{t("Service & Operation")}</th>
@@ -149,56 +149,56 @@ export function TracesPage() {
                       onClick={() => nav(`/traces/${item.trace_id}`)}
                       className="cursor-pointer transition hover:bg-white/[0.03]"
                     >
-                      <td className="px-4 py-3 font-mono text-indigo-400">
+                      <td className="px-4 py-3 font-mono text-entity-user">
                         <span className="hover:underline">{item.trace_id.slice(0, 16)}...</span>
                       </td>
-                      <td className="px-4 py-3 font-mono text-[#8b949e]">
+                      <td className="px-4 py-3 font-mono text-muted">
                         {new Date(item.timestamp_ms).toLocaleTimeString()}
                       </td>
                       <td className="px-4 py-3">
                         <div className="flex items-center gap-1.5">
-                          <EntityLink entity={{ kind: "service", name: item.target_service || item.service_name }} className="font-mono font-medium text-emerald-400 hover:underline">{item.service_name || item.target_service}</EntityLink>
-                          <span className="text-[#8b949e]">/</span>
-                          <EntityLink entity={{ kind: "api", service: item.target_service || item.service_name, operation: item.operation }} className="font-mono text-[#f0f3f6] hover:underline">{item.operation}</EntityLink>
+                          <EntityLink entity={{ kind: "service", name: item.target_service || item.service_name }} className="font-mono font-medium text-good hover:underline">{item.service_name || item.target_service}</EntityLink>
+                          <span className="text-muted">/</span>
+                          <EntityLink entity={{ kind: "api", service: item.target_service || item.service_name, operation: item.operation }} className="font-mono text-ink hover:underline">{item.operation}</EntityLink>
                         </div>
                       </td>
-                      <td className="px-4 py-3 font-mono text-[#8b949e]">
+                      <td className="px-4 py-3 font-mono text-muted">
                         {item.principal_name && item.principal_name !== "unknown" ? (
-                          <EntityLink entity={{ kind: "user", principal: item.principal_name }} className="font-medium text-indigo-300 hover:underline">{item.principal_name}</EntityLink>
+                          <EntityLink entity={{ kind: "user", principal: item.principal_name }} className="font-medium text-entity-user hover:underline">{item.principal_name}</EntityLink>
                         ) : (
-                          <span className="text-[#6e7681]">unknown</span>
+                          <span className="text-faint">unknown</span>
                         )}
                       </td>
-                      <td className="px-4 py-3 text-right font-mono text-[#c9d1d9]">
+                      <td className="px-4 py-3 text-right font-mono text-ink">
                         {item.duration_ms ? `${item.duration_ms.toFixed(1)} ms` : "0.0 ms"}
                       </td>
                       <td className="px-4 py-3 text-right font-mono">
                         {item.http_status ? (
                           isError ? (
-                            <span className="inline-flex items-center gap-1 rounded bg-rose-500/10 px-2 py-0.5 text-[11px] font-semibold text-rose-400 border border-rose-500/20">
+                            <span className="inline-flex items-center gap-1 rounded bg-bad/10 px-2 py-0.5 text-[11px] font-semibold text-bad border border-bad/20">
                               {item.http_status} ERROR
                             </span>
                           ) : (
-                            <span className="inline-flex items-center gap-1 rounded bg-emerald-500/10 px-2 py-0.5 text-[11px] font-semibold text-emerald-400 border border-emerald-500/20">
+                            <span className="inline-flex items-center gap-1 rounded bg-good/10 px-2 py-0.5 text-[11px] font-semibold text-good border border-good/20">
                               {item.http_status} OK
                             </span>
                           )
                         ) : isError ? (
-                          <span className="inline-flex items-center gap-1 rounded bg-rose-500/10 px-2 py-0.5 text-[11px] font-semibold text-rose-400 border border-rose-500/20">
+                          <span className="inline-flex items-center gap-1 rounded bg-bad/10 px-2 py-0.5 text-[11px] font-semibold text-bad border border-bad/20">
                             ERROR
                           </span>
                         ) : item.outcome === "success" ? (
-                          <span className="inline-flex items-center gap-1 rounded bg-emerald-500/10 px-2 py-0.5 text-[11px] font-semibold text-emerald-400 border border-emerald-500/20">
+                          <span className="inline-flex items-center gap-1 rounded bg-good/10 px-2 py-0.5 text-[11px] font-semibold text-good border border-good/20">
                             200 OK
                           </span>
                         ) : (
-                          <span className="inline-flex items-center gap-1 rounded bg-slate-500/10 px-2 py-0.5 text-[11px] font-semibold text-slate-400 border border-slate-500/20">
+                          <span className="inline-flex items-center gap-1 rounded bg-surface-2/10 px-2 py-0.5 text-[11px] font-semibold text-muted border border-line/20">
                             N/A
                           </span>
                         )}
                       </td>
                       <td className="px-4 py-3 text-right">
-                        <span className="inline-flex items-center gap-1 text-[11px] text-indigo-400 hover:text-indigo-300">
+                        <span className="inline-flex items-center gap-1 text-[11px] text-entity-user hover:text-accent">
                           {t("Waterfall")} <ChevronRight size={12} />
                         </span>
                       </td>
@@ -207,7 +207,7 @@ export function TracesPage() {
                 })}
                 {(!q.data?.items || q.data.items.length === 0) && (
                   <tr>
-                    <td colSpan={7} className="px-4 py-8 text-center text-xs text-[#8b949e]">
+                    <td colSpan={7} className="px-4 py-8 text-center text-xs text-muted">
                       {t("No traces match current filters.")}
                     </td>
                   </tr>
@@ -318,19 +318,19 @@ export function TraceDetailPage() {
                     onClick={() => setSelectedSpan(span)}
                     className={`group flex cursor-pointer items-center gap-3 rounded-lg border p-2 transition ${
                       isSelected
-                        ? "border-indigo-500 bg-indigo-500/10"
+                        ? "border-line bg-accent/10"
                         : "border-[rgba(255,255,255,0.04)] bg-white/[0.01] hover:border-[rgba(255,255,255,0.1)] hover:bg-white/[0.03]"
                     }`}
                   >
                     {/* Left: Service & Operation */}
                     <div className="w-56 shrink-0 truncate">
                       <div className="flex items-center gap-1.5 truncate">
-                        <span className={`h-2 w-2 rounded-full ${isErr ? "bg-rose-400" : "bg-emerald-400"}`} />
-                        <EntityLink entity={{ kind: "service", name: span.target_service || span.service_name }} className="truncate font-mono text-xs font-semibold text-[#f0f3f6] hover:underline">
+                        <span className={`h-2 w-2 rounded-full ${isErr ? "bg-bad" : "bg-good"}`} />
+                        <EntityLink entity={{ kind: "service", name: span.target_service || span.service_name }} className="truncate font-mono text-xs font-semibold text-ink hover:underline">
                           {span.service_name || span.target_service}
                         </EntityLink>
                       </div>
-                      <div className="pl-3.5 truncate font-mono text-[10px] text-[#8b949e]">
+                      <div className="pl-3.5 truncate font-mono text-[10px] text-muted">
                         {span.target_service || span.service_name
                           ? <EntityLink entity={{ kind: "api", service: span.target_service || span.service_name, operation: span.operation }} className="hover:underline">{span.operation}</EntityLink>
                           : span.operation}
@@ -338,7 +338,7 @@ export function TraceDetailPage() {
                     </div>
 
                     {/* Middle: Timeline bar */}
-                    <div className="relative h-6 flex-1 rounded bg-white/[0.02]">
+                    <div className="relative h-6 flex-1 rounded bg-surface-2">
                       <div
                         style={{
                           left: `${startPct}%`,
@@ -346,8 +346,8 @@ export function TraceDetailPage() {
                         }}
                         className={`absolute top-1 h-4 rounded text-[10px] font-mono px-1 flex items-center shadow-sm ${
                           isErr
-                            ? "bg-rose-500/80 text-white"
-                            : "bg-indigo-600/80 text-white"
+                            ? "bg-bad/80 text-white"
+                            : "bg-accent/80 text-white"
                         }`}
                       >
                         <span className="truncate">{span.duration_ms ? `${span.duration_ms.toFixed(1)}ms` : "0ms"}</span>
@@ -358,10 +358,10 @@ export function TraceDetailPage() {
                     <div className="w-20 shrink-0 text-right">
                       <span className={`font-mono text-[10px] px-1.5 py-0.5 rounded ${
                         isErr
-                          ? "bg-rose-500/20 text-rose-300"
+                          ? "bg-bad/20 text-bad"
                           : (span.http_status || span.outcome === "success")
-                          ? "bg-emerald-500/20 text-emerald-300"
-                          : "bg-slate-500/20 text-slate-300"
+                          ? "bg-good/20 text-good"
+                          : "bg-surface-2/20 text-muted"
                       }`}>
                         {span.http_status || (span.outcome === "failure" ? "500" : span.outcome === "success" ? "200" : "N/A")}
                       </span>
@@ -382,7 +382,7 @@ export function TraceDetailPage() {
               action={
                 <button
                   onClick={() => setSelectedSpan(null)}
-                  className="text-xs text-[#8b949e] hover:text-white"
+                  className="text-xs text-muted hover:text-ink"
                 >
                   {t("Close")}
                 </button>
@@ -390,46 +390,46 @@ export function TraceDetailPage() {
             >
               <div className="space-y-3 text-xs">
                 <div>
-                  <span className="text-[10px] font-semibold uppercase text-[#8b949e]">{t("Service")}</span>
-                  <EntityLink entity={{ kind: "service", name: selectedSpan.target_service || selectedSpan.service_name }} className="font-mono font-medium text-[#f0f3f6] hover:underline">{selectedSpan.service_name || selectedSpan.target_service}</EntityLink>
+                  <span className="text-[10px] font-semibold uppercase text-muted">{t("Service")}</span>
+                  <EntityLink entity={{ kind: "service", name: selectedSpan.target_service || selectedSpan.service_name }} className="font-mono font-medium text-ink hover:underline">{selectedSpan.service_name || selectedSpan.target_service}</EntityLink>
                 </div>
 
                 <div>
-                  <span className="text-[10px] font-semibold uppercase text-[#8b949e]">{t("Operation")}</span>
+                  <span className="text-[10px] font-semibold uppercase text-muted">{t("Operation")}</span>
                   {(selectedSpan.target_service || selectedSpan.service_name)
-                    ? <EntityLink entity={{ kind: "api", service: selectedSpan.target_service || selectedSpan.service_name, operation: selectedSpan.operation }} className="break-all font-mono text-[#f0f3f6] hover:underline">{selectedSpan.operation}</EntityLink>
-                    : <div className="break-all font-mono text-[#f0f3f6]">{selectedSpan.operation}</div>}
+                    ? <EntityLink entity={{ kind: "api", service: selectedSpan.target_service || selectedSpan.service_name, operation: selectedSpan.operation }} className="break-all font-mono text-ink hover:underline">{selectedSpan.operation}</EntityLink>
+                    : <div className="break-all font-mono text-ink">{selectedSpan.operation}</div>}
                 </div>
 
                 <div className="grid grid-cols-2 gap-2">
                   <div>
-                    <span className="text-[10px] font-semibold uppercase text-[#8b949e]">{t("Duration")}</span>
-                    <div className="font-mono text-[#c9d1d9]">{selectedSpan.duration_ms?.toFixed(2)} ms</div>
+                    <span className="text-[10px] font-semibold uppercase text-muted">{t("Duration")}</span>
+                    <div className="font-mono text-ink">{selectedSpan.duration_ms?.toFixed(2)} ms</div>
                   </div>
                   <div>
-                    <span className="text-[10px] font-semibold uppercase text-[#8b949e]">{t("HTTP Status")}</span>
-                    <div className="font-mono text-[#c9d1d9]">{selectedSpan.http_status || "N/A"}</div>
+                    <span className="text-[10px] font-semibold uppercase text-muted">{t("HTTP Status")}</span>
+                    <div className="font-mono text-ink">{selectedSpan.http_status || "N/A"}</div>
                   </div>
                 </div>
 
                 <div>
-                  <span className="text-[10px] font-semibold uppercase text-[#8b949e]">{t("Principal Actor")}</span>
-                  {selectedSpan.principal_name ? <EntityLink entity={{ kind: "user", principal: selectedSpan.principal_name }} className="font-mono text-indigo-300 hover:underline">{selectedSpan.principal_name}</EntityLink> : <div className="font-mono text-indigo-300">unknown</div>}
+                  <span className="text-[10px] font-semibold uppercase text-muted">{t("Principal Actor")}</span>
+                  {selectedSpan.principal_name ? <EntityLink entity={{ kind: "user", principal: selectedSpan.principal_name }} className="font-mono text-entity-user hover:underline">{selectedSpan.principal_name}</EntityLink> : <div className="font-mono text-entity-user">unknown</div>}
                 </div>
 
                 {selectedSpan.caller_service && (
                   <div>
-                    <span className="text-[10px] font-semibold uppercase text-[#8b949e]">{t("Caller Service")}</span>
-                    <EntityLink entity={{ kind: "service", name: selectedSpan.caller_service }} className="font-mono text-[#8b949e] hover:underline">{selectedSpan.caller_service}</EntityLink>
+                    <span className="text-[10px] font-semibold uppercase text-muted">{t("Caller Service")}</span>
+                    <EntityLink entity={{ kind: "service", name: selectedSpan.caller_service }} className="font-mono text-muted hover:underline">{selectedSpan.caller_service}</EntityLink>
                   </div>
                 )}
 
                 {selectedSpan.attributes_json && (
                   <div>
-                    <span className="text-[10px] font-semibold uppercase text-[#8b949e] mb-1 flex items-center gap-1">
+                    <span className="text-[10px] font-semibold uppercase text-muted mb-1 flex items-center gap-1">
                       <FileJson size={12} /> {t("Attributes JSON")}
                     </span>
-                    <pre className="max-h-56 overflow-auto rounded bg-black/40 p-2 font-mono text-[10px] text-[#c9d1d9] border border-[rgba(255,255,255,0.06)]">
+                    <pre className="max-h-56 overflow-auto rounded bg-black/40 p-2 font-mono text-[10px] text-ink border border-[rgba(255,255,255,0.06)]">
                       {formatAttributes(selectedSpan.attributes_json)}
                     </pre>
                   </div>

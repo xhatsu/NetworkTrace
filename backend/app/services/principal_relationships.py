@@ -1,37 +1,62 @@
-"""Incrementally derive identity relationships from sanitized, durable trace dimensions."""
+"""Incrementally derive identity relationships from the per-credential activity rollup.
+
+Principal intelligence reads ``principal_activity_5m`` (built by
+:mod:`backend.app.services.principal_activity`) and never raw ``traces``. One rollup row
+is one five-minute bucket of one credential's caller/source/target/operation combination,
+and every derived counter is weighted by its request count. ``principal_activity_consumed``
+records what was already counted for each row, so a bucket the worker rewrites is
+processed only for its increase, and nothing depends on the one-day raw trace TTL.
+"""
 from __future__ import annotations
 
-import hashlib
 import json
 import time
 from typing import Any, Optional
 
 from backend.config import settings
-from backend.app.repositories.db_context import db_transaction, get_connection
+from backend.app.repositories.db_context import db_transaction
 from backend.app.services.behavioral_engine import (
-    CHANGE_SCORES,
-    EVENT_SCORES,
-    EVENT_FAMILY,
-    FAMILY_CAPS,
-    BASE_IMPORTANCE,
+    CHANGE_SCORES,  # noqa: F401  re-exported for principal_change_detector
     emit_behavioral_change,
-    evaluate_readiness,
     evaluate_readiness_from_stats,
-    record_historical_observation,
-    record_candidate_behavior,
     detect_operation_mix_shift,
     detect_caller_principal_switch,
     detect_target_fanout_surge,
     detect_source_fanout_surge,
     detect_principal_rate_surge,
     detect_explicit_auth_anomalies,
-    detect_telemetry_quality_gates,
     INCIDENT_COLUMNS,
     recalculate_incident_score,
 )
 from backend.app.services.normalization import _is_trusted_proxy, derive_source_group
 
 PRINCIPAL_BATCH_SIZE = 5000
+ACTIVITY = "principal_activity_5m FINAL"
+BUCKET_MS = 300_000
+ANONYMOUS = ("unknown", "-anonymous-", "anonymous", "")
+_NAMED = "principal_name NOT IN ('unknown', '-anonymous-', 'anonymous', '')"
+# Each cycle rescans rows rewritten this shortly before the cursor. The consumed ledger
+# turns rows that were already counted into no-ops, so a same-millisecond rewrite is not lost.
+CURSOR_OVERLAP_MS = 5_000
+# Cursor position after every row with a given updated_at_ms.
+_AFTER_ALL = (2**63 - 1, 2**64 - 1)
+_BUCKET_TIME = "toDateTime(intDiv(bucket_start_ms, 1000), 'UTC')"
+
+_ROW_NAMES = (
+    "bucket_start_ms", "row_key", "updated_at_ms", "principal_name", "service_environment", "principal_id",
+    "operation_key", "source_group", "caller_service", "caller_ip", "ip_resolution", "target_service",
+    "operation", "caller_instance", "target_instance", "target_ip", "target_port", "http_method",
+    "first_seen_ms", "last_seen_ms", "request_count", "error_count", "auth_failure_count", "auth_success_count",
+)
+# Aliases map rollup columns to the names the trace-row consumer used. None of them equals
+# a column it reads (see the ClickHouse alias note in principal_activity).
+_ROW_SELECT = (
+    "bucket_start_ms,row_key,updated_at_ms,principal_name,environment AS service_environment,principal_id,"
+    "operation_key,source_group,caller_service,source_ip AS caller_ip,ip_resolution,target_service,operation,"
+    "caller_instance,target_instance,target_ip,target_port,http_method,first_seen_ms,last_seen_ms,"
+    "request_count,error_count,auth_failure_count,auth_success_count"
+)
+_COUNT_FIELDS = ("request_count", "error_count", "auth_failure_count", "auth_success_count")
 
 
 def _load_readiness_stats(db, principal_ids: list[str], cache: dict[str, Any]) -> None:
@@ -92,142 +117,102 @@ def _emit(db, *, principal: str, change_type: str, observed: int,
     )
 
 
-def _upsert_dimension(db, table: str, column: str, principal: str, value: str,
-                      timestamp_ms: int, is_error: int = 0) -> None:
-    if not value:
-        return
-    error_sql = ",error_count" if table in {"principal_targets", "principal_operations"} else ""
-    error_value = ",?" if error_sql else ""
-    key_values = value.split("\0")
-    key_columns = column.split(",")
-    where = " AND ".join(f"{name}=?" for name in ("principal_name", *key_columns))
-    params = (principal, *key_values)
-    select_cols = "first_seen,last_seen,observation_count" + (",error_count" if error_sql else "")
-    existing = db.execute(f"SELECT {select_cols} FROM {table} FINAL WHERE {where} LIMIT 1", params).fetchone()
-    if existing:
-        replacement = (principal, *key_values, min(int(existing[0]), timestamp_ms),
-                       max(int(existing[1]), timestamp_ms), int(existing[2]) + 1)
-        if error_sql:
-            replacement = (*replacement, int(existing[3]) + is_error)
-        placeholders = ",".join("?" for _ in replacement)
-        db.execute(f"INSERT INTO {table}(principal_name,{column},first_seen,last_seen,observation_count{error_sql}) "
-                   f"VALUES({placeholders})", replacement)
-        return
-    values = (principal, *key_values, timestamp_ms, timestamp_ms)
-    placeholders = ",".join("?" for _ in values)
-    db.execute(f"INSERT INTO {table}(principal_name,{column},first_seen,last_seen,observation_count{error_sql}) "
-               f"VALUES({placeholders},1{error_value})", (*values, *([is_error] if error_sql else [])))
-
-
-def _dimension_known(db, principal: str, dimension: str, value: str) -> bool:
-    return db.execute(
-        "SELECT 1 FROM principal_baselines WHERE principal_name=? AND dimension_type=? AND dimension_value=?",
-        (principal, dimension, value),
-    ).fetchone() is not None
-
-
-def _refresh_principal_counts(db, principal: str) -> None:
-    row = db.execute("SELECT principal_type,first_seen,last_seen,total_requests,created_at FROM principals FINAL "
-                     "WHERE principal_name=?", (principal,)).fetchone()
-    if not row:
-        return
-    counts = [db.execute(f"SELECT COUNT(*) FROM {table} FINAL WHERE principal_name=?", (principal,)).fetchone()[0]
-              for table in ("principal_callers", "principal_sources", "principal_targets", "principal_operations")]
-    db.execute("INSERT INTO principals(principal_name,principal_type,first_seen,last_seen,total_requests,unique_callers,"
-               "unique_sources,unique_targets,unique_operations,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?)",
-               (principal, row[0], row[1], row[2], row[3], *counts, row[4], int(time.time() * 1000)))
+def _mark_all_consumed(db) -> tuple[int, int, int]:
+    """Record every current rollup row as counted and return a cursor past all of them."""
+    now = int(time.time() * 1000)
+    db.execute(
+        "INSERT INTO principal_activity_consumed(bucket_start_ms,row_key,request_count,error_count,"
+        "auth_failure_count,auth_success_count,updated_at_ms) "
+        f"SELECT bucket_start_ms,row_key,request_count,error_count,auth_failure_count,auth_success_count,? "
+        f"FROM {ACTIVITY}",
+        (now,),
+    )
+    high_water = db.execute(f"SELECT max(updated_at_ms) FROM {ACTIVITY}").fetchone()
+    return (int(high_water[0] or 0), *_AFTER_ALL)
 
 
 def _bootstrap(db, ratio: float) -> dict[str, int]:
     bounds = db.execute(
-        "SELECT MIN(timestamp_ms),MAX(timestamp_ms) FROM traces WHERE principal_name NOT IN ('unknown', '-anonymous-', 'anonymous', '')"
+        f"SELECT min(first_seen_ms),max(last_seen_ms),count() FROM {ACTIVITY} WHERE {_NAMED}"
     ).fetchone()
-    if not bounds or bounds[0] is None:
+    if not bounds or not bounds[2]:
         return {"processed": 0, "changes": 0, "cursor": 0, "bootstrap_cutoff_ms": 0}
-    minimum, maximum = map(int, bounds)
-    cursor_row = db.execute(
-        "SELECT ingest_order,toString(row_uid) FROM traces ORDER BY ingest_order DESC,row_uid DESC LIMIT 1"
-    ).fetchone()
-    cursor_order = int(cursor_row[0]) if cursor_row else 0
-    cursor_uid = str(cursor_row[1]) if cursor_row else "00000000-0000-0000-0000-000000000000"
-    cutoff = minimum + int((maximum - minimum) * ratio)
+    minimum, maximum = int(bounds[0]), int(bounds[1])
+    # The baseline/post split is made on whole buckets: a bucket belongs to the baseline
+    # when it starts before the cutoff.
+    cutoff = (minimum + int((maximum - minimum) * ratio)) // BUCKET_MS * BUCKET_MS
     now = int(time.time() * 1000)
 
-    db.execute("""
+    db.execute(f"""
       INSERT INTO principals(principal_name,principal_type,first_seen,last_seen,total_requests,
         unique_callers,unique_sources,unique_targets,unique_operations,created_at,updated_at)
-      SELECT principal_name,'unknown',MIN(timestamp_ms),MAX(timestamp_ms),COUNT(*),
-        COUNT(DISTINCT CASE WHEN caller_service<>'' THEN caller_service END),
-        COUNT(DISTINCT CASE WHEN caller_ip<>'' THEN caller_ip END),COUNT(DISTINCT target_service),
-        COUNT(DISTINCT operation),?,? FROM traces
-      WHERE principal_name NOT IN ('unknown', '-anonymous-', 'anonymous', '') GROUP BY principal_name
+      SELECT principal_name,'unknown',min(first_seen_ms),max(last_seen_ms),sum(request_count),
+        uniqExactIf(caller_service, caller_service<>''),uniqExactIf(source_ip, source_ip<>''),
+        uniqExact(target_service),uniqExact(operation),?,?
+      FROM {ACTIVITY} WHERE {_NAMED} GROUP BY principal_name
     """, (now, now))
-    relationship_select = """
-      SELECT principal_name,COALESCE(caller_service,''),COALESCE(caller_instance,''),COALESCE(caller_ip,''),
-        target_service,COALESCE(target_instance,''),COALESCE(target_ip,''),COALESCE(target_port,0),
-        operation,COALESCE(http_method,''),MIN(timestamp_ms),MAX(timestamp_ms),COUNT(*),
-        SUM(CASE WHEN http_status<400 AND outcome<>'failure' THEN 1 ELSE 0 END),
-        SUM(CASE WHEN http_status>=400 OR outcome='failure' THEN 1 ELSE 0 END)
-      FROM traces WHERE principal_name NOT IN ('unknown', '-anonymous-', 'anonymous', '')
-      GROUP BY principal_name,caller_service,caller_instance,caller_ip,target_service,target_instance,target_ip,target_port,operation,http_method
-    """
-    db.execute("""
+    db.execute(f"""
       INSERT INTO principal_relationships(principal_name,caller_service,caller_instance,source_ip,
         target_service,target_instance,target_ip,target_port,operation,http_method,first_seen,last_seen,
-        observation_count,success_count,error_count) """ + relationship_select)
+        observation_count,success_count,error_count)
+      SELECT principal_name,caller_service,caller_instance,source_ip,target_service,target_instance,target_ip,
+        target_port,operation,http_method,min(first_seen_ms),max(last_seen_ms),sum(request_count),
+        sum(request_count - error_count),sum(error_count)
+      FROM {ACTIVITY} WHERE {_NAMED}
+      GROUP BY principal_name,caller_service,caller_instance,source_ip,target_service,target_instance,
+        target_ip,target_port,operation,http_method
+    """)
     for table, column, expression, col_extra, expr_extra in (
         ("principal_callers", "caller_service", "caller_service", "", ""),
-        ("principal_sources", "source_ip", "caller_ip", "", ""),
-        ("principal_targets", "target_service", "target_service", ",error_count", ",SUM(CASE WHEN http_status>=400 OR outcome='failure' THEN 1 ELSE 0 END)"),
+        ("principal_sources", "source_ip", "source_ip", "", ""),
+        ("principal_targets", "target_service", "target_service", ",error_count", ",sum(error_count)"),
     ):
         db.execute(f"""
           INSERT INTO {table}(principal_name,{column},first_seen,last_seen,observation_count{col_extra})
-          SELECT principal_name,{expression},MIN(timestamp_ms),MAX(timestamp_ms),COUNT(*){expr_extra}
-          FROM traces WHERE principal_name NOT IN ('unknown', '-anonymous-', 'anonymous', '') AND COALESCE({expression},'')<>''
+          SELECT principal_name,{expression},min(first_seen_ms),max(last_seen_ms),sum(request_count){expr_extra}
+          FROM {ACTIVITY} WHERE {_NAMED} AND {expression}<>''
           GROUP BY principal_name,{expression}
         """)
-    db.execute("""
+    db.execute(f"""
       INSERT INTO principal_operations(principal_name,target_service,operation,first_seen,last_seen,observation_count,error_count)
-      SELECT principal_name,target_service,operation,MIN(timestamp_ms),MAX(timestamp_ms),COUNT(*),
-        SUM(CASE WHEN http_status>=400 OR outcome='failure' THEN 1 ELSE 0 END)
-      FROM traces WHERE principal_name NOT IN ('unknown', '-anonymous-', 'anonymous', '') GROUP BY principal_name,target_service,operation
+      SELECT principal_name,target_service,operation,min(first_seen_ms),max(last_seen_ms),sum(request_count),sum(error_count)
+      FROM {ACTIVITY} WHERE {_NAMED} GROUP BY principal_name,target_service,operation
     """)
-    db.execute("""
+    # %w numbering (Sunday = 0) matches the incremental path's time.strftime("%w").
+    db.execute(f"""
       INSERT INTO principal_hourly_activity(principal_name,day_of_week,hour_of_day,observation_count,error_count)
-      SELECT principal_name,CAST(strftime('%w',timestamp_ms/1000,'unixepoch') AS INTEGER),
-        CAST(strftime('%H',timestamp_ms/1000,'unixepoch') AS INTEGER),COUNT(*),
-        SUM(CASE WHEN http_status>=400 OR outcome='failure' THEN 1 ELSE 0 END)
-      FROM traces WHERE principal_name NOT IN ('unknown', '-anonymous-', 'anonymous', '') GROUP BY principal_name,2,3
+      SELECT principal_name,toDayOfWeek({_BUCKET_TIME}) % 7 AS bucket_dow,toHour({_BUCKET_TIME}) AS bucket_hour,
+        sum(request_count),sum(error_count)
+      FROM {ACTIVITY} WHERE {_NAMED} GROUP BY principal_name,bucket_dow,bucket_hour
     """)
-    db.execute("""
+    db.execute(f"""
       INSERT INTO principal_daily_stats(principal_name,day_start,observation_count,error_count,
         unique_callers,unique_sources,unique_targets,unique_operations)
-      SELECT principal_name,CAST(timestamp_ms/86400000 AS INTEGER)*86400000,COUNT(*),
-        SUM(CASE WHEN http_status>=400 OR outcome='failure' THEN 1 ELSE 0 END),
-        COUNT(DISTINCT caller_service),COUNT(DISTINCT caller_ip),COUNT(DISTINCT target_service),COUNT(DISTINCT operation)
-      FROM traces WHERE principal_name NOT IN ('unknown', '-anonymous-', 'anonymous', '') GROUP BY principal_name,2
+      SELECT principal_name,intDiv(bucket_start_ms, 86400000) * 86400000 AS bucket_day,sum(request_count),
+        sum(error_count),uniqExact(caller_service),uniqExact(source_ip),uniqExact(target_service),uniqExact(operation)
+      FROM {ACTIVITY} WHERE {_NAMED} GROUP BY principal_name,bucket_day
     """)
 
     baseline_dimensions = (
         ("caller", "caller_service", "caller_service<>''"),
-        ("source", "caller_ip", "caller_ip<>''"),
+        ("source", "source_ip", "source_ip<>''"),
         ("target", "target_service", "target_service<>''"),
-        ("operation", "target_service||'→'||operation", "operation<>''"),
-        ("hour", "CAST(strftime('%w',timestamp_ms/1000,'unixepoch') AS TEXT)||':'||strftime('%H',timestamp_ms/1000,'unixepoch')", "1=1"),
-        ("relationship", "COALESCE(caller_service,'')||'→'||COALESCE(caller_ip,'')||'→'||target_service||'→'||operation", "1=1"),
+        ("operation", "concat(target_service,'→',operation)", "operation<>''"),
+        ("hour", f"formatDateTime({_BUCKET_TIME},'%w:%H')", "1=1"),
+        ("relationship", "concat(caller_service,'→',source_ip,'→',target_service,'→',operation)", "1=1"),
     )
     for dimension, expression, condition in baseline_dimensions:
         db.execute(f"""
           INSERT INTO principal_baselines(principal_name,dimension_type,dimension_value,first_seen,last_seen,observation_count,distribution_share)
-          SELECT principal_name,?,{expression},MIN(timestamp_ms),MAX(timestamp_ms),COUNT(*),
-            COUNT(*)*1.0/SUM(COUNT(*)) OVER (PARTITION BY principal_name)
-          FROM traces WHERE principal_name NOT IN ('unknown', '-anonymous-', 'anonymous', '') AND timestamp_ms<=? AND {condition}
-          GROUP BY principal_name,{expression}
+          SELECT principal_name,?,{expression} AS baseline_value,min(first_seen_ms),max(last_seen_ms),sum(request_count),
+            sum(request_count)/sum(sum(request_count)) OVER (PARTITION BY principal_name)
+          FROM {ACTIVITY} WHERE {_NAMED} AND bucket_start_ms<? AND {condition}
+          GROUP BY principal_name,baseline_value
         """, (dimension, cutoff))
 
     before = db.total_changes
     for principal, first_seen in db.execute(
-        "SELECT principal_name,first_seen FROM principals WHERE first_seen>?", (cutoff,)
+        "SELECT principal_name,first_seen FROM principals FINAL WHERE first_seen>=?", (cutoff,)
     ).fetchall():
         _emit(db, principal=principal, change_type="USERNAME_FIRST_SEEN", observed=first_seen,
               new=principal, reason={"summary": f"{principal} first appeared after the historical baseline window."})
@@ -239,7 +224,7 @@ def _bootstrap(db, ratio: float) -> dict[str, int]:
     )
     for table, column, dimension, event_type in dimension_events:
         for principal, value, first_seen in db.execute(
-            f"SELECT principal_name,{column},first_seen FROM {table} WHERE first_seen>?", (cutoff,)
+            f"SELECT principal_name,{column},first_seen FROM {table} FINAL WHERE first_seen>=?", (cutoff,)
         ).fetchall():
             kwargs = {"caller": value} if dimension == "caller" else {"source": value} if dimension == "source" else {"target": value}
             _emit(db, principal=principal, change_type=event_type, observed=first_seen, new=value, **kwargs)
@@ -250,7 +235,7 @@ def _bootstrap(db, ratio: float) -> dict[str, int]:
         FROM principal_sources ps
         INNER JOIN principal_baselines pb
           ON ps.source_ip = pb.dimension_value
-        WHERE ps.first_seen > ?
+        WHERE ps.first_seen >= ?
           AND pb.dimension_type = 'source'
           AND pb.principal_name <> ps.principal_name
     """, (cutoff,)).fetchall():
@@ -260,35 +245,36 @@ def _bootstrap(db, ratio: float) -> dict[str, int]:
                   reason={"summary": f"Known host {source} was accessed by novel user {principal}."})
 
     for principal, target, operation, first_seen in db.execute(
-        "SELECT principal_name,target_service,operation,first_seen FROM principal_operations WHERE first_seen>?", (cutoff,)
+        "SELECT principal_name,target_service,operation,first_seen FROM principal_operations FINAL WHERE first_seen>=?", (cutoff,)
     ).fetchall():
         _emit(db, principal=principal, change_type="NEW_OPERATION", observed=first_seen,
               target=target, operation=operation, new=operation)
 
     for row in db.execute("""
         SELECT principal_name,caller_service,source_ip,target_service,operation,first_seen
-        FROM principal_relationships WHERE first_seen>?
+        FROM principal_relationships FINAL WHERE first_seen>=?
     """, (cutoff,)).fetchall():
         _emit(db, principal=row[0], change_type="NEW_RELATIONSHIP", observed=row[5], caller=row[1],
               source=row[2], target=row[3], operation=row[4], new=" → ".join(row[1:5]))
 
-    # Check for dormant reactivations (active before, silent >= 14d, reactivated post-cutoff)
-    for p_name, in db.execute("SELECT DISTINCT principal_name FROM traces WHERE timestamp_ms > ? AND principal_name NOT IN ('unknown', '-anonymous-', 'anonymous', '')", (cutoff,)).fetchall():
-        prev_row = db.execute("SELECT MAX(timestamp_ms) FROM traces WHERE principal_name = ? AND timestamp_ms <= ?", (p_name, cutoff)).fetchone()
-        cur_row = db.execute("SELECT MIN(timestamp_ms) FROM traces WHERE principal_name = ? AND timestamp_ms > ?", (p_name, cutoff)).fetchone()
-        if prev_row and prev_row[0] and cur_row and cur_row[0]:
-            prev_max = int(prev_row[0])
-            cur_min = int(cur_row[0])
-            dormant_ms = min(14, getattr(settings, "principal_dormant_days", 14)) * 86_400_000
-            if (cur_min - prev_max) >= dormant_ms:
-                days = (cur_min - prev_max) // 86_400_000
-                p_id = f"production:{p_name}"
-                _emit(db, principal=p_name, principal_id=p_id, change_type="DORMANT_REACTIVATED", observed=cur_min,
-                      old=f"inactive {days} days", new="active", recurrence=str(cur_min // 86_400_000),
-                      reason={"summary": f"{p_name} became active after {days} inactive days."})
+    # Dormant reactivation: active before the cutoff, silent >= 14 days, active again after it.
+    dormant_ms = min(14, getattr(settings, "principal_dormant_days", 14)) * 86_400_000
+    for p_name, p_id, prev_max, cur_min in db.execute(f"""
+        SELECT principal_name,any(principal_id),maxIf(last_seen_ms, bucket_start_ms<?),minIf(first_seen_ms, bucket_start_ms>=?)
+        FROM {ACTIVITY} WHERE {_NAMED}
+        GROUP BY principal_name HAVING countIf(bucket_start_ms>=?)>0 AND countIf(bucket_start_ms<?)>0
+    """, (cutoff, cutoff, cutoff, cutoff)).fetchall():
+        prev_max, cur_min = int(prev_max), int(cur_min)
+        if cur_min - prev_max >= dormant_ms:
+            days = (cur_min - prev_max) // 86_400_000
+            _emit(db, principal=p_name, principal_id=p_id, change_type="DORMANT_REACTIVATED", observed=cur_min,
+                  old=f"inactive {days} days", new="active", recurrence=str(cur_min // 86_400_000),
+                  reason={"summary": f"{p_name} became active after {days} inactive days."})
 
     # Run advanced behavioral detectors across post-cutoff windows (last 24-48 hours)
-    post_principals = [r[0] for r in db.execute("SELECT DISTINCT principal_id FROM traces WHERE timestamp_ms > ? AND principal_name NOT IN ('unknown', '-anonymous-', 'anonymous', '')", (cutoff,)).fetchall()]
+    post_principals = [r[0] for r in db.execute(
+        f"SELECT DISTINCT principal_id FROM {ACTIVITY} WHERE bucket_start_ms>=? AND {_NAMED}", (cutoff,)
+    ).fetchall()]
     window_step = 900_000  # 15-minute windows
     w_start = max(cutoff, maximum - 86_400_000)
     w_windows = [(w_s, w_s + window_step) for w_s in range(w_start, maximum + 1, window_step)]
@@ -297,24 +283,32 @@ def _bootstrap(db, ratio: float) -> dict[str, int]:
     if maximum - 7200_000 >= cutoff:
         w_windows.append((maximum - 7200_000, maximum))
     for w_s, w_e in w_windows:
+        bucket_from = w_s // BUCKET_MS * BUCKET_MS
+        targets_by_principal: dict[str, list[str]] = {}
+        for pid, tgt in db.execute(
+            f"SELECT DISTINCT principal_id,target_service FROM {ACTIVITY} "
+            f"WHERE bucket_start_ms>=? AND bucket_start_ms<? AND {_NAMED}", (bucket_from, w_e)
+        ).fetchall():
+            targets_by_principal.setdefault(str(pid), []).append(str(tgt))
         for pid in post_principals:
             detect_explicit_auth_anomalies(db, pid, w_s, w_e)
             detect_target_fanout_surge(db, pid, w_s, w_e)
             detect_source_fanout_surge(db, pid, w_s, w_e)
             detect_principal_rate_surge(db, pid, w_s, w_e)
-            targets = [r[0] for r in db.execute("SELECT DISTINCT target_service FROM traces WHERE principal_id = ? AND timestamp_ms >= ? AND timestamp_ms < ?", (pid, w_s, w_e)).fetchall()]
-            for tgt in targets:
+            for tgt in targets_by_principal.get(pid, ()):
                 detect_operation_mix_shift(db, pid, tgt, w_s, w_e)
-        callers_targets_ops = db.execute("SELECT DISTINCT caller_service, target_service, operation_key FROM traces WHERE timestamp_ms >= ? AND timestamp_ms < ? AND caller_service != ''", (w_s, w_e)).fetchall()
+        callers_targets_ops = db.execute(
+            f"SELECT DISTINCT caller_service,target_service,operation_key FROM {ACTIVITY} "
+            "WHERE bucket_start_ms>=? AND bucket_start_ms<? AND caller_service!=''", (bucket_from, w_e)
+        ).fetchall()
         for caller, tgt, op in callers_targets_ops:
             detect_caller_principal_switch(db, caller, tgt, op, w_s, w_e)
 
     changes = db.total_changes - before
-    checkpoint = json.dumps({"ingest_order": cursor_order, "row_uid": cursor_uid, "bootstrap_cutoff_ms": cutoff, "ratio": ratio})
-    db.execute("INSERT INTO checkpoints(source,cursor_json,updated_at_ms) VALUES('principal_intelligence',?,?)",
-               (checkpoint, now))
-    return {"processed": db.execute("SELECT COUNT(*) FROM traces WHERE principal_name NOT IN ('unknown', '-anonymous-', 'anonymous', '')").fetchone()[0],
-            "changes": changes, "cursor": cursor_order, "bootstrap_cutoff_ms": cutoff}
+    processed = db.execute(f"SELECT sum(request_count) FROM {ACTIVITY} WHERE {_NAMED}").fetchone()[0]
+    cursor = _mark_all_consumed(db)
+    _save_principal_checkpoint(db, _with_cursor({"bootstrap_cutoff_ms": cutoff, "ratio": ratio}, cursor))
+    return {"processed": int(processed or 0), "changes": changes, "cursor": cursor[0], "bootstrap_cutoff_ms": cutoff}
 
 
 class _BatchState:
@@ -326,9 +320,10 @@ class _BatchState:
         self.cache: dict[tuple, Any] = {}
         self.emissions: dict[tuple, dict[str, Any]] = {}
         self.auth_windows: set[tuple[str, int]] = set()
+        self.consumed: list[tuple] = []
         principal_ids = sorted({
             (row["principal_id"] or f"{row['service_environment'] or 'production'}:{row['principal_name']}")
-            for row in rows if row["principal_name"] and row["principal_name"] not in ("unknown", "-anonymous-", "anonymous", "")
+            for row in rows if row["principal_name"] and row["principal_name"] not in ANONYMOUS
         })
         self.readiness = readiness_cache if readiness_cache is not None else {}
         _load_readiness_stats(db, principal_ids, self.readiness)
@@ -336,7 +331,7 @@ class _BatchState:
 
     def _preload(self, rows, principal_ids: list[str]) -> None:
         names = sorted({str(row["principal_name"]) for row in rows
-                        if row["principal_name"] and row["principal_name"] not in ("unknown", "-anonymous-", "anonymous", "")})
+                        if row["principal_name"] and row["principal_name"] not in ANONYMOUS})
         if not names:
             return
         name_marks = ",".join("?" for _ in names)
@@ -345,7 +340,7 @@ class _BatchState:
         # Seed every key used by this page as absent, then overlay the durable FINAL rows.
         for row in rows:
             principal = str(row["principal_name"] or "")
-            if not principal or principal in ("unknown", "-anonymous-", "anonymous", ""):
+            if not principal or principal in ANONYMOUS:
                 continue
             env = str(row["service_environment"] or "production")
             pid = str(row["principal_id"] or f"{env}:{principal}")
@@ -476,7 +471,7 @@ class _BatchState:
         return globally, together
 
     def dimension(self, table: str, column: str, principal: str, values: tuple[str, ...],
-                  timestamp_ms: int, error: int = 0) -> None:
+                  first_ms: int, last_ms: int, count: int, errors: int = 0) -> None:
         if not all(values):
             return
         key = (table, principal, *values)
@@ -486,13 +481,13 @@ class _BatchState:
         state = self.query_one(key, f"SELECT {selected} FROM {table} FINAL WHERE {where} LIMIT 1", (principal, *values))
         was_new = not state
         if state:
-            state[0] = min(int(state[0]), timestamp_ms)
-            state[1] = max(int(state[1]), timestamp_ms)
-            state[2] = int(state[2]) + 1
+            state[0] = min(int(state[0]), first_ms)
+            state[1] = max(int(state[1]), last_ms)
+            state[2] = int(state[2]) + count
             if has_error:
-                state[3] = int(state[3]) + error
+                state[3] = int(state[3]) + errors
         else:
-            state = [timestamp_ms, timestamp_ms, 1] + ([error] if has_error else [])
+            state = [first_ms, last_ms, count] + ([errors] if has_error else [])
             self.cache[key] = state
         self.cache[("dimension_dirty", *key)] = (principal, *values, *state)
         if was_new:
@@ -505,7 +500,7 @@ class _BatchState:
             self.cache[("source_global", values[0])] = [1]
             self.cache[("source_pair", principal, values[0])] = [1]
 
-    def relationship(self, key_values: tuple, timestamp_ms: int, error: int) -> None:
+    def relationship(self, key_values: tuple, first_ms: int, last_ms: int, count: int, errors: int) -> None:
         key = ("relationship", *key_values)
         columns = ("principal_name", "caller_service", "caller_instance", "source_ip", "target_service",
                    "target_instance", "target_ip", "target_port", "operation", "http_method")
@@ -513,26 +508,27 @@ class _BatchState:
         state = self.query_one(key, f"SELECT first_seen,last_seen,observation_count,success_count,error_count "
                                     f"FROM principal_relationships FINAL WHERE {where} LIMIT 1", key_values)
         if state:
-            state[:] = [min(int(state[0]), timestamp_ms), max(int(state[1]), timestamp_ms), int(state[2]) + 1,
-                        int(state[3]) + 1 - error, int(state[4]) + error]
+            state[:] = [min(int(state[0]), first_ms), max(int(state[1]), last_ms), int(state[2]) + count,
+                        int(state[3]) + count - errors, int(state[4]) + errors]
         else:
-            state = [timestamp_ms, timestamp_ms, 1, 1 - error, error]
+            state = [first_ms, last_ms, count, count - errors, errors]
             self.cache[key] = state
         self.cache[("relationship_dirty", *key_values)] = (*key_values, *state)
 
-    def activity(self, principal: str, timestamp_ms: int, error: int) -> None:
+    def activity(self, principal: str, timestamp_ms: int, count: int, errors: int) -> None:
         day = (timestamp_ms // 86_400_000) * 86_400_000
         dow, hour = map(int, time.strftime("%w %H", time.gmtime(timestamp_ms / 1000)).split())
         hour_key = ("hour", principal, dow, hour)
         hour_state = self.query_one(hour_key, "SELECT observation_count,error_count FROM principal_hourly_activity FINAL "
                                     "WHERE principal_name=? AND day_of_week=? AND hour_of_day=?", (principal, dow, hour))
-        hour_state = [int(hour_state[0]) + 1, int(hour_state[1]) + error] if hour_state else [1, error]
+        hour_state = [int(hour_state[0]) + count, int(hour_state[1]) + errors] if hour_state else [count, errors]
         self.cache[hour_key] = hour_state
         self.cache[("hour_dirty", principal, dow, hour)] = (principal, dow, hour, *hour_state)
         day_key = ("day", principal, day)
         day_state = self.query_one(day_key, "SELECT observation_count,error_count,unique_callers,unique_sources,unique_targets,unique_operations "
                                   "FROM principal_daily_stats FINAL WHERE principal_name=? AND day_start=?", (principal, day))
-        day_state = [int(day_state[0]) + 1, int(day_state[1]) + error, *map(int, day_state[2:])] if day_state else [1, error, 0, 0, 0, 0]
+        day_state = ([int(day_state[0]) + count, int(day_state[1]) + errors, *map(int, day_state[2:])]
+                     if day_state else [count, errors, 0, 0, 0, 0])
         self.cache[day_key] = day_state
         self.cache[("day_dirty", principal, day)] = (principal, day, *day_state)
 
@@ -546,7 +542,7 @@ class _BatchState:
         )
         self.emissions[key] = kwargs
 
-    def historical(self, principal_id: str, dim_type: str, value: str, timestamp_ms: int) -> None:
+    def historical(self, principal_id: str, dim_type: str, value: str, timestamp_ms: int, count: int) -> None:
         key_value = f"{dim_type}:{principal_id}:{value}"
         key = ("historical", key_value)
         state = self.query_one(
@@ -555,13 +551,13 @@ class _BatchState:
         )
         now = int(time.time() * 1000)
         if state:
-            state[:] = [min(int(state[0]), timestamp_ms), max(int(state[1]), timestamp_ms), int(state[2]) + 1, int(state[3])]
+            state[:] = [min(int(state[0]), timestamp_ms), max(int(state[1]), timestamp_ms), int(state[2]) + count, int(state[3])]
         else:
-            state = [timestamp_ms, timestamp_ms, 1, now]
+            state = [timestamp_ms, timestamp_ms, count, now]
             self.cache[key] = state
         self.cache[("historical_dirty", key_value)] = (key_value, principal_id, dim_type, value, *state, now)
 
-    def candidate(self, principal_id: str, dim_type: str, value: str, timestamp_ms: int) -> None:
+    def candidate(self, principal_id: str, dim_type: str, value: str, timestamp_ms: int, count: int) -> None:
         key_value = f"{dim_type}:{principal_id}:{value}"
         key = ("candidate", key_value)
         state = self.query_one(
@@ -572,15 +568,15 @@ class _BatchState:
         if state:
             state[2] = int(state[2]) + int(timestamp_ms // 86400000 > int(state[1]) // 86400000)
             state[3] = int(state[3]) + int(timestamp_ms // 900000 > int(state[1]) // 900000)
-            state[4] = int(state[4]) + 1
-            state[1] = timestamp_ms
+            state[4] = int(state[4]) + count
+            state[1] = max(int(state[1]), timestamp_ms)
             if state[2] >= 3 and state[3] >= 5:
                 state[5] = "promoted"
                 self.add("established_baselines", "baseline_key,principal_id,dimension_type,dimension_value,first_seen,last_seen,observation_count,distribution_share,promoted_at,promotion_reason,created_at,updated_at",
                          (key_value, principal_id, dim_type, value, state[0], timestamp_ms, state[4], 0.05, now,
                           "Promoted after 3+ days and 5+ windows support", now, now))
         else:
-            state = [timestamp_ms, timestamp_ms, 1, 1, 1, "pending", now]
+            state = [timestamp_ms, timestamp_ms, 1, 1, count, "pending", now]
             self.cache[key] = state
         self.cache[("candidate_dirty", key_value)] = (key_value, principal_id, dim_type, value, *state, now)
 
@@ -649,50 +645,63 @@ class _BatchState:
             for incident in incident_cache.values():
                 recalculate_incident_score(self.db, incident["incident_id"])
         for principal_id, window_end in self.auth_windows:
-            detect_explicit_auth_anomalies(self.db, principal_id, window_end - 900_000, window_end + 1)
+            detect_explicit_auth_anomalies(self.db, principal_id, window_end - 900_000, window_end)
+        # Written last: a crash before this point leaves the rows unconsumed and the
+        # page is processed again from the same cursor.
+        if self.consumed:
+            self.db.executemany(
+                "INSERT INTO principal_activity_consumed(bucket_start_ms,row_key,request_count,error_count,"
+                "auth_failure_count,auth_success_count,updated_at_ms) VALUES (?,?,?,?,?,?,?)",
+                self.consumed,
+            )
 
 
-def _process_incremental_row(db, row, batch: _BatchState | None = None) -> int:
+def _process_incremental_row(db, row: dict[str, Any], batch: _BatchState) -> int:
+    """Count one rollup row's unconsumed increase. ``row["count"]`` requests are new."""
     principal = row["principal_name"]
-    if not principal or principal in ("unknown", "-anonymous-", "anonymous", ""):
+    count = int(row["count"])
+    if not principal or principal in ANONYMOUS or count <= 0:
         return 0
-    timestamp_ms = row["timestamp_ms"]
+    errors = int(row["errors"])
+    timestamp_ms = int(row["timestamp_ms"])
+    first_ms, last_ms = int(row["first_seen_ms"]), int(row["last_seen_ms"])
     caller = row["caller_service"] or ""
     source = row["caller_ip"] or ""
     target = row["target_service"] or ""
     operation = row["operation"] or ""
 
-    env = row["service_environment"] if "service_environment" in row.keys() else "production"
-    principal_id = row["principal_id"] if "principal_id" in row.keys() and row["principal_id"] else f"{env}:{principal}"
-    op_key = row["operation_key"] if "operation_key" in row.keys() and row["operation_key"] else operation
-    src_group = row["source_group"] if "source_group" in row.keys() and row["source_group"] else derive_source_group(source)
+    env = row["service_environment"] or "production"
+    principal_id = row["principal_id"] or f"{env}:{principal}"
+    op_key = row["operation_key"] or operation
+    src_group = row["source_group"] or derive_source_group(source)
 
     from backend.app.services.normalization import is_known_infrastructure_ip
-    ip_res = row["ip_resolution"] if "ip_resolution" in row.keys() else "unknown"
     is_source_unresolved_lb = (
-        ip_res == "load_balancer_unresolved"
+        row["ip_resolution"] == "load_balancer_unresolved"
         or is_known_infrastructure_ip(source)
     )
 
     # 1. Update historical registry for all dimensions
-    record_history = batch.historical if batch else lambda *args: record_historical_observation(db, *args)
-    emit = batch.emit if batch else lambda **kwargs: _emit(db, **kwargs)
-    readiness = batch.ready if batch else lambda pid, detector, ts: evaluate_readiness(db, pid, detector, ts)
-    record_history(principal_id, "caller", caller, timestamp_ms)
+    emit = batch.emit
+    readiness = batch.ready
+
+    def record_history(dim_type: str, value: str) -> None:
+        batch.historical(principal_id, dim_type, value, timestamp_ms, count)
+
+    record_history("caller", caller)
     if not is_source_unresolved_lb:
-        record_history(principal_id, "source", source, timestamp_ms)
-    record_history(principal_id, "target", target, timestamp_ms)
-    record_history(principal_id, "operation", op_key, timestamp_ms)
+        record_history("source", source)
+    record_history("target", target)
+    record_history("operation", op_key)
     logical_rel = f"{caller}→{target}→{op_key}"
-    record_history(principal_id, "logical_relationship", logical_rel, timestamp_ms)
+    record_history("logical_relationship", logical_rel)
     if src_group and not is_source_unresolved_lb:
         origin_rel = f"{caller}→{src_group}→{target}→{op_key}"
-        record_history(principal_id, "origin_relationship", origin_rel, timestamp_ms)
+        record_history("origin_relationship", origin_rel)
 
     principal_key = ("principal", principal)
     existing = batch.query_one(principal_key, "SELECT principal_type,first_seen,last_seen,total_requests,unique_callers,unique_sources,"
-                               "unique_targets,unique_operations,created_at FROM principals FINAL WHERE principal_name=?", (principal,)) if batch else db.execute(
-        "SELECT principal_type,first_seen,last_seen,total_requests,unique_callers,unique_sources,unique_targets,unique_operations,created_at FROM principals FINAL WHERE principal_name=?", (principal,)).fetchone()
+                               "unique_targets,unique_operations,created_at FROM principals FINAL WHERE principal_name=?", (principal,))
     is_new = existing is None
 
     # Track novelty flags to avoid duplicate scoring
@@ -714,14 +723,8 @@ def _process_incremental_row(db, row, batch: _BatchState | None = None) -> int:
 
     # Dedicated source host accessed by novel user (excluding shared proxies / gateways / unresolved LBs)
     if source and source not in {"unknown", "", "unavailable"} and not is_source_unresolved_lb and not _is_trusted_proxy(source):
-        if batch:
-            ip_globally_known, already_seen_together = batch.source_seen(source, principal)
-        else:
-            ip_globally_known = db.execute("SELECT 1 FROM principal_sources WHERE source_ip=? LIMIT 1", (source,)).fetchone()
-            already_seen_together = db.execute(
-                "SELECT 1 FROM principal_sources WHERE principal_name=? AND source_ip=?", (principal, source)
-            ).fetchone()
-        if ip_globally_known and not (batch.dimension_known(principal, "source", source) if batch else _dimension_known(db, principal, "source", source)):
+        ip_globally_known, already_seen_together = batch.source_seen(source, principal)
+        if ip_globally_known and not batch.dimension_known(principal, "source", source):
             if not already_seen_together:
                 ready, _ = readiness(principal_id, "NEW_PRINCIPAL_ON_SOURCE", timestamp_ms)
                 if ready:
@@ -730,14 +733,14 @@ def _process_incremental_row(db, row, batch: _BatchState | None = None) -> int:
                           reason={"summary": f"Host {source} was accessed by novel user {principal}."})
 
     # Detector readiness-guarded novelty checks
-    if caller and not (batch.dimension_known(principal, "caller", caller) if batch else _dimension_known(db, principal, "caller", caller)):
+    if caller and not batch.dimension_known(principal, "caller", caller):
         ready, _ = readiness(principal_id, "NEW_CALLER", timestamp_ms)
         if ready:
             emit(principal=principal, principal_id=principal_id, change_type="NEW_CALLER", observed=timestamp_ms,
                   caller=caller, source=source, target=target, operation=operation, new=caller)
             is_caller_new = True
 
-    if source and source not in {"unknown", "", "unavailable"} and not is_source_unresolved_lb and not (batch.dimension_known(principal, "source", source) if batch else _dimension_known(db, principal, "source", source)):
+    if source and source not in {"unknown", "", "unavailable"} and not is_source_unresolved_lb and not batch.dimension_known(principal, "source", source):
         ready, _ = readiness(principal_id, "NEW_SOURCE_IP", timestamp_ms)
         if ready:
             from backend.app.services.normalization import classify_source_ip_role
@@ -749,7 +752,7 @@ def _process_incremental_row(db, row, batch: _BatchState | None = None) -> int:
 
     if source and caller and not is_source_unresolved_lb:
         ip_caller_dim = f"{source}→{caller}"
-        if not (batch.dimension_known(principal, "ip_caller", ip_caller_dim) if batch else _dimension_known(db, principal, "ip_caller", ip_caller_dim)):
+        if not batch.dimension_known(principal, "ip_caller", ip_caller_dim):
             ready, _ = readiness(principal_id, "NEW_IP_CALLER_PAIR", timestamp_ms)
             if ready:
                 from backend.app.services.normalization import classify_source_ip_role
@@ -759,8 +762,7 @@ def _process_incremental_row(db, row, batch: _BatchState | None = None) -> int:
                       reason={"summary": f"Novel ingress route: {source} ({role_label}) to caller {caller}.",
                               "source_ip_role": role, "role_label": role_label, "attribution_confidence": conf})
 
-
-    if target and not (batch.dimension_known(principal, "target", target) if batch else _dimension_known(db, principal, "target", target)):
+    if target and not batch.dimension_known(principal, "target", target):
         ready, _ = readiness(principal_id, "NEW_TARGET", timestamp_ms)
         if ready:
             emit(principal=principal, principal_id=principal_id, change_type="NEW_TARGET", observed=timestamp_ms,
@@ -768,7 +770,7 @@ def _process_incremental_row(db, row, batch: _BatchState | None = None) -> int:
             is_target_new = True
 
     op_dim = f"{target}→{operation}"
-    if operation and not (batch.dimension_known(principal, "operation", op_dim) if batch else _dimension_known(db, principal, "operation", op_dim)):
+    if operation and not batch.dimension_known(principal, "operation", op_dim):
         ready, _ = readiness(principal_id, "NEW_OPERATION", timestamp_ms)
         if ready:
             emit(principal=principal, principal_id=principal_id, change_type="NEW_OPERATION", observed=timestamp_ms,
@@ -777,7 +779,7 @@ def _process_incremental_row(db, row, batch: _BatchState | None = None) -> int:
 
     # Logical relationship novelty
     rel_dim = f"{caller}→{source}→{target}→{operation}"
-    if not (batch.dimension_known(principal, "relationship", rel_dim) if batch else _dimension_known(db, principal, "relationship", rel_dim)):
+    if not batch.dimension_known(principal, "relationship", rel_dim):
         ready, _ = readiness(principal_id, "NEW_RELATIONSHIP", timestamp_ms)
         # Score NEW_RELATIONSHIP only when constituent dimensions are already known
         if ready and not (is_caller_new or is_target_new or is_op_new):
@@ -786,117 +788,52 @@ def _process_incremental_row(db, row, batch: _BatchState | None = None) -> int:
 
     # Circadian unusual time check
     day_hour = time.strftime("%w:%H", time.gmtime(timestamp_ms / 1000))
-    if not (batch.dimension_known(principal, "hour", day_hour) if batch else _dimension_known(db, principal, "hour", day_hour)):
+    if not batch.dimension_known(principal, "hour", day_hour):
         ready, _ = readiness(principal_id, "UNUSUAL_TIME", timestamp_ms)
         if ready:
-            active_hours = (batch.query_one(
+            active_hours = batch.query_one(
                 ("active_hours", principal),
                 "SELECT COUNT(DISTINCT hour_of_day) FROM principal_hourly_activity FINAL WHERE principal_name = ?",
                 (principal,),
-            )[0] if batch else db.execute(
-                "SELECT COUNT(DISTINCT hour_of_day) FROM principal_hourly_activity WHERE principal_name = ?", (principal,)
-            ).fetchone()[0])
+            )[0]
             # Only alert if account is diurnal/periodic, not continuous 24h
             if active_hours <= 18:
                 emit(principal=principal, principal_id=principal_id, change_type="UNUSUAL_TIME", observed=timestamp_ms,
                       caller=caller, source=source, target=target, operation=operation, new=day_hour,
                       recurrence=str(timestamp_ms // 3_600_000))
 
-    # Check explicit authentication outcomes
-    if "auth_result" in row.keys() and row["auth_result"] == "failure":
-        if batch:
-            batch.auth_windows.add((principal_id, timestamp_ms))
-        else:
-            detect_explicit_auth_anomalies(db, principal_id, timestamp_ms - 900_000, timestamp_ms + 1)
+    # Explicit authentication outcomes are evaluated over the 15 minutes ending with this bucket.
+    if int(row["auth_failures"]) > 0:
+        batch.auth_windows.add((principal_id, int(row["bucket_start_ms"]) + BUCKET_MS))
 
     # Update candidate behaviors
-    if batch:
-        batch.candidate(principal_id, "caller", caller, timestamp_ms)
-        batch.candidate(principal_id, "target", target, timestamp_ms)
-        batch.candidate(principal_id, "operation", op_key, timestamp_ms)
-    else:
-        record_candidate_behavior(db, principal_id, "caller", caller, timestamp_ms, timestamp_ms // 900000)
-        record_candidate_behavior(db, principal_id, "target", target, timestamp_ms, timestamp_ms // 900000)
-        record_candidate_behavior(db, principal_id, "operation", op_key, timestamp_ms, timestamp_ms // 900000)
+    batch.candidate(principal_id, "caller", caller, timestamp_ms, count)
+    batch.candidate(principal_id, "target", target, timestamp_ms, count)
+    batch.candidate(principal_id, "operation", op_key, timestamp_ms, count)
 
     now = int(time.time() * 1000)
-    error = int((row["http_status"] or 0) >= 400 or row["outcome"] == "failure")
-    if batch:
-        if existing:
-            existing[:] = [existing[0], min(int(existing[1]), timestamp_ms), max(int(existing[2]), timestamp_ms),
-                           int(existing[3]) + 1, *existing[4:]]
-        else:
-            existing = ["unknown", timestamp_ms, timestamp_ms, 1, 0, 0, 0, 0, now]
-            batch.cache[principal_key] = existing
-        batch.cache[("principal_dirty", principal)] = (
-            principal, existing[0], existing[1], existing[2], existing[3], existing[4], existing[5],
-            existing[6], existing[7], existing[8], now,
-        )
-        batch.dimension("principal_callers", "caller_service", principal, (caller,), timestamp_ms)
-        if not is_source_unresolved_lb:
-            batch.dimension("principal_sources", "source_ip", principal, (source,), timestamp_ms)
-        batch.dimension("principal_targets", "target_service", principal, (target,), timestamp_ms, error)
-        batch.dimension("principal_operations", "target_service,operation", principal, (target, operation), timestamp_ms, error)
+    if existing:
+        existing[:] = [existing[0], min(int(existing[1]), first_ms), max(int(existing[2]), last_ms),
+                       int(existing[3]) + count, *existing[4:]]
     else:
-        if existing:
-            db.execute("INSERT INTO principals(principal_name,principal_type,first_seen,last_seen,total_requests,unique_callers,"
-                       "unique_sources,unique_targets,unique_operations,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?)",
-                       (principal, existing[0], min(int(existing[1]), timestamp_ms), max(int(existing[2]), timestamp_ms),
-                        int(existing[3]) + 1, existing[4], existing[5], existing[6], existing[7], existing[8], now))
-        else:
-            db.execute("INSERT INTO principals(principal_name,principal_type,first_seen,last_seen,total_requests,created_at,updated_at) "
-                       "VALUES(?,'unknown',?,?,1,?,?)", (principal, timestamp_ms, timestamp_ms, now, now))
-        _upsert_dimension(db, "principal_callers", "caller_service", principal, caller, timestamp_ms)
-        if not is_source_unresolved_lb:
-            _upsert_dimension(db, "principal_sources", "source_ip", principal, source, timestamp_ms)
-        _upsert_dimension(db, "principal_targets", "target_service", principal, target, timestamp_ms, error)
-        _upsert_dimension(db, "principal_operations", "target_service,operation", principal,
-                          f"{target}\0{operation}", timestamp_ms, error)
+        existing = ["unknown", first_ms, last_ms, count, 0, 0, 0, 0, now]
+        batch.cache[principal_key] = existing
+    batch.cache[("principal_dirty", principal)] = (
+        principal, existing[0], existing[1], existing[2], existing[3], existing[4], existing[5],
+        existing[6], existing[7], existing[8], now,
+    )
+    batch.dimension("principal_callers", "caller_service", principal, (caller,), first_ms, last_ms, count)
+    if not is_source_unresolved_lb:
+        batch.dimension("principal_sources", "source_ip", principal, (source,), first_ms, last_ms, count)
+    batch.dimension("principal_targets", "target_service", principal, (target,), first_ms, last_ms, count, errors)
+    batch.dimension("principal_operations", "target_service,operation", principal, (target, operation),
+                    first_ms, last_ms, count, errors)
     relationship_key = (principal, caller, row["caller_instance"] or "", source, target,
                         row["target_instance"] or "", row["target_ip"] or "", row["target_port"] or 0,
                         operation, row["http_method"] or "")
-    relationship_where = " AND ".join(f"{c}=?" for c in (
-        "principal_name", "caller_service", "caller_instance", "source_ip", "target_service",
-        "target_instance", "target_ip", "target_port", "operation", "http_method"))
-    prior_relationship = None if batch else db.execute(
-        f"SELECT first_seen,last_seen,observation_count,success_count,error_count FROM principal_relationships FINAL "
-        f"WHERE {relationship_where} LIMIT 1", relationship_key).fetchone()
-    if batch:
-        batch.relationship(relationship_key, timestamp_ms, error)
-    elif prior_relationship:
-        db.execute("INSERT INTO principal_relationships(principal_name,caller_service,caller_instance,source_ip,target_service,"
-                   "target_instance,target_ip,target_port,operation,http_method,first_seen,last_seen,observation_count,success_count,error_count) "
-                   "VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
-                   (*relationship_key, min(int(prior_relationship[0]), timestamp_ms),
-                    max(int(prior_relationship[1]), timestamp_ms), int(prior_relationship[2]) + 1,
-                    int(prior_relationship[3]) + 1-error, int(prior_relationship[4]) + error))
-    else:
-        db.execute("INSERT INTO principal_relationships(principal_name,caller_service,caller_instance,source_ip,target_service,"
-                   "target_instance,target_ip,target_port,operation,http_method,first_seen,last_seen,observation_count,success_count,error_count) "
-                   "VALUES(?,?,?,?,?,?,?,?,?,?,?,?,1,?,?)", (*relationship_key, timestamp_ms, timestamp_ms, 1-error, error))
-    day = (timestamp_ms // 86_400_000) * 86_400_000
-    dow, hour = map(int, time.strftime("%w %H", time.gmtime(timestamp_ms / 1000)).split())
-    prior_hour = None if batch else db.execute("SELECT observation_count,error_count FROM principal_hourly_activity FINAL WHERE principal_name=? AND day_of_week=? AND hour_of_day=?", (principal, dow, hour)).fetchone()
-    if batch:
-        batch.activity(principal, timestamp_ms, error)
-    elif prior_hour:
-        db.execute("INSERT INTO principal_hourly_activity VALUES(?,?,?,?,?)",
-                   (principal, dow, hour, int(prior_hour[0]) + 1, int(prior_hour[1]) + error))
-    else:
-        db.execute("INSERT INTO principal_hourly_activity VALUES(?,?,?,?,?)", (principal, dow, hour, 1, error))
-    prior_day = None if batch else db.execute("SELECT observation_count,error_count,unique_callers,unique_sources,unique_targets,unique_operations "
-                           "FROM principal_daily_stats FINAL WHERE principal_name=? AND day_start=?", (principal, day)).fetchone()
-    if batch:
-        pass
-    elif prior_day:
-        db.execute("INSERT INTO principal_daily_stats VALUES(?,?,?,?,?,?,?,?)",
-                   (principal, day, int(prior_day[0]) + 1, int(prior_day[1]) + error,
-                    int(prior_day[2]), int(prior_day[3]), int(prior_day[4]), int(prior_day[5])))
-    else:
-        db.execute("INSERT INTO principal_daily_stats VALUES(?,?,?,?,?,?,?,?)", (principal, day, 1, error, 0, 0, 0, 0))
-    if not batch:
-        _refresh_principal_counts(db, principal)
-    return 1
+    batch.relationship(relationship_key, first_ms, last_ms, count, errors)
+    batch.activity(principal, timestamp_ms, count, errors)
+    return count
 
 
 def _save_principal_checkpoint(db, checkpoint: dict[str, Any]) -> None:
@@ -904,6 +841,55 @@ def _save_principal_checkpoint(db, checkpoint: dict[str, Any]) -> None:
         "INSERT INTO checkpoints(source,cursor_json,updated_at_ms) VALUES('principal_intelligence',?,?)",
         (json.dumps(checkpoint), int(time.time() * 1000)),
     )
+
+
+def _with_cursor(checkpoint: dict[str, Any], cursor: tuple[int, int, int]) -> dict[str, Any]:
+    checkpoint.update({"updated_at_ms": cursor[0], "bucket_start_ms": cursor[1], "row_key": cursor[2]})
+    return checkpoint
+
+
+def _fetch_page(db, cursor: tuple[int, int, int], min_bucket_ms: int) -> list[dict[str, Any]]:
+    rows = db.execute(
+        f"SELECT {_ROW_SELECT} FROM {ACTIVITY} "
+        f"WHERE (updated_at_ms,bucket_start_ms,row_key)>(?,?,?) AND bucket_start_ms>=? AND {_NAMED} "
+        "ORDER BY updated_at_ms,bucket_start_ms,row_key LIMIT ?",
+        (*cursor, min_bucket_ms, PRINCIPAL_BATCH_SIZE),
+    ).fetchall()
+    return [{name: row[index] for index, name in enumerate(_ROW_NAMES)} for row in rows]
+
+
+def _apply_ledger(db, rows: list[dict[str, Any]]) -> list[tuple]:
+    """Attach each row's unconsumed increase and return the ledger rows to write.
+
+    A rewritten bucket can shrink (late caller resolution moves requests to another row
+    key). Decreases are not subtracted; the ledger keeps the larger value so a later
+    increase is still counted only once.
+    """
+    keys = sorted({int(row["row_key"]) for row in rows})
+    buckets = [int(row["bucket_start_ms"]) for row in rows]
+    prior: dict[tuple[int, int], tuple[int, ...]] = {}
+    for record in db.execute(
+        "SELECT bucket_start_ms,row_key,request_count,error_count,auth_failure_count,auth_success_count "
+        "FROM principal_activity_consumed FINAL WHERE bucket_start_ms>=? AND bucket_start_ms<=? "
+        f"AND row_key IN ({','.join('?' for _ in keys)})",
+        (min(buckets), max(buckets), *keys),
+    ).fetchall():
+        prior[(int(record[0]), int(record[1]))] = tuple(int(value) for value in record[2:6])
+    now = int(time.time() * 1000)
+    ledger: list[tuple] = []
+    for row in rows:
+        current = tuple(int(row[field]) for field in _COUNT_FIELDS)
+        before = prior.get((int(row["bucket_start_ms"]), int(row["row_key"])), (0, 0, 0, 0))
+        count = current[0] - before[0]
+        row["count"] = max(0, count)
+        row["errors"] = max(0, min(row["count"], current[1] - before[1]))
+        row["auth_failures"] = max(0, current[2] - before[2])
+        # A first sighting is dated by its earliest request, an increase by its latest.
+        row["timestamp_ms"] = int(row["first_seen_ms"]) if not before[0] else int(row["last_seen_ms"])
+        merged = tuple(max(a, b) for a, b in zip(current, before))
+        if merged != before:
+            ledger.append((int(row["bucket_start_ms"]), int(row["row_key"]), *merged, now))
+    return ledger
 
 
 def process_principal_intelligence(db_path: Optional[str] = None, force_bootstrap: bool = False) -> dict[str, int]:
@@ -915,80 +901,57 @@ def process_principal_intelligence(db_path: Optional[str] = None, force_bootstra
             "SELECT cursor_json FROM checkpoints FINAL WHERE source='principal_intelligence'"
         ).fetchone()
         start_time_ms = getattr(settings, "worker_start_time_ms", None)
+        min_bucket_ms = (int(start_time_ms) // BUCKET_MS * BUCKET_MS) if start_time_ms is not None else 0
         base_count = db.execute("SELECT count() FROM principal_baselines").fetchone()[0]
-        trace_count = db.execute("SELECT count() FROM traces WHERE principal_name NOT IN ('unknown', '-anonymous-', 'anonymous', '')").fetchone()[0]
-        needs_bootstrap = (not checkpoint_row) or (base_count <= 5 and trace_count > 100)
+        named_requests = db.execute(f"SELECT sum(request_count) FROM {ACTIVITY} WHERE {_NAMED}").fetchone()[0] or 0
+        needs_bootstrap = (not checkpoint_row) or (base_count <= 5 and named_requests > 100)
+        checkpoint: dict[str, Any] = json.loads(checkpoint_row[0]) if checkpoint_row else {}
+        if needs_bootstrap and start_time_ms is None:
+            return _bootstrap(db, settings.principal_bootstrap_ratio)
         if needs_bootstrap:
-            if start_time_ms is not None:
-                high_water = db.execute(
-                    "SELECT ingest_order, toString(row_uid) FROM traces WHERE timestamp_ms < ? "
-                    "ORDER BY ingest_order DESC, row_uid DESC LIMIT 1",
-                    (start_time_ms,),
-                ).fetchone()
-                cursor_order = int(high_water[0]) if high_water else 0
-                cursor_uid = str(high_water[1]) if high_water else "00000000-0000-0000-0000-000000000000"
-                checkpoint = {
-                    "ingest_order": cursor_order,
-                    "row_uid": cursor_uid,
-                    "bootstrap_cutoff_ms": start_time_ms,
-                    "ratio": 1.0,
-                }
-                _save_principal_checkpoint(db, checkpoint)
-            else:
-                return _bootstrap(db, settings.principal_bootstrap_ratio)
-        else:
-            checkpoint = json.loads(checkpoint_row[0])
-            cursor_order = int(checkpoint.get("ingest_order", 0))
-            cursor_uid = str(checkpoint.get("row_uid", "00000000-0000-0000-0000-000000000000"))
-            if start_time_ms is not None and start_time_ms > int(checkpoint.get("bootstrap_cutoff_ms", 0)):
-                high_water = db.execute(
-                    "SELECT ingest_order, toString(row_uid) FROM traces WHERE timestamp_ms < ? "
-                    "ORDER BY ingest_order DESC, row_uid DESC LIMIT 1",
-                    (start_time_ms,),
-                ).fetchone()
-                if high_water:
-                    cursor_order = max(cursor_order, int(high_water[0]))
-                    cursor_uid = str(high_water[1])
-                checkpoint["ingest_order"] = cursor_order
-                checkpoint["row_uid"] = cursor_uid
-                checkpoint["bootstrap_cutoff_ms"] = start_time_ms
-                _save_principal_checkpoint(db, checkpoint)
+            # History before the configured start is skipped through min_bucket_ms.
+            checkpoint = _with_cursor({**checkpoint, "bootstrap_cutoff_ms": start_time_ms,
+                                       "ratio": checkpoint.get("ratio", 1.0)}, (0, 0, 0))
+            _save_principal_checkpoint(db, checkpoint)
+        elif "updated_at_ms" not in checkpoint:
+            # Upgrade from the raw trace cursor: everything already in the rollup was
+            # counted from raw trace rows, so it is recorded as consumed instead of counted again.
+            checkpoint = _with_cursor(checkpoint, _mark_all_consumed(db))
+            _save_principal_checkpoint(db, checkpoint)
+        elif start_time_ms is not None and start_time_ms > int(checkpoint.get("bootstrap_cutoff_ms", 0)):
+            checkpoint["bootstrap_cutoff_ms"] = start_time_ms
+            _save_principal_checkpoint(db, checkpoint)
 
+        saved = (int(checkpoint["updated_at_ms"]), int(checkpoint["bucket_start_ms"]), int(checkpoint["row_key"]))
+        cursor = (max(0, saved[0] - CURSOR_OVERLAP_MS), 0, 0) if saved[0] and CURSOR_OVERLAP_MS else saved
         processed = 0
         readiness_cache: dict[str, Any] = {}
         while True:
-            where_sql = "WHERE (ingest_order,row_uid)>(?,toUUID(?))"
-            params: list[Any] = [cursor_order, cursor_uid]
-            if start_time_ms is not None:
-                where_sql += " AND timestamp_ms >= ?"
-                params.append(start_time_ms)
-            params.append(PRINCIPAL_BATCH_SIZE)
-            rows = db.execute(
-                "SELECT ingest_order,row_uid,timestamp_ms,principal_name,"
-                "service_environment,principal_id,operation_key,source_group,caller_service,caller_ip,"
-                "target_service,operation,auth_result,http_status,outcome,caller_instance,target_instance,"
-                "target_ip,target_port,http_method FROM traces "
-                f"{where_sql} "
-                "ORDER BY ingest_order,row_uid LIMIT ?",
-                params,
-            ).fetchall()
+            rows = _fetch_page(db, cursor, min_bucket_ms)
             if not rows:
                 break
-            batch = _BatchState(db, rows, readiness_cache)
-            for row in rows:
-                processed += _process_incremental_row(db, row, batch)
-            # No derived statement is issued until the whole page has been computed.
-            # Once all block inserts return, the page cursor is durable and can advance.
-            batch.flush()
-            cursor_order = int(rows[-1]["ingest_order"])
-            cursor_uid = str(rows[-1]["row_uid"])
-            checkpoint["ingest_order"] = cursor_order
-            checkpoint["row_uid"] = cursor_uid
-            db.execute(
-                "INSERT INTO checkpoints(source,cursor_json,updated_at_ms) VALUES('principal_intelligence',?,?)",
-                (json.dumps(checkpoint), int(time.time() * 1000)),
-            )
-            if time.monotonic() - stage_started >= settings.analytics_stage_budget_seconds:
+            ledger = _apply_ledger(db, rows)
+            fresh = [row for row in rows if row["count"] > 0]
+            if fresh or ledger:
+                batch = _BatchState(db, fresh, readiness_cache)
+                batch.consumed = ledger
+                for row in fresh:
+                    processed += _process_incremental_row(db, row, batch)
+                # No derived statement is issued until the whole page has been computed.
+                # Once all block inserts return, the page cursor is durable and can advance.
+                batch.flush()
+            last = rows[-1]
+            cursor = (int(last["updated_at_ms"]), int(last["bucket_start_ms"]), int(last["row_key"]))
+            if cursor > saved:
+                saved = cursor
+                _with_cursor(checkpoint, cursor)
+                db.execute(
+                    "INSERT INTO checkpoints(source,cursor_json,updated_at_ms) VALUES('principal_intelligence',?,?)",
+                    (json.dumps(checkpoint), int(time.time() * 1000)),
+                )
+            # A page of already-counted rows (the overlap rescan) is cheap and must not
+            # use up the budget, or a budget-limited cycle would never get past it.
+            if fresh and time.monotonic() - stage_started >= settings.analytics_stage_budget_seconds:
                 break
-        return {"processed": processed, "changes": db.total_changes, "cursor": cursor_order,
-                "bootstrap_cutoff_ms": int(checkpoint.get("bootstrap_cutoff_ms", 0))}
+        return {"processed": processed, "changes": db.total_changes, "cursor": saved[0],
+                "bootstrap_cutoff_ms": int(checkpoint.get("bootstrap_cutoff_ms") or 0)}

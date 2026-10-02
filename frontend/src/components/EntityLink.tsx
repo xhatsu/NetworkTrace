@@ -19,7 +19,7 @@ export function EntityLink({
     <Link
       to={`${entityPath(entity)}${search}`}
       onClick={(event) => event.stopPropagation()}
-      className={`entity-link focus-visible:outline focus-visible:outline-1 focus-visible:outline-offset-2 focus-visible:outline-[#5794f2] ${className}`}
+      className={`entity-link text-ink hover:underline focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-accent ${className}`}
       title={title}
     >
       {children}

@@ -1,5 +1,367 @@
 # TraceScope & Testbed Cluster Services — STATE.md
 
+> Complete deployment, generator parameters, and stack setup guide: [GUIDE.md](file:///home/ubuntu/Viettel/OtelTrace/GUIDE.md).
+
+## Frontend Complete In-Place Restyle & Legacy Override Cleanup (2026-10-02; docs/frontend-restyle-plan.md COMPLETE)
+
+- **Completed Phases:**
+  - **Phase A (Tokens & Theme Plumbing):** Created `frontend/src/styles/tokens.css` with semantic daylight and night CSS variables; rewired `frontend/tailwind.config.js` to reference semantic CSS variables; created `frontend/src/theme.tsx` dynamic provider and inline theme script in `index.html` guaranteeing zero flash on reload and default dark theme preservation.
+  - **Phase B (Shared Primitives & App Shell):** Restyled `components.tsx`, `EntityLink.tsx`, `EpisodePrimitives.tsx`, and `App.tsx` navigation sidebar, breadcrumbs, search, and two-option Light/Dark theme switcher.
+  - **Phase C (Charts):** Standardized `chartTheme.ts`, `ZoomableDashboardChart.tsx`, and `ChangeVisualEvidence.tsx` reading dynamic CSS variables from `useTheme()` tokens with daylight and night area gradients.
+  - **Phase D (Graphs & Topology):** Restyled `accessEncoding.ts`, `Topology.tsx`, `InteractiveTopology.tsx`, `AccessFlow.tsx`, `AccessMatrix.tsx`, `AccessExplorer.tsx`, and `ServiceAccessBoard.tsx` with dynamic state colors and canvas/SVG repainting.
+  - **Phase E (Complete Page Sweep):** Swept 100% of pages (`Overview.tsx`, `Services.tsx`, `ApiDetail.tsx`, `user/UserActivityWorkspace.tsx`, `user/UserDirectory.tsx`, `user/UserLayout.tsx`, `user/UserChangesTab.tsx`, `Changes.tsx`, `Alerts.tsx`, `Topology.tsx`, `Behavior.tsx`, `BehaviorGraph.tsx`, `BehaviorAccess.tsx`, `Traces.tsx`, `AgentStats.tsx`, `UnknownUsers.tsx`, `Accounts.tsx`, `Principals.tsx`, `Anomalies.tsx`, `UserIntelligence.tsx`, `i18n.tsx`).
+  - **Phase F (Legacy Override Removal & Grep Verification):**
+    - Completely stripped 500+ lines of dark hover overrides, ProServe gradient layer, particles, cubes, and `[class~="..."]` hacks from `frontend/src/index.css`.
+    - Removed legacy aliases from `src/styles/tokens.css` and `frontend/tailwind.config.js`.
+    - Verified all 5 grep checks from §2F Step 4 return **0**:
+      1. `grep -rhoE "\-\[#[0-9a-fA-F]{3,8}\]" src | wc -l` -> **0**
+      2. `grep -rhoE "(^|[ \"'\`])dark:" src | wc -l` -> **0**
+      3. `grep -rhoE "\b(bg|text|border|ring|divide)-(slate|gray|zinc|neutral|stone|blue|sky|indigo|violet|purple|fuchsia|pink|rose|red|orange|amber|yellow|lime|green|emerald|teal|cyan)-[0-9]{2,3}" src | wc -l` -> **0**
+      4. `grep -rnE "#[0-9a-fA-F]{6}" src --include=*.ts --include=*.tsx | grep -v "styles/tokens.css" | wc -l` -> **0**
+      5. `grep -rn "isLight\|theme === \"light\"\|backdrop-blur\|bg-gradient" src | wc -l` -> **0**
+  - **Bundle & API Verification:**
+    - Production build compiled cleanly with `tsc -b && vite build`: CSS reduced from 102.3 kB to 42.67 kB (~60% reduction).
+    - Tested 12 endpoints on dev server `http://127.0.0.1:31102` (all 200 OK).
+
+## Complete UI Hover States & Light Mode Font Color Remediation (2026-10-02)
+
+- **Problem & Root Causes Identified:**
+  1. **Dark Hover Backgrounds in Light Mode:** Table rows, cards, list items, and tabs used dark mode hover classes (`hover:bg-[#181b1f]`, `hover:bg-[#202226]`, `hover:bg-[#111217]`, `hover:bg-[#292133]`, `hover:bg-[#202436]`) which turned jet-black on hover in light mode.
+  2. **Invisible White Text on Hover in Light Mode:** Action buttons, links, and icons with `hover:text-white`, `hover:text-[#fff]`, `hover:text-[#d8d9da]`, `hover:text-[#f1f3f5]` became invisible white text on white/light surfaces when hovered.
+  3. **Washed-out Pastel Text in Light Mode:** Pastel colors calibrated for dark backgrounds (`text-[#a9ccff]`, `text-[#8bb8fa]`, `text-[#8db7fa]`, `text-[#9be7d8]`, `text-[#82d5c4]`, `text-[#e3c4f1]`, `text-[#d9b4ea]`, `text-[#ffb45e]`, `text-[#ffb767]`, `text-[#fb7185]`) lacked sufficient contrast on light surfaces (< 3:1).
+  4. **Text-white remapping preservation:** Ensuring solid colored background badges (e.g. `btn-primary`, `bg-blue-600`, `bg-violet-600`, `bg-rose-500`) preserve crisp `#ffffff` text while neutral text-white elements remap to dark text on light surfaces.
+- **Architectural & Global CSS Fixes (`frontend/src/index.css`):**
+  - **Comprehensive Light Mode Dark Hover Remap:**
+    Added global rules mapping all dark hover backgrounds (`hover:bg-[#181b1f]`, `hover:bg-[#202226]`, `hover:bg-[#111217]`, `hover:bg-[#1f222b]`, `hover:bg-[#252934]`, `hover:bg-[#1a1d2e]`, `hover:bg-[#202333]`, `hover:bg-[#202436]`, `hover:bg-[#292133]`, `hover:bg-slate-800`, `hover:bg-slate-900`, `hover:bg-gray-800`, `hover:bg-zinc-800`, `hover:bg-white/`) to `background-color: var(--theme-surface-hover) !important` (`#f7f7fa` / `#f1f5f9`).
+  - **Comprehensive Light Mode Hover Text Remap:**
+    Added rules mapping `hover:text-white`, `hover:text-[#fff]`, `hover:text-[#d8d9da]`, `hover:text-[#f0f3f6]`, `hover:text-[#f1f3f5]`, `hover:text-slate-100`, `hover:text-slate-200`, `group-hover:text-white` to `color: var(--theme-text) !important` (`#172235`).
+  - **Accessible Accent Hover Remap:**
+    Mapped `hover:text-[#a9ccff]`, `hover:text-[#5794f2]`, `hover:text-cyan-100/200`, `hover:text-indigo-300`, `group-hover:text-indigo-300` to `#1d63dc !important`; `hover:text-[#9be7d8]/[#56b9a8]` to `#0d9488 !important`; `hover:text-[#e3c4f1]/[#b877d9]` to `#7c3aed !important`; `hover:text-[#ff9830]` to `#d97706 !important`.
+  - **Pastel Color Contrast Enforcement (WCAG AA >= 4.5:1):**
+    Mapped `text-[#a9ccff]`, `text-[#8bb8fa]`, `text-[#8db7fa]` -> `#1d63dc !important`; `text-[#9be7d8]`, `text-[#82d5c4]` -> `#0d9488 !important`; `text-[#e3c4f1]`, `text-[#d9b4ea]` -> `#7c3aed !important`; `text-[#ffb45e]`, `text-[#ffb767]` -> `#d97706 !important`; `text-[#fb7185]`, `text-[#f43f5e]` -> `#dc2626 !important`; `text-[#34d399]` -> `#16a34a !important`; `text-white/` -> `var(--theme-text-secondary) !important`.
+  - **Protected Solid Badge Text:**
+    Explicitly guarded `.btn-primary`, `.btn-cyan`, `bg-blue-600`, `bg-violet-600`, `bg-indigo-600`, `bg-rose-500`, `bg-rose-600`, `bg-red-600` so their text remains `#ffffff !important`.
+  - **Dark Hover Borders Remap:**
+    Mapped `hover:border-[#34373b]`, `hover:border-[#7b7d80]`, `hover:border-[#2a2d30]`, `hover:border-[#262838]`, `hover:border-white/` to `border-color: var(--theme-border-strong) !important`.
+- **Component-Level Upgrades with Direct Tailwind Light/Dark Variants:**
+  - `frontend/src/pages/Overview.tsx`: Table headers now hover `hover:text-[#172235] dark:hover:text-[#d8d9da]`; Top users table rows hover `hover:bg-[#f1f5f9] dark:hover:bg-[#181b1f]`; View all button hovers `hover:text-[#172235] dark:hover:text-white`; Important changes rows hover `hover:bg-[#f1f5f9] dark:hover:bg-[#181b1f]`.
+  - `frontend/src/pages/Services.tsx`: View all button hovers `hover:text-[#172235] dark:hover:text-white`; Attention operations hover `hover:bg-[#f1f5f9] dark:hover:bg-[#181b1f]`; Operations table rows hover `hover:bg-[#f1f5f9] dark:hover:bg-[#181b1f]`; Users table rows hover `hover:bg-[#f1f5f9] dark:hover:bg-[#181b1f]`; Representative traces button and rows hover `hover:bg-[#f1f5f9] dark:hover:bg-[#181b1f]`.
+  - `frontend/src/pages/ApiDetail.tsx`: Traces action button hovers `hover:text-[#172235] dark:hover:text-white`; Traces table rows hover `hover:bg-[#f1f5f9] dark:hover:bg-[#181b1f]`; PartyTable rows hover `hover:bg-[#f1f5f9] dark:hover:bg-[#181b1f]`.
+  - `frontend/src/components/AccessExplorer.tsx`: Segmented control upgraded to `bg-white dark:bg-[#111217]` with `hover:bg-[#f1f5f9] dark:hover:bg-[#202226]` and `hover:text-[#172235] dark:hover:text-white`; search clear button hovers `hover:text-[#172235] dark:hover:text-white`; row items hover `hover:bg-[#f1f5f9] dark:hover:bg-[#181b1f]`; load more button hovers `hover:bg-[#f1f5f9] dark:hover:bg-[#181b1f]`; selection header close button hovers `hover:text-[#172235] dark:hover:text-white`.
+  - `frontend/src/components/FleetTriage.tsx`: Scope buttons upgraded with `border-[#1d63dc] dark:border-[#5794f2] text-[#1d63dc] dark:text-[#5794f2]` and inactive hover `hover:text-[#172235] dark:hover:text-[#d8d9da]`; service table rows hover `hover:bg-[#f1f5f9] dark:hover:bg-[#181b1f]`; entity link hovers `hover:text-[#1d63dc] dark:hover:text-[#5794f2]`.
+  - `frontend/src/components/ServiceAccessBoard.tsx`: Selected chips upgraded to high-contrast colors (`text-[#1d63dc] dark:text-[#a9ccff]`, `text-[#0d9488] dark:text-[#9be7d8]`, `text-[#7c3aed] dark:text-[#e3c4f1]`) with clear buttons hovering `hover:text-[#172235] dark:hover:text-white`.
+  - `frontend/src/components/EpisodePrimitives.tsx`: `SemanticAssessmentBadge` tone colors mapped with `text-[#7c3aed] dark:text-[#d9b4ea]`, `text-[#1d63dc] dark:text-[#8bb8fa]`, `text-[#d97706] dark:text-[#ffb767]`; `entityTokenClass` upgraded to `text-[#7c3aed] dark:text-[#d9b4ea]`, `text-[#1d63dc] dark:text-[#8db7fa]`, `text-[#0d9488] dark:text-[#82d5c4]`; `EpisodeCard` background set to `bg-white dark:bg-[#111217]` and hover to `hover:bg-[#f1f5f9] dark:hover:bg-[#181b1f]`.
+  - `frontend/src/components/InvestigationPanel.tsx`: Technical details summary hovers `hover:text-[#172235] dark:hover:text-[#d8d9da]`; `InvestigationEntity` colors mapped with `text-[#1d63dc] dark:text-[#8db7fa]`, `text-[#0d9488] dark:text-[#82d5c4]`, `text-[#7c3aed] dark:text-[#d9b4ea]`.
+  - `frontend/src/pages/Changes.tsx`: View scope buttons hover `hover:bg-[#f1f5f9] dark:hover:bg-[#181b1f]`; header strip styled with `bg-[#f8fafc] dark:bg-[#181b1f]`; change episode articles hover `hover:bg-[#f1f5f9] dark:hover:bg-[#181b1f]/60`; action links hover `hover:underline` with high-contrast text.
+  - `frontend/src/pages/user/UserLayout.tsx`: Back button styled with `bg-white dark:bg-[#181b1f]` and hover `hover:text-[#172235] dark:hover:text-white`; user switcher rows hover `hover:bg-[#f1f5f9] dark:hover:bg-[#202436] hover:text-[#172235] dark:hover:text-white`; nav tabs styled with `bg-white dark:bg-[#111217]` and hover `hover:bg-[#f1f5f9] dark:hover:bg-[#181b1f] hover:text-[#172235] dark:hover:text-[#d8d9da]`.
+  - `frontend/src/pages/user/UserActivityWorkspace.tsx`: Detail tabs hover `hover:text-[#172235] dark:hover:text-white`; traces button hovers `hover:text-[#172235] dark:hover:text-white`; traces rows and party table rows hover `hover:bg-[#f1f5f9] dark:hover:bg-[#181b1f]`; entity labels and icons use calibrated contrast colors.
+  - `frontend/src/pages/Topology.tsx`: Edge table rows hover `hover:bg-[#f1f5f9] dark:hover:bg-[#292133]` with readable text `#172235 dark:text-white`.
+  - `frontend/src/App.tsx`: Toolbar filter clear buttons hover `hover:text-[#172235] dark:hover:text-[#d8d9da]`.
+- **Verification:**
+  - `npm run build` completed with zero errors (`dist/assets/index-ComdsnJc.css` 102.29 kB, `dist/assets/index-qxiCudg3.js` 1,867.88 kB).
+  - Dev server at `http://127.0.0.1:31102` verified serving fresh bundle with all light mode hover and text rules active.
+  - Tested 9 API endpoints returning 200 OK (`/api/v1/health`, `/api/v1/services`, `/api/v1/apis`, `/api/v1/behavior/overview`, `/api/v1/behavior/topology`, `/api/v1/behavior/profiles`, `/api/v1/changes`, `/api/v1/alerts`, `/api/v1/dashboard/series`).
+
+## Dashboard Overview: Removal of Hero Banner ("Live service intelligence") (2026-10-02)
+
+- **Action:** Removed the `proserve-hero` section containing the "Live service intelligence" pill, "Stay ahead of what changes" heading, descriptive copy, and action buttons from `frontend/src/pages/Overview.tsx`.
+- **Rationale:** Maximizes above-the-fold operational screen space for core KPI metric cards (TPS, Bandwidth, Needs attention, Observed footprint) and traffic charts.
+- **Verification:**
+  - `npm run build` compiled cleanly into `dist/assets/index-Casmpc75.js` and `dist/assets/index-BK1YPfSa.css`.
+  - Local dev server at `http://127.0.0.1:31102` verified serving bundle without hero banner.
+  - Backend API health and endpoints tested (200 OK).
+
+## Reset: `frontend-next/` Clean Removal for Fresh Start (2026-10-02)
+
+- **Action:** Removed `/frontend-next` completely upon user request to start clean from scratch.
+- **Preserved Design & Plan References:**
+  - `docs/frontend-next-design.md`: Design guide (tokens, typography, layout recipes, chart rules).
+  - `docs/frontend-next-migration-plan.md`: Migration plan (phases 0-7, cutover steps, rollback instructions).
+- **Process & Port Cleanup:** Stopped Vite preview server on `:31110` (`tmux kill-session -t tracescope-next-31110`).
+- **Active System State:** Local dev server running on `:31102` serving existing `frontend/dist`. Clean slate ready for fresh implementation.
+
+## Complete Light Mode Deep Redesign (Daylight Operational Console) (2026-10-02; frontend rebuilt, local :31102 restarted)
+
+- **Architectural Shift:** Removed destructive wildcard CSS overrides (`html[data-theme="light"] [class*="text-[#"]`) in `frontend/src/index.css` that previously crushed all status pills, error badges, metrics, and entity highlights into monochrome black.
+- **Semantic Token Architecture:**
+  - `frontend/src/theme.ts`: Added typed token definitions (`ColorTokens`, `DARK_THEME`, `LIGHT_THEME`, `getThemeTokens`) defining low-glare canvas (`#f3f6fa`), clean daylight surfaces (`#ffffff`, `#f8fafc`, `#edf2f7`), accessible dark text (`#172235`, `#334155`, `#475569`, `#64748b`), and WCAG AA compliant operational status colors (`#1d63dc`, `#16a34a`, `#d97706`, `#dc2626`, `#7c3aed`, `#0d9488`).
+  - `frontend/src/chartTheme.ts`: Standardized chart tokens for ECharts and Recharts (tooltips, axes, grids).
+  - `frontend/src/accessEncoding.ts`: Added `getStateStyle(state, isLight)` and `getEntityColor(kind, isLight)` providing calibrated SVG strokes and fills for access flows, matrices, and topologies.
+  - `frontend/tailwind.config.js`: Integrated semantic CSS variable mappings for `canvas`, `sidebar`, `surface`, `line`, `ink`, `status`, and `entity`.
+  - `frontend/src/index.css`: Rebuilt root and daylight variable tokens with purposeful surface contrast; mapped dark utility literals safely without crushing semantic text colors; added daylight forms, inputs, tooltips, and scrollbars.
+- **Component Upgrades:**
+  - **Shell:** SideNav brand mark with vibrant blue fill, active states with `bg-blue-50/90 border-blue-200 text-[#172235]`, readable slate inactive navigation, and green ClickHouse status pill. Toolbar with high-contrast breadcrumbs, time-range badge, and theme switcher (Sun/Moon).
+  - **Primitives (`components.tsx`):** `Page`, `Panel`, `MetricCard`, `InteractiveMetricCard`, `TpsLineChart`, `Loading`, `ErrorState`, and `chartTooltip` styled with daylight borders (`#d5dee9`), deep ink headings, and high-contrast status metrics.
+  - **Charts (`ZoomableDashboardChart.tsx` & `ChangeVisualEvidence.tsx`):** Theme-aware ECharts instance with daylight palette, white tooltip, light zoom slider, and 1h before/after comparison metric boxes.
+  - **Access & Behavior (`AccessFlow.tsx`, `AccessMatrix.tsx`):** Dynamic ribbon states and entity colors (`getEntityColor`, `getStateStyle`), daylight filter bars, search controls, inspector readouts, and table views.
+  - **Interactive Topology (`InteractiveTopology.tsx`):** Node card backgrounds (`bg-white dark:bg-[#11131b]/95`), border colors, entity tones, SVG arrow markers, search results dropdown, zoom controls, and flow drawer.
+- **Verification:**
+  - `npm run build` completed with zero TypeScript/bundling errors (`dist/assets/index-D61VQ0w0.js`, `dist/assets/index-Cpo8qVn9.css`).
+  - Local server on `:31102` restarted via `./run_server.sh restart`.
+  - Verified 200 OK responses across API endpoints (`/api/v1/health`, `/api/v1/services`, `/api/v1/apis`, `/api/v1/behavior/overview`, `/api/v1/behavior/topology`, `/api/v1/dashboard/series`).
+  - Dark mode remains 100% intact and visually identical.
+
+## Standalone OBI Agent Only Deployment (Omitting OpenTelemetry Collector) (2026-10-02)
+
+- **Requirements & Design:**
+  - Support deploying exclusively the eBPF auto-instrumentation agent (`tracescope-obi` DaemonSet + RBAC + ConfigMap) without deploying the OpenTelemetry Collector (`Deployment`, `Service`, `collector-configmap`).
+  - Required when an environment already hosts an OpenTelemetry Collector or routes traces directly to an external OTLP receiver.
+  - Critical constraint: when `collector.enabled: false`, OBI's `otel_traces_export.endpoint` must be explicitly configured with the destination OTLP address (e.g. `http://<collector>:4317` or HTTP endpoint).
+- **Changes Applied:**
+  - `deploy/helm/render-stack.sh`:
+    - Added `--no-collector` flag to set `collector.enabled: false`.
+    - Added `--export-endpoint <URL>` to supply `obi.export.endpoint`.
+    - Added validation to prevent generation without an explicit export endpoint when `--no-collector` is used.
+    - Updated stack rendering so ClickHouse mode does not mandate a local in-chart collector.
+  - `GUIDE.md`:
+    - Documented flags `--no-collector` and `--export-endpoint <URL>` in parameter reference.
+    - Added dedicated subsection detailing the 4 resources to apply vs 3 to omit, with CLI commands and YAML generation examples.
+    - Saved standalone manifest to `stack-out/tracescope-obi-agent-only.yaml`.
+- **Verification:**
+  - Tested `./deploy/helm/render-stack.sh --mode clickhouse --no-collector --export-endpoint "http://my-collector:4317" --render` producing clean manifest without Collector Deployment/Service.
+  - Verified `helm template` outputs only `ServiceAccount`, `ConfigMap`, `ClusterRole`, `ClusterRoleBinding`, and `DaemonSet`.
+
+## Dashboard Page Layout: Top Users (2/5) and Heatmap (3/5) Row with Column Sorting (2026-10-01)
+
+- **Requirements & Design:**
+  - Move the "Top users" card into the same row as the "When behavior changes" Heatmap card on the Dashboard overview (`frontend/src/pages/Overview.tsx`).
+  - Arrange in a responsive 2/5 - 3/5 grid: "Top users" on the left (`lg:col-span-2`), "Heatmap" on the right (`lg:col-span-3`).
+  - Add interactive column sorting to the "Top users" table for columns: `TPS`, `Services`, `APIs`, and `Changes`.
+  - Column headers toggle sort direction between descending and ascending, with visual indicator icons (`ArrowDown`, `ArrowUp`, `ArrowUpDown`) and active column highlighting (`text-[#5794f2] font-semibold`).
+  - Query limit expanded to 50 users (`usersDirectoryQuery`) to allow client-side sorting across active users in the selected window.
+- **Changes Applied:**
+  - `frontend/src/pages/Overview.tsx`:
+    - Imported `ArrowDown`, `ArrowUp`, `ArrowUpDown` from `lucide-react`.
+    - Added sort state: `userSortField: "tps" | "services" | "apis" | "changes"` (default `"tps"`) and `userSortDir: "asc" | "desc"` (default `"desc"`).
+    - Added `handleUserSort` callback and `sortedUserHotspots` / `sortedChangedUsers` compute blocks.
+    - Grouped Top users and Heatmap in `<div className="mt-3 grid grid-cols-1 lg:grid-cols-5 gap-3 items-stretch">`.
+    - Rendered sortable headers with click handlers on `TPS`, `Services`, `APIs`, `Changes`.
+    - Removed redundant separate `Top users` card block from the bottom of the page.
+- **Verification:**
+  - Built frontend with `npm run build` -> `dist/assets/index-CpxF53g6.js`.
+  - Synced bundle to cluster container mount (`/var/lib/kubelet/pods/f92443a6-cdd1-40e8-bfa0-3fa461373e7f/volumes/kubernetes.io~empty-dir/tmp/dist/`).
+  - Restarted local server on `:31102` (`./run_server.sh restart`).
+  - Both `http://127.0.0.1:31102` and cluster NodePort `http://127.0.0.1:30102` verified returning 200 OK and serving `index-CpxF53g6.js`.
+
+## Changes Page Priority & Review Status: Left-Aligned, Box-Free Badges & Non-Filling Divider Line (2026-10-01)
+
+- **Requirements & Design:**
+  - Left-align text and icons for both Priority and Review Status in the first column of the Changes list table (`frontend/src/pages/Changes.tsx`).
+  - Eliminate bounding boxes/cards (remove borders and background fills) for both `EpisodeStatusBadge` and `EpisodeWorkflowBadge` (`frontend/src/components/EpisodePrimitives.tsx`), rendering clean colored typography and icons.
+  - Drop the "Review status:" prefix from `EpisodeWorkflowBadge`, rendering solely the review state (`Open`, `Monitoring`, `Resolved`) with its icon.
+  - Separate the Priority/Status column from the change name column using a subtle vertical dividing line (`w-px bg-[#303236]`) that does NOT fill vertically (`top-2.5 bottom-2.5` inset).
+- **Changes Applied:**
+  - `frontend/src/components/EpisodePrimitives.tsx`:
+    - Added `episodeStatusTone(state)` returning crisp text colors (`text-[#f2495c]`, `text-[#ff9830]`, `text-[#73bf69]`, `text-[#b877d9]`, `text-[#5794f2]`).
+    - Updated `EpisodeStatusBadge`: renders `inline-flex items-center justify-start gap-1.5 text-[10px] font-bold uppercase tracking-wider whitespace-nowrap` without box/border by default (optional `box` prop preserved).
+    - Updated `EpisodeWorkflowBadge`: renders `inline-flex items-center justify-start gap-1 text-[10px] font-semibold uppercase tracking-wider whitespace-nowrap` showing `{label}` without the "Review status:" prefix.
+  - `frontend/src/pages/Changes.tsx`:
+    - Left-aligned table column header: `<span>{t("Priority", "Mức ưu tiên")}</span>`.
+    - Left-aligned column content: `<div className="relative flex flex-wrap items-start justify-start gap-1 text-left xl:flex-col xl:items-start xl:justify-start">`.
+    - Maintained partial vertical divider: `<div className="hidden xl:block absolute -right-1.5 top-2.5 bottom-2.5 w-px bg-[#303236]" />` placed in the center of the column gap and inset top/bottom.
+- **Verification:**
+  - Built frontend (`npm run build` -> `dist/assets/index-CN0_pA-3.js`).
+  - Synced bundle to cluster NodePort (`30102`) and restarted local dev server (`31102`). Both return 200 OK.
+
+## Change in Context Visual Evidence & 1h Before/After Accurate Metrics (2026-10-01)
+
+- **Root Causes of Broken / Contradictory "Change in context" Card (`ChangeVisualEvidence.tsx`):**
+  1. **5-Minute Signal vs 1-Hour Chart Rate Discrepancy:** The two top summary boxes previously fetched `detectorHighlight.before` and `detectorHighlight.after`. In novelty/edge detectors (e.g. `new_service_edge`), `after` held the raw 5-minute request count (e.g. 16.0), which was formatted as `16.00 TPS`, directly contradicting the line chart below which plotted true request rates (e.g. `0.05 TPS`).
+  2. **Sparse Telemetry & Inaccurate Averages:** Because ClickHouse `metric_buckets` only contains rows for active minutes, sparse telemetry caused Recharts to connect distant points diagonally across the hour or show empty data. `mean(beforePoints)` then either inflated average TPS by averaging only active minutes or displayed "No observed samples".
+  3. **Missing `caller` Filtering:** `dashboard/series` supported `service`, `operation`, and `account`, but ignored `caller` (`caller_service` in `metric_buckets`). An edge anomaly for `caller -> service` displayed the aggregate service's metrics rather than the edge.
+  4. **Baseline Dimension Key Mismatch:** When `service` was present, `repository.py` defaulted to the whole service's baseline, ignoring specific `principal_target` or `caller_target` baselines.
+- **Fixes Applied:**
+  - **Dense 1-Minute Bucketing:** `ChangeVisualEvidence.tsx` now builds continuous 1-minute buckets between `startMinute` and `endMinute`. For TPS and HTTP 5xx rate, unrecorded minutes default to 0. For P95 latency, unrecorded minutes default to `null` and are not connected.
+  - **True 1-Hour Window Means:** Top boxes now display `1h Before (avg)` and `After Signal (avg)` computed from `mean(beforePoints)` and `mean(afterPoints)`, ensuring exact arithmetic consistency with the chart.
+  - **Caller & Edge Filtering:** Added `caller` to `QueryFilters` (`backend/models.py`), `filters_model` / `filter_dict` (`backend/app/application.py`), and `dashboard_series` (`backend/repository.py`). Prioritized baseline lookup specificity: `(account, service) -> (caller, service) -> (service, operation) -> account -> operation -> service -> system-wide`.
+  - **Time Window Safety:** Capped `pivot` at `nowMs` to eliminate invalid future projection from window-end timestamps.
+- **Verification:**
+  - Tested `/api/v1/dashboard/series` with caller/service filters on `:31102` (`caller=traffic-ui&service=order-service` -> 120 points, baseline 0.1033).
+  - Built frontend (`npm run build`) and synced dist to both local dev server (`:31102`) and cluster NodePort (`:30102`). Both return 200 OK for `assets/index-DJ7t1p_v.js`.
+
+## Service Detail Page Layout: TPS (3/5) and Recent Changes (2/5) Row (2026-10-01)
+
+- **Unified 60/40 Grid Row on `/services/:serviceName`:**
+  - Placed the TPS performance chart and Recent Changes card in a responsive side-by-side grid (`grid grid-cols-1 lg:grid-cols-5 gap-4 items-stretch`).
+  - Allocated 3/5 width (`lg:col-span-3`) to the TPS vs Expected chart panel and 2/5 width (`lg:col-span-2`) to the Recent Changes panel.
+  - Aligned card heights with `h-full flex flex-col` and scrollable items (`max-h-[262px] overflow-y-auto`).
+  - Compiled and deployed bundle to both local dev server (`:31102`) and cluster NodePort (`:30102`).
+
+## ClusterRole Cross-Namespace Tracing & ClickHouse Learning Stack (2026-10-01)
+
+- **Cluster-Wide RBAC (`ClusterRole` & `ClusterRoleBinding`):**
+  - Generated manifest includes `ClusterRole` and `ClusterRoleBinding` for `tracescope-obi`.
+  - Grants cluster-wide discovery (`pods`, `services`, `nodes`, `namespaces`, `deployments`, `statefulsets`, `daemonsets`) across all target namespaces, including namespaces the non-admin user cannot access directly.
+- **Generated Manifests:**
+  - `stack-out/tracescope-all.yaml`: single consolidated manifest containing ClickHouse, Ingest, App, OBI, and Collector with behavior learning enabled (`OTEL_BEHAVIOR_LEARNING_ENABLED: "true"`) and cluster-wide RBAC.
+- **Live Deployment & Health (Authorized kubectl execution):**
+  - Applied `./stack-out/tracescope-all.yaml` to cluster.
+  - Pods 100% Ready: `tracescope-app-0` (2/2), `tracescope-clickhouse-0` (1/1), `tracescope-ingest` (1/1), `tracescope-obi` (2/2), `tracescope-obi-collector` (1/1).
+  - Traces streaming: OBI -> Collector -> Ingestion (continuous 200 OK).
+  - Analytics verified: Background worker running in shadow mode with 280 active profiles.
+  - Endpoints healthy (200 OK): `http://127.0.0.1:30102/api/v1/health` and `https://trace.n2d.id.vn/api/v1/behavior/*`.
+
+## Multi-Arch Images, Ephemeral ClickHouse (--no-pvc) & Single-YAML Stack (2026-10-01)
+
+- **ClickHouse Without PVC (Ephemeral / Test Environments):**
+  - Updated `deploy/helm/tracescope/templates/clickhouse-statefulset.yaml`: supports `.Values.clickhouse.persistence.enabled: false`. When disabled, ClickHouse mounts `emptyDir: {}` instead of a PVC claim.
+  - Updated `deploy/helm/render-stack.sh`: added `--no-pvc` flag which renders `clickhouse.persistence.enabled: false` and eliminates the `PersistentVolumeClaim` document from generated manifests.
+  - Manual YAML fallback: In any rendered manifest, delete the `kind: PersistentVolumeClaim` named `tracescope-clickhouse-data` and change the StatefulSet `volumes.data` from `persistentVolumeClaim: {claimName: tracescope-clickhouse-data}` to `emptyDir: {}`.
+  - Behavior: ClickHouse runs fully in-memory/pod-disk; data resets when the pod restarts. Ideal for quick dev/test environments without dynamic PVC provisioners.
+- **Multi-Arch Docker Images & Dedicated AMD64 Tags:**
+  - Built and pushed multi-arch manifest lists to Docker Hub (`linux/amd64` + `linux/arm64`):
+    - `xhatsu101/tracescope:0.4.6`, `app-0.4.6`, `latest`
+    - `xhatsu101/tracescope:ingest-0.4.6`, `ingest-latest`
+  - Also pushed dedicated single-arch AMD64 tags to prevent stale ARM64 node cache collisions (`exec format error`):
+    - `xhatsu101/tracescope:0.4.6-amd64` (digest `sha256:f63103f0eb6fdf731ae5c95299503bce8a7c21e8ee6a119d460fdcb16d80687d`)
+    - `xhatsu101/tracescope:ingest-0.4.6-amd64` (digest `sha256:92091bb62ccc96b76f87653775ff56bbac33fc60fe679cbb8a210653a93ae388`)
+- **Generator Flags (`--tag` & `--pull-policy`):**
+  - Updated `deploy/helm/render-stack.sh`: supports `--tag <TAG>` (e.g. `--tag 0.4.6-amd64`) and `--pull-policy <POLICY>` (e.g. `--pull-policy Always`).
+  - Restructured YAML emission to merge `app:` and `ingest:` sections without duplicate YAML keys.
+- **Single-YAML Stack & Namespace Isolation:**
+  - `render-stack.sh -n <namespace> --single-yaml [file]`: Bundles full TraceScope application + OBI stack into a single unified manifest with unified namespace injection across all resources.
+  - RBAC handling: `--no-cluster-rbac` drops `ClusterRole` & `ClusterRoleBinding` (scoped to namespace `Role`), while `--no-rbac` removes all RBAC resources for clusters with restricted permissions.
+  - Full guide and command references maintained in `GUIDE.md`.
+
+## NodePort & Local Port Layout (2026-10-01)
+
+- **Port Disambiguation & Concurrent Operation:**
+  - **In-cluster NodePort 30102**: `tracescope-api` Service in Kubernetes. Handles external requests and public Ingress (`https://trace.n2d.id.vn`).
+  - **Local Host Dev Server 31102**: Running in `tmux session tracescope-31102` (`http://0.0.0.0:31102`), configured via `OTEL_PORT=31102` in `.env` and `run_server.sh`. Worker disabled locally so the cluster worker owns all analytics.
+  - **Ingest NodePort 30103**: `tracescope-ingest` OTLP HTTP receiver.
+  - **Bootstrap Server 30105**: Node bootstrap server (`bootstrap/start.sh`).
+- **Ingress Bypass & Direct NodePort Access:**
+  - `tracescope-api` (UI & REST API): Port 30102. `templates/api-service.yaml` supports `app.service.type: NodePort` and `app.service.nodePort: 30102`.
+  - `tracescope-ingest` (OTLP Trace Intake): Port 30103. Supports `ingest.service.type: NodePort` and `ingest.service.nodePort: 30103`.
+  - `tracescope-obi-collector`: Supports `collector.service.type: NodePort` with `nodePortGrpc` (4317) and `nodePortHttp` (4318).
+  - Generator flag: `render-stack.sh --nodeport` generates values with `ingress.enabled: false`, `app.service.type: NodePort` (30102), and `ingest.service.type: NodePort` (30103).
+  - Generator flags `-n, --namespace <NS>` and `--single-yaml [FILE]`: Added unified namespace parameter and automatic bundling of app + OBI into `tracescope-all.yaml`. All chart templates now inject `metadata.namespace: {{ .Release.Namespace }}`.
+
+## Behavior Learning Activation & Resolution (2026-10-01)
+
+- **Root Cause:** `behavior.enabled` defaulted to `false` in Helm `values.yaml`, rendering `OTEL_BEHAVIOR_LEARNING_ENABLED: "false"` into the ConfigMap. The worker's `run_behavior_learning()` method exited early with `status: disabled`, so no behavioral profiles or graph nodes were generated.
+- **Remediation:** Enabled `behavior.enabled: true` in `deploy/helm/tracescope/values.yaml` and `deploy/helm/render-stack.sh`. Patched `tracescope-config` ConfigMap and rolled out `tracescope-app`.
+- **Live Status:**
+  - Cluster worker logs show: `{"event": "worker_stage_complete", "stage": "learned_behavior", ... "learned_behavior": {"status": "shadow", "sources": {"legacy_metrics": {"status": "live", "profiles": 49, "deviations": 0}}}}`.
+  - `/api/v1/behavior/overview`: `mode: shadow`, `enabled: true`, `profiles: 49`, `requests: 64839`.
+  - `/api/v1/behavior/topology`: returns 52 entities and 9 edges.
+  - `/api/v1/behavior/access`: returns 15 nodes and 28 links for `order-service`.
+
+## tracescope-obi Live Cluster Migration & YAML Generation Deployment (2026-10-01; applied via kubectl per authorization)
+
+- **Uninstalled Legacy Release:** `helm uninstall otel-obi -n observability` cleanly uninstalled the old OBI release and freed up node resources.
+- **YAML Generation:** Executed `./deploy/helm/render-stack.sh --mode clickhouse --obi custom --body on --target default --exclude kube-system --ts-release tracescope --ts-namespace tracescope --obi-release tracescope-obi --obi-namespace tracescope --out ./stack-out --render`.
+- **Applied Declarative Manifests:** Applied `tracescope.yaml` and `tracescope-obi.yaml` to namespace `tracescope`.
+- **OBI Stack Renamed:** DaemonSet is `tracescope-obi` and Collector is `tracescope-obi-collector` inside the `tracescope` namespace matching the app.
+- **Live Verification & Recheck:**
+  - OBI captures XML/SOAP bodies (e.g. `emma_wsse` username extracted).
+  - Collector exports traces to `http://tracescope-ingest.tracescope.svc.cluster.local:30103`.
+  - Ingestion pods acknowledge batches with continuous `POST /v1/traces 200 OK`.
+  - ClickHouse receives rows continuously with ~4s lag: **165,077+** total rows.
+  - Analytics worker completed cycles without errors; `/api/v1/behavior/overview` shows 53 profiles and 78,802+ requests analyzed.
+  - Public APIs (`https://trace.n2d.id.vn`), cluster NodePort (`:30102`), and local dev server (`:31102`) all return HTTP 200.
+
+## Trace-free user behavior and mid-request dependency edges (2026-10-01; deployed as image 0.4.6, chart 0.3.10, release rev 5; host worker intentionally disabled)
+
+- **Rollup `principal_activity_5m`** (migration 019, ReplacingMergeTree, 35-day TTL; ledger `principal_activity_consumed`): per (5-minute bucket, row_key) credential activity: principal, caller, source IP, target, operation, requests/errors/auth failures/successes, first/last seen, 3 sample trace IDs. `backend/app/services/principal_activity.py::materialize_principal_activity` rewrites whole buckets (DELETE then INSERT) from `traces_source_sql()` in `_aggregate_slice` right after caller resolution, so behavior carries the same resolved callers/targets as `metric_buckets`. A window with no raw traces is skipped, so expired windows keep their rollup rows.
+- **No raw trace reads for behavior:** `principal_relationships.py` (rewritten), `behavioral_engine.py` (readiness uses the ingest-time `principal_readiness_summary` MV; detectors read the rollup), `anomaly_detection.py` Detector 9 (user/IP) and `prometheus_metrics.py` (totals from `metric_buckets`, nodes = services) no longer query `traces`. Enforced by `tests/test_api_read_model_boundary.py::test_user_behavior_services_read_the_activity_rollup_not_raw_traces`. Raw `traces` is read only by ingestion, `trace_edge_resolution`, `principal_activity` and Trace Explorer.
+- **Incremental processing:** cursor `(updated_at_ms, bucket_start_ms, row_key)`; each cycle rewinds `CURSOR_OVERLAP_MS` (5 s, 0 disables) so a rewrite landing behind the cursor is still seen. The ledger stores the elementwise max already counted; only the positive difference is processed, so re-aggregating a slice never double counts. The ledger is written last in `flush()`. Legacy checkpoints (no `updated_at_ms`) mark everything consumed on first run. Bootstrap (no checkpoint, or <=5 baselines with >100 named requests) is built entirely on the rollup and ends by marking all consumed.
+- **Caveats:** re-resolution of a caller changes `row_key`, so the new key is counted again and the old key's shrink is ignored (negative deltas are never subtracted); history now reaches 35 days (raw traces 1 day); agent traces are included; auth anomalies are evaluated per 5-minute row; the telemetry gate counts requests not spans; a legacy checkpoint upgrade can skip at most one cycle; known IPs for Detector 9 exclude anonymous principals' IPs. The ELK path (`elk_to_clickhouse`) is unchanged and also feeds the rollup through the ClickHouse `traces` copy.
+- **Reset:** `rebuild_clickhouse_analytics.py` truncates the ledger but deliberately keeps `principal_activity_5m` (its history cannot be rebuilt from 1-day raw traces); the checkpoint reset triggers a bootstrap that replays the kept rollup.
+- **Mid-request outgoing calls (`client_exit`):** `trace_edges.resolve(..., exit_clients=True)` (used by `trace_edge_resolution` for OTLP rows stored one-per-span) turns a non-root client span that is contained in a server span and names a different peer into a `caller -> peer` dependency edge, confidence 0.7, instead of dropping it. The client span's own row is counted at the edge (`client_exit`), the enclosing server row is untouched. Root clients still use `client_retargeted`. Tests: `tests/test_otlp_trace_edge_resolution.py` (mid-request section).
+- **Scripts:** `generate_{7,10,30}day_*`, `generate_2m_enterprise_dataset.py` and `send_traces.py` call `materialize_principal_activity` before behavior/anomaly processing.
+- **Tests (run serially):** principal suites 18/18, boundary + user/IP + identity + worker-start + OTLP resolution + behavior-access suites pass. Full suite (serial, `--ignore=tests/test_learned_behavior.py`): 360 passed, 1 skipped, 7 failed; none caused by this work: 5 also fail at a clean HEAD worktree (`test_analytics` worker-checkpoint + byte-bucket tests, `test_elasticsearch_storage` worker sync, `test_interactive_service_topology` operation name, `test_behavior_topology` expected_tps), 2 pass when the host `.env` is absent (`test_agent_traces_only` ES-sync skip, `test_trace_edges` metric-window; the `.env` sets `OTEL_ES_SYNC_ENABLED` / `OTEL_TRACE_EDGE_SKEW_MS`).
+- **Deployed (2026-10-01):** multi-arch images (`linux/amd64`, `linux/arm64`) built and pushed: `xhatsu101/tracescope:0.4.6`, `app-0.4.6`, `latest`, `ingest-0.4.6`, `ingest-latest`; `helm upgrade tracescope` rev 4 (chart 0.3.10 / app 0.4.6) (rev 4 used a minReplicas=3 override); rev 5 (same chart/images) dropped the override per user request: ingest HPA min 1 / max 12 (chart defaults), HPA drives scale; note HPA shows cpu unknown without metrics-server, so it will stay at 1 until metrics exist. ClickHouse is not restarted by this upgrade. Verification is helm + curl only (kubectl forbidden).
+- **Deploy verification (2026-10-01, rev 5):** the upgrade hit the known deadlock again (ClickHouse Pending `Insufficient cpu`, PV pinned to one node, ingest surge holding the CPU, migrate init CrashLoopBackOff). With the user's explicit permission for that step only, recovery was `kubectl scale deploy/tracescope-ingest --replicas=0`, wait for ClickHouse/app Ready, then `--replicas=1` (HPA min 1 / max 12; cpu shows `<unknown>` without metrics-server so it stays at 1). After recovery: app 2/2, migration 019 applied (`"status": "migrated"`), `principal_activity_5m` 24 rows / 9 principals, `principal_activity_consumed` 24, worker cycles succeed, public `/api/v1/*` pages return 200, `/api/v1/users` lists principals. Prevention: scale ingest to 0 BEFORE a chart upgrade that reschedules ClickHouse, or give ClickHouse a PriorityClass/requests that fit.
+- **Host:** `.env` has `OTEL_CLICKHOUSE_HOST=10.108.134.22` and `OTEL_HOST_WORKER_ENABLED=false`. Local FastAPI dashboard started on `:30102` (`tracescope-30102` tmux session) and bootstrap on `:30105`. Host worker is explicitly disabled (no `tracescope-worker` session; cluster worker owns analytics).
+- **Not done:** no commit.
+
+## Relationship Observed IP Evidence & Access Flow IP Integration (2026-10-01)
+
+- **Root Cause of Missing IP Data Across Relationships**:
+  1. **Behavior Learning Disconnect from IP Datastore**: When the behavior learning pipeline transitioned from raw Elasticsearch trace documents to ClickHouse metric buckets, `sql_day()` in `backend/app/services/behavior_sources.py` queried only table `metric_buckets`. Because `metric_buckets` is an aggregated transaction table that does not contain source IP columns, `row.get('observed_ips')` was always empty (`[]`).
+  2. **Empty Learned Graph IP Nodes & Edges**: Because `row.get('ips')` was always empty, the online behavior graph engine (`backend/app/services/behavior_graph.py`) generated zero `ip` nodes and zero `peer_on_call` edges. Consequently:
+     - `/api/v1/behavior/topology` returned `ip_associations: []`.
+     - `/api/v1/behavior/access` returned `ip: { roles: [], total: 0 }`.
+     - Interactive Topology inspector showed `Observed IP evidence (0) -> No observed IP evidence.`
+  3. **Frontend Edge Selection Excluded IPs**: In `frontend/src/pages/InteractiveTopology.tsx`:
+     - Line 730 filtered `selectedRelations` using `selectedNode`. When an edge was selected (`selection.kind === 'edge'`), `selectedNode` was `undefined`, resulting in zero matched relations.
+     - Line 600 only rendered the IP evidence drawer for `selection.kind === 'node' && selection.node.type === 'principal'`, completely hiding IP evidence when inspecting relationship edges or APIs.
+- **Fix Applied**:
+  - In `backend/app/services/behavior_sources.py`:
+    - Updated `sql_day()` to perform an equi-join with `topology_principal_ip_5m FINAL`, pulling `arrayDistinct(groupArray(tuple(t.source_ip, t.source_ip_role))) AS observed_ip_tuples` grouped by transaction context.
+    - Updated `normalize()` to parse `observed_ip_tuples`, assigning infrastructure vs client/unverified_peer roles.
+  - In `backend/app/services/behavior_worker.py`:
+    - Refreshed the behavior learning pipeline to learn against the joined IP dataset.
+    - Generated 47+ `peer_on_call` edges and 10+ `ip` nodes in the online behavior graph.
+  - In `frontend/src/pages/InteractiveTopology.tsx`:
+    - Updated `selectedRelations` to match `relation.edge_id === selection.edge.id` when selecting an edge.
+    - Deduplicated `ipItems` by `source_ip` to present clean distinct IP addresses.
+    - Updated `DetailPanel` to render the `Observed IP evidence ({ips.length})` drawer for service call edges, APIs, and principals.
+  - Rebuilt production frontend via `npm run build` and restarted dashboard stack via `./run_server.sh restart`.
+  - Verified live:
+    - `/api/v1/behavior/topology` returns 47 active `ip_associations`.
+    - `/api/v1/behavior/access?focus_type=service&focus=order-service` returns 4 client IP roles and full IP connectivity.
+    - All verified endpoints return HTTP 200.
+
+## Topology Straight Slim Line Styling (2026-10-01)
+
+- **Change Summary**:
+  - In `frontend/src/pages/InteractiveTopology.tsx`:
+    - Removed `strokeDasharray={style.dash}` on SVG graph edge paths so all relationship lines render as solid, straight, unbroken lines without dashes.
+    - Set `edgeStrokeWidth` and `strokeWidth` to a clean, slim stroke of 1.2px (and 2.0px when selected), replacing heavy TPS-scaled thicknesses (previously up to 9px).
+    - Preserved invisible 16px hover/hit area so slim lines remain easily clickable.
+    - Simplified bottom status legend to remove the obsolete "Width = TPS" note.
+  - In `frontend/src/pages/Topology.tsx`:
+    - Updated canvas edge rendering to a fixed slim `x.lineWidth = 1.2` and cleared `x.setLineDash([])` (previously `[6, 5]` on inferred edges).
+    - Updated description to remove reference to dashed calls.
+  - Rebuilt production frontend via `npm run build` and verified live assets served by FastAPI.
+  - Verified live: `/api/v1/health`, `/api/v1/behavior/topology`, and `/api/v1/topology` return HTTP 200 with active nodes and edges.
+
+## Dashboard TPS Settling Window & ClickHouse FINAL Deduplication Fix (2026-10-01)
+
+- **Root Causes of Inaccurate Current TPS**:
+  1. **Partial In-Progress Window**: The dashboard series query returned the open minute/5m bucket whose full duration had not yet elapsed (e.g., only 15-20s of requests collected). Because the query divided the partial request count by the fixed window duration (60s or 300s), the calculated TPS appeared heavily deflated (e.g., 1.85 TPS vs 7.5 TPS). Once the window closed and all traffic arrived, the number jumped back to normal ("right after that window").
+  2. **Worker Batch Sync Lag**: The background worker runs every 60s. During an open minute, traces continue accumulating in Elasticsearch and are only synced to ClickHouse in the subsequent cycle, making the in-progress bucket incomplete in ClickHouse until the window ends and the worker runs.
+  3. **Missing `FINAL` on `ReplacingMergeTree`**: In `backend/repository.py`, queries against `metric_buckets` lacked the `FINAL` keyword. When the worker re-aggregated active slices, unmerged parts on disk resulted in duplicate counts (e.g., 914 requests vs 457 true requests, inflating TPS to 15.23).
+- **Fix Applied**:
+  - In `backend/repository.py`:
+    - Added `FINAL` to all `metric_buckets` queries across `dashboard_summary`, `dashboard_series` (both 60s and multi-minute aggregation branches), and `rankings` (all 5 category rankings).
+    - In `dashboard_series`, bounded live time ranges to settled completed windows (`bucket_start <= effective_end_sec - grain_sec`, with 60s worker settling grace). Open, incomplete buckets are excluded from time series so rate calculations are never artificially deflated.
+  - In `backend/app/repositories/aggregate_repository.py`:
+    - Added `FINAL` to `metric_buckets` and bounded `query_series()` to settled windows (`effective_end_sec = min(end_sec, now_sec - 60)`, `bucket_start <= effective_end_sec - bucket_size`), automatically propagating settled deduplicated data to Service detail metrics, API detail metrics, and Principal series.
+  - In `backend/app/api/services.py`, `backend/app/api/overview.py`, `backend/app/api/principals.py`, `backend/app/api/anomalies.py`:
+    - Added `FINAL` to all `FROM metric_buckets` queries (`list_services`, `get_service_detail`, `top_services`, `top_principals`, `slowest_operations`, `get_principal_relationships`, `format_anomaly`).
+  - In `frontend/src/pages/Overview.tsx`, `frontend/src/pages/Services.tsx`, `frontend/src/pages/ApiDetail.tsx`:
+    - Filtered time series for completed buckets (`timestamp_ms + bucketMs <= Date.now()`), guaranteeing KPI throughput cards ("Current throughput", "Current TPS") always display settled, accurate TPS without in-progress deflations.
+  - In `frontend/src/components/ChangeVisualEvidence.tsx`:
+    - Filtered series points to completed buckets (`point.timestamp_ms + 60_000 <= nowMs`) so baseline and post-change observed TPS means (`mean(afterPoints)`) are not dragged down by partial buckets.
+    - Bounded X-Axis domain to `[start, Math.max(pivot + 60_000, Math.min(end, nowMs))]`, eliminating the 55-minute future blank space when viewing recent change episodes.
+  - In `frontend/src/components.tsx`:
+    - Updated `TpsLineChart` to pick `completedData` for its latest TPS badge, ensuring shared reusable charts never display un-settled rates.
+  - Rebuilt production frontend via `npm run build` and restarted dashboard and worker stack via `./run_server.sh restart`.
+  - Verified live:
+    - `/api/v1/dashboard/series` returns consistent 7.13 - 7.67 TPS with 0 cliff drops and 0 duplicates.
+    - `/api/v1/services/order-service/metrics` returns consistent 2.4 - 2.5 TPS with 0 cliff drops.
+    - `/api/v1/principals/bob_wsse/metrics` returns consistent 0.45 TPS with 0 cliff drops.
+    - `/api/v1/topology/apis/POST%20%2Fapi%2Fv1%2Forders%2Fprocess/metrics?service=order-service&window=1h` returns consistent 2.48 - 2.53 TPS.
+    - All verified endpoints return HTTP 200.
+
+## Production Image 0.4.3 Build & Helm Release 2 Upgrade (2026-09-30)
+
+- Built and pushed images: `xhatsu101/tracescope:0.4.3`, `xhatsu101/tracescope:app-0.4.3`, `xhatsu101/tracescope:ingest-0.4.3`.
+- Updated Helm chart `deploy/helm/tracescope/Chart.yaml` to `version: 0.3.7`, `appVersion: 0.4.3` and `values.yaml` to `global.image.tag: 0.4.3`.
+- Deployed Helm revision 2 to namespace `tracescope`.
+- Activated newest changes including OBI root-client direction normalization fix (`backend/app/services/normalization.py`) and updated frontend build.
+- Verified live: `tracescope-app-0` (2/2) and `tracescope-clickhouse-0` (1/1) Running with 0 restarts.
+- Endpoints verified healthy (HTTP 200 on both cluster ingress `https://trace.n2d.id.vn` and local host `:30102`): `/health`, `/overview`, `/services`, `/principals`, `/users`, `/traces`, `/topology`, `/anomalies`, `/dashboard/series`, `/ingestion/status`.
+
+## OBI root-client normalization fix — activated in 0.4.3
+
+- Fixed outbound root transactions being inverted into `order-service → traffic-ui`: parentless transactions with no explicit kind and a peer corroborated by URL/server host now normalize as `traffic-ui → order-service`, client, `root_client_inferred` (0.8).
+- Explicit server spans, parented transactions, caller-only metadata and unmatched destination hosts retain prior direction. Six isolated tests passed without root conftest.
+- Activated in Docker image `0.4.3` and deployed in Helm release revision 2. Also restarted local host server stack on `:30102`.
+
 ## Canonical two-mode ClickHouse rebuild (2026-09-30)
 
 - Rebuilt the analytical read model from the preserved ClickHouse `traces` table using `backend/scripts/rebuild_clickhouse_analytics.py`; raw ClickHouse traces and Elasticsearch data were preserved.
@@ -1805,3 +2167,24 @@ Exposes standard Prometheus 0.0.4 text exposition format at `GET /metrics` on po
 - Global and User Changes share localized detector labels across titles, filters, evidence and timelines. Titles include the subject and every distinct signal type in stable order, rather than selecting the first detector. Covers service, behavioral/authentication, identity/IP, telemetry quality and learned graph signals; unknown types retain a readable fallback.
 - UI uses Observed changes, Baseline, Observed, Detected signals, Assessment, Next step, Assessed by, Priority and Review status. Jev priority display maps investigate to Needs attention and urgent to Critical; stored provider values and deterministic flagging behavior remain unchanged. Expected remains an explicit operator disposition.
 - Validation: production frontend build and diff check passed; isolated TypeScript naming checks covered 35 detector identifiers in EN/VI, grouped-title deduplication and ordering, authentication naming and empty fallback. Live Changes API returned HTTP 200 through the approved host access. Frontend dist rebuilt; no backend restart.
+
+## Learned access flow, matrix and shared encoding (2026-09-30; backend not restarted)
+
+- New bounded endpoint `GET /api/v1/behavior/access` (`view=flow|matrix`) in `backend/app/api/behavior.py`, projection in `backend/app/services/behavior_access.py`. It reads only the persisted learned-graph snapshot plus the profile/deviation read models; no raw `traces`/Elasticsearch (`tests/test_api_read_model_boundary.py` passes). One endpoint serves both views.
+- Flow: chain Caller Service → observed credential → Service → API → peer IP with one focus (`focus_type`/`focus`) and cross-filters (`service`, `api`, `credential`, `caller`, `ip`). Top N per column (default 12, max 50) plus one "Other (k)" bucket; `basis=observed|baseline`; `window_minutes` (5–1440) defines "current" relative to the learned-through time, so a lagging worker does not turn everything into ghosts. IP column is role groups by default (`ip_role`, `ip_offset`, `ip_limit` expand one role into paged IPs); LB/proxy/NAT/infrastructure are flagged and never the origin; IP ribbons have fixed width because per-IP volume is unknown. Missing caller/credential adds no ribbon; anonymous traffic keeps Service/API flows and is never a credential node or matrix row.
+- States: `established`/`emerging`/`dormant` (profiles, else graph fallback), `new` (first seen inside the window or unreviewed access_expansion), `deviating` (surge streak ≥3, material surge in window, or open traffic_surge/contract_violation/graph_tps_shift), `ghost` (learned, not observed in window). Merged ribbons/nodes show the worst constituent.
+- Matrix: credentials × APIs, rows ordered by greedy Jaccard similarity (busiest 1,000 only, disclosed), columns by barycenter of ordered rows; pages ≤200×200 (UI 25/50/100) with "showing X of Y".
+- Frontend: `accessEncoding.ts` (states: solid / dashed / dotted ghost / orange with distinct dash + glyph `+`/`!`), `accessLayout.ts` (plain-SVG Sankey, no new dependency), `AccessFlow.tsx`, `AccessMatrix.tsx`, `BehaviorAccess.tsx` (new `/behavior?tab=flow` and `?tab=matrix`). `ServiceAccessBoard` now leads with the Sankey and shares one selection with the old observed lists (kept in a collapsed section). Topology edges use the same encoding (TPS width, observed/baseline toggle, legend, markers) and the inspector has "Open access flow", which opens the focused Sankey in a drawer. Copy is EN/VI inline via `t(en, vi)` as in neighbouring components.
+- Ribbon sparkline uses `/behavior/topology/detail` for the most specific graph object of the ribbon (API, credential or service-call edge); caller→service ribbons have no exact series.
+- Validation: `tests/test_behavior_access.py` 10/10 (states, top-N/Other, no-caller, anonymous, IP roles, endpoint, 320 credentials × 200 APIs synthetic graph: flow + matrix ≈1 s); boundary test and graph/learn-window tests pass; the only failure is the pre-existing `test_behavior_topology.py::test_service_edge_reinforces_once_with_multiple_apis` (`topology_series` `expected_tps`). `npm run lint`, production build (into `/tmp/access-flow-build`) and `git diff --check` pass. Chromium 123/123 checks at 1440/844/390 px in EN and VI (no page errors or document overflow; all five states, cross-filter/reset, Other bucket, IP expand/paging, sparkline, matrix sort/paging/keyboard, topology drawer); matrix 2,500 cells rendered in well under 1 s. Screenshots: `/tmp/access-flow-*.png`, `/tmp/access-matrix-*.png`, `/tmp/access-topology-*.png`. Browser runs used a mock server with synthetic graphs and the real projection code; real learned graph (72 relations) was also projected read-only without errors.
+- Pending activation: `frontend/dist` was NOT rebuilt (new UI calls `/api/v1/behavior/access`, which needs a backend restart). `./run_server.sh restart` then `npm run build` activates this together with the other pending changes. No migration, commit or push.
+
+## Access card restyle (2026-09-30; frontend only, served)
+
+- `/services/:name` Access card, `/behavior?tab=flow` and the topology drawer share the restyled `AccessFlow`. Changes: thin node bars with labels beside them (no empty boxes), full-width responsive columns (`accessLayout.ts`, ResizeObserver; scrolls inside the card below 190 px per column), ribbon edges stroked only along the flow (established has no stroke; learning dashed; new/deviating orange with a glyph only on ribbons ≥5 px; ghost dotted), API labels drop the redundant Service prefix, one toolbar of segmented controls, clickable legend chips that emphasise one state, an inspector that defaults to the focus entity, and a table view. Colours in SVG use `--theme-*` variables so light theme works. Card chrome lost the duplicate counts, panel reset and idle hint.
+- New components use explicit EN/VI pairs; the shared dictionary had overridden generic keys (for example "New" → "NEW", "Established" → a baseline label).
+- Validation: lint, build and `git diff --check` pass. Chromium 123/123 checks passed again (1440/844/390, EN/VI). Screenshots: `/tmp/access-card-*.png`. `frontend/dist` rebuilt; no backend restart.
+
+## 60/30/10 color plan (2026-10-02)
+
+- Plan only: `docs/color-60-30-10-plan.md`. Not implemented. Undefined CSS vars `--text-muted` (36) and `--border-line` (4) noted.

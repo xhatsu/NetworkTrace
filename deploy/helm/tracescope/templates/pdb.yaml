@@ -4,6 +4,7 @@ apiVersion: policy/v1
 kind: PodDisruptionBudget
 metadata:
   name: {{ include "tracescope.fullname" . }}-ingest
+  namespace: {{ .Release.Namespace }}
   labels:
     {{- include "tracescope.labels" . | nindent 4 }}
     app.kubernetes.io/component: ingest
@@ -20,6 +21,7 @@ apiVersion: policy/v1
 kind: PodDisruptionBudget
 metadata:
   name: {{ include "tracescope.fullname" . }}-agent-stats
+  namespace: {{ .Release.Namespace }}
   labels:
     {{- include "tracescope.labels" . | nindent 4 }}
     app.kubernetes.io/component: agent-stats
@@ -36,6 +38,7 @@ apiVersion: policy/v1
 kind: PodDisruptionBudget
 metadata:
   name: {{ include "tracescope.fullname" . }}-ui
+  namespace: {{ .Release.Namespace }}
   labels:
     {{- include "tracescope.labels" . | nindent 4 }}
     app.kubernetes.io/component: ui

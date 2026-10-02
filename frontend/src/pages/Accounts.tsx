@@ -48,7 +48,7 @@ export function AccountsPage() {
       title="Request Authenticated Identities"
       description="Extracted usernames from Basic Authorization. Passwords and credentials are scrubbed in-memory prior to storage."
       actions={
-        <div className="chip font-mono text-[11px] text-[#8b949e]">
+        <div className="chip font-mono text-[11px] text-muted">
           <span>Sanitized in-memory</span>
         </div>
       }
@@ -72,22 +72,22 @@ export function AccountsPage() {
                 className="group flex w-full items-center justify-between p-4 text-left transition hover:bg-white/[0.03]"
               >
                 <div className="flex items-center gap-3 min-w-0">
-                  <div className="grid h-9 w-9 shrink-0 place-items-center rounded-lg border border-[rgba(255,255,255,0.08)] bg-white/[0.03] text-indigo-400 group-hover:text-indigo-300">
+                  <div className="grid h-9 w-9 shrink-0 place-items-center rounded-lg border border-line bg-white/[0.03] text-entity-user group-hover:text-accent">
                     <KeyRound size={16} />
                   </div>
                   <div className="min-w-0">
-                    <div className="truncate text-xs font-semibold text-[#f0f3f6] group-hover:text-indigo-300 transition">
+                    <div className="truncate text-xs font-semibold text-ink group-hover:text-accent transition">
                       {a.username}
                     </div>
-                    <div className="mt-0.5 truncate text-[11px] text-[#8b949e]">
-                      Namespace: <span className="font-mono text-[#c9d1d9]">{a.namespace || "default"}</span> · First seen{" "}
+                    <div className="mt-0.5 truncate text-[11px] text-muted">
+                      Namespace: <span className="font-mono text-ink">{a.namespace || "default"}</span> · First seen{" "}
                       {new Date(a.first_seen_ms).toLocaleDateString()}
                     </div>
                   </div>
                 </div>
 
                 <div className="flex items-center gap-3">
-                  <span className="rounded bg-white/[0.04] px-2 py-0.5 font-mono text-[11px] text-[#8b949e]">
+                  <span className="rounded bg-surface-2 px-2 py-0.5 font-mono text-[11px] text-muted">
                     Last seen {new Date(a.last_seen_ms).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                   </span>
                 </div>
@@ -227,17 +227,17 @@ export function AccountDetailPage() {
                   key={`${t.service_name}-${t.operation}`}
                   className="border-b border-[rgba(255,255,255,0.04)] transition hover:bg-white/[0.02]"
                 >
-                  <td className="px-4 py-3 text-xs font-semibold text-[#f0f3f6]">
+                  <td className="px-4 py-3 text-xs font-semibold text-ink">
                     {t.service_name}
                   </td>
-                  <td className="px-4 py-3 text-xs text-[#8b949e]">
+                  <td className="px-4 py-3 text-xs text-muted">
                     {t.operation}
                   </td>
-                  <td className="px-4 font-mono text-xs tabular-nums text-[#c9d1d9]">
+                  <td className="px-4 font-mono text-xs tabular-nums text-ink">
                     {n(t.requests)}
                   </td>
                   <td className="px-4 font-mono text-xs tabular-nums">
-                    <span className={t.denied > 0 ? "text-[#f43f5e] font-semibold" : "text-[#8b949e]"}>
+                    <span className={t.denied > 0 ? "text-bad font-semibold" : "text-muted"}>
                       {n(t.denied)}
                     </span>
                   </td>
@@ -260,15 +260,15 @@ function MiniBars({
     <div className="h-64 p-3">
       <ResponsiveContainer>
         <BarChart data={data}>
-          <CartesianGrid stroke="rgba(255,255,255,0.05)" vertical={false} />
+          <CartesianGrid stroke="var(--grid)" vertical={false} />
           <XAxis
             dataKey={data[0]?.hour !== undefined ? "hour" : "day"}
-            stroke="#484f58"
+            stroke="var(--text-muted)"
             fontSize={11}
           />
-          <YAxis stroke="#484f58" fontSize={11} width={36} />
+          <YAxis stroke="var(--text-muted)" fontSize={11} width={36} />
           <Tooltip {...chartTooltip} />
-          <Bar dataKey="requests" fill="#6366f1" radius={[3, 3, 0, 0]} />
+          <Bar dataKey="requests" fill="var(--accent)" radius={[3, 3, 0, 0]} />
         </BarChart>
       </ResponsiveContainer>
     </div>

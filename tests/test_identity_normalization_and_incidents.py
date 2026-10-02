@@ -20,6 +20,7 @@ from backend.app.services.behavioral_engine import (
     FAMILY_CAPS,
 )
 from backend.repository import StorageRepository
+from backend.app.services.principal_activity import materialize_principal_activity
 
 
 @pytest.fixture
@@ -172,6 +173,7 @@ def test_operation_mix_shift_detection(clean_db):
                 VALUES (?, ?, ?, ?, ?, ?, ?, 'billing_app', ?, 'cancelInvoice', 'billing-service/cancelInvoice', 10, 10000, ?)
             """, (f"w_c_{i}", ts // 1000, ts, f"t_w_c_{i}", f"s_w_c_{i}", svc, svc, pid, ts))
 
+        materialize_principal_activity(0, 4_102_444_800_000, clean_db)  # detectors read the rollup
         ev_id = detect_operation_mix_shift(db, pid, svc, window_start, window_end)
         assert ev_id is not None
         ev = db.execute("SELECT * FROM principal_change_events WHERE id = ?", (ev_id,)).fetchone()
@@ -252,6 +254,7 @@ def test_caller_principal_switch_detection(clean_db):
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'rogue_admin', 'production:rogue_admin', 'charge', ?, 10, 10000, ?)
             """, (f"wc_{i}", ts // 1000, ts, f"twc_{i}", f"swc_{i}", caller, target, target, op, ts))
 
+        materialize_principal_activity(0, 4_102_444_800_000, clean_db)  # detectors read the rollup
         ev_id = detect_caller_principal_switch(db, caller, target, op, window_start, window_end)
         assert ev_id is not None
         ev = db.execute("SELECT * FROM principal_change_events WHERE id = ?", (ev_id,)).fetchone()
@@ -313,6 +316,7 @@ def test_explicit_auth_failure_burst_and_recovery(clean_db):
                     'success', 'security_event:auth_success', 10, 10000, ?)
         """, (ts_ok // 1000, ts_ok, pid, ts_ok))
 
+        materialize_principal_activity(0, 4_102_444_800_000, clean_db)  # detectors read the rollup
         ev_ids = detect_explicit_auth_anomalies(db, pid, window_start, window_end)
         assert len(ev_ids) > 0
         ev = db.execute("SELECT * FROM principal_change_events WHERE id = ?", (ev_ids[0],)).fetchone()

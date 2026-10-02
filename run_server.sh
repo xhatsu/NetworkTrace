@@ -14,6 +14,7 @@ if [ -x "$PROJECT_DIR/.venv/bin/python" ]; then
 fi
 PYTHON_BIN="${OTEL_PYTHON:-$DEFAULT_PYTHON}"
 SERVER_HOST="${OTEL_HOST:-0.0.0.0}"
+SERVER_PORT="${OTEL_PORT:-31102}"
 ELASTICSEARCH_NODEPORT="${OTEL_ES_PORT:-32073}"
 ES_URL="${OTEL_ES_URL:-http://127.0.0.1:$ELASTICSEARCH_NODEPORT}"
 ES_INDEX="${OTEL_ES_INDEX:-apm-*,traces-apm*}"
@@ -26,17 +27,23 @@ ES_RETENTION_DAYS="${OTEL_ES_RETENTION_DAYS:-2}"
 case "$ACTION" in
   start|restart)
     tmux kill-session -t tracescope-30102 2>/dev/null || true
+    tmux kill-session -t "tracescope-$SERVER_PORT" 2>/dev/null || true
     tmux kill-session -t tracescope-worker 2>/dev/null || true
     tmux start-server 2>/dev/null || true
-    tmux new-session -d -s tracescope-30102 "cd $PROJECT_DIR && if [ -f .env ]; then set -a; . ./.env; set +a; fi; OTEL_STORAGE_BACKEND=$STORAGE_BACKEND OTEL_TRACE_STORAGE_BACKEND=$TRACE_STORAGE_BACKEND OTEL_ES_URL=$ES_URL OTEL_ES_INDEX=$ES_INDEX OTEL_ES_RETENTION_DAYS=$ES_RETENTION_DAYS exec $PYTHON_BIN -m uvicorn backend.main:app --host $SERVER_HOST --port 30102"
-    tmux new-session -d -s tracescope-worker "cd $PROJECT_DIR && if [ -f .env ]; then set -a; . ./.env; set +a; fi; OTEL_STORAGE_BACKEND=$STORAGE_BACKEND OTEL_TRACE_STORAGE_BACKEND=$TRACE_STORAGE_BACKEND OTEL_ES_URL=$ES_URL OTEL_ES_INDEX=$ES_INDEX OTEL_ES_RETENTION_DAYS=$ES_RETENTION_DAYS exec $PYTHON_BIN -m backend.worker --interval 60"
+    tmux new-session -d -s "tracescope-$SERVER_PORT" "cd $PROJECT_DIR && if [ -f .env ]; then set -a; . ./.env; set +a; fi; OTEL_STORAGE_BACKEND=$STORAGE_BACKEND OTEL_TRACE_STORAGE_BACKEND=$TRACE_STORAGE_BACKEND OTEL_ES_URL=$ES_URL OTEL_ES_INDEX=$ES_INDEX OTEL_ES_RETENTION_DAYS=$ES_RETENTION_DAYS exec $PYTHON_BIN -m uvicorn backend.main:app --host $SERVER_HOST --port $SERVER_PORT"
+    if [ "${OTEL_HOST_WORKER_ENABLED:-true}" = "true" ]; then
+      tmux new-session -d -s tracescope-worker "cd $PROJECT_DIR && if [ -f .env ]; then set -a; . ./.env; set +a; fi; OTEL_STORAGE_BACKEND=$STORAGE_BACKEND OTEL_TRACE_STORAGE_BACKEND=$TRACE_STORAGE_BACKEND OTEL_ES_URL=$ES_URL OTEL_ES_INDEX=$ES_INDEX OTEL_ES_RETENTION_DAYS=$ES_RETENTION_DAYS exec $PYTHON_BIN -m backend.worker --interval 60"
+    else
+      echo "Host worker disabled (OTEL_HOST_WORKER_ENABLED=false); not starting tracescope-worker."
+    fi
     if [ -f "$PROJECT_DIR/bootstrap/start.sh" ]; then
       sh "$PROJECT_DIR/bootstrap/start.sh"
     fi
-    echo "TraceScope dashboard started on http://$SERVER_HOST:30102 (wired to ES NodePort $ELASTICSEARCH_NODEPORT)"
+    echo "TraceScope dashboard started on http://$SERVER_HOST:$SERVER_PORT (wired to ES NodePort $ELASTICSEARCH_NODEPORT)"
     ;;
   stop)
     tmux kill-session -t tracescope-30102 2>/dev/null || true
+    tmux kill-session -t "tracescope-$SERVER_PORT" 2>/dev/null || true
     tmux kill-session -t tracescope-worker 2>/dev/null || true
     if [ -f "$PROJECT_DIR/bootstrap/stop.sh" ]; then
       sh "$PROJECT_DIR/bootstrap/stop.sh"
@@ -45,7 +52,7 @@ case "$ACTION" in
     ;;
   status)
     tmux ls 2>/dev/null | grep -E 'tracescope' || echo "No active tracescope sessions."
-    ss -tuln | grep 30102 || echo "Port 30102 is not listening."
+    ss -tuln | grep "$SERVER_PORT" || echo "Port $SERVER_PORT is not listening."
     ss -tuln | grep 30105 || echo "Port 30105 (bootstrap) is not listening."
     if curl -s -m 2 "$ES_URL/" 2>/dev/null | grep -q "lucene_version"; then
       echo "Elasticsearch NodePort $ELASTICSEARCH_NODEPORT is accessible ($ES_URL)."

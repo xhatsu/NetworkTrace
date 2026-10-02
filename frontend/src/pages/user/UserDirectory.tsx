@@ -67,20 +67,20 @@ export function UserDirectory() {
   return (
     <div className="mx-auto max-w-[1720px] px-4 py-6 md:px-8 space-y-6">
       {/* Header Banner */}
-      <div className="rounded-2xl border border-[#262838] bg-[#141622] p-6 shadow-sm">
+      <div className="rounded-2xl border border-line bg-surface p-6 shadow-sm">
         <div className="flex flex-wrap items-center justify-between gap-4">
           <div className="flex items-center gap-4">
-            <div className="grid h-14 w-14 place-items-center rounded-2xl bg-indigo-600 border border-indigo-400/40 text-white">
+            <div className="grid h-14 w-14 place-items-center rounded-2xl bg-accent border border-line/40 text-white">
               <Users size={28} strokeWidth={2.2} />
             </div>
             <div>
-              <span className="text-[11px] font-bold uppercase tracking-[0.15em] text-cyan-400">
+              <span className="text-[11px] font-bold uppercase tracking-[0.15em] text-entity-api">
                 {t("User Intelligence & Identity Directory")}
               </span>
               <h1 className="mt-0.5 text-2xl md:text-3xl font-bold tracking-tight text-white">
                 {t("User Directory")}
               </h1>
-              <p className="mt-1 text-xs text-[#cbd5e1]">
+              <p className="mt-1 text-xs text-secondary">
                 {t("Continuous identity behavioral baseline monitoring across service topologies")}
               </p>
             </div>
@@ -89,12 +89,12 @@ export function UserDirectory() {
           <div className="flex items-center gap-2">
             <Link
               to="/unknown-users"
-              className="flex items-center gap-1.5 rounded-full border border-amber-500/40 bg-amber-500/15 px-3 py-1 text-xs font-mono font-bold text-amber-300 hover:bg-amber-500/25 hover:text-white transition-all"
+              className="flex items-center gap-1.5 rounded-full border border-warn/40 bg-warn/15 px-3 py-1 text-xs font-mono font-bold text-warn hover:bg-warn/25 hover:text-ink transition-all"
             >
               <UserX size={13} />
               <span>{t("Unattributed Traffic", "Lưu Lượng Chưa Định Danh")}</span>
             </Link>
-            <span className="rounded-full border border-emerald-500/40 bg-emerald-500/15 px-3 py-1 text-xs font-mono font-bold text-emerald-300">
+            <span className="rounded-full border border-good/40 bg-good/15 px-3 py-1 text-xs font-mono font-bold text-good">
               ● {t("Active Behavioral Engine", "Động Cơ Hành Vi Đang Hoạt Động")}
             </span>
           </div>
@@ -102,27 +102,27 @@ export function UserDirectory() {
 
         {/* 4 Summary Cards */}
         <div className="mt-6 grid grid-cols-2 gap-3 sm:grid-cols-4">
-          <div className="rounded-xl border border-[#262838] bg-[#10121a] p-3.5">
-            <span className="text-[10px] font-bold uppercase tracking-wider text-[#94a3b8]">{t("Observed Identities")}</span>
+          <div className="rounded-xl border border-line bg-surface p-3.5">
+            <span className="text-[10px] font-bold uppercase tracking-wider text-faint">{t("Observed Identities")}</span>
             <div className="mt-1 font-mono text-2xl font-bold text-white">
               {(summary?.observed_principals || users.length).toLocaleString()}
             </div>
           </div>
-          <div className="rounded-xl border border-[#262838] bg-[#10121a] p-3.5">
-            <span className="text-[10px] font-bold uppercase tracking-wider text-[#94a3b8]">{t("Currently Active", "Đang Hoạt Động")}</span>
-            <div className="mt-1 font-mono text-2xl font-bold text-emerald-300">
+          <div className="rounded-xl border border-line bg-surface p-3.5">
+            <span className="text-[10px] font-bold uppercase tracking-wider text-faint">{t("Currently Active", "Đang Hoạt Động")}</span>
+            <div className="mt-1 font-mono text-2xl font-bold text-good">
               {(summary?.active_principals || 0).toLocaleString()}
             </div>
           </div>
-          <div className="rounded-xl border border-white/10 bg-black/30 p-3.5">
-            <span className="text-[10px] font-bold uppercase tracking-wider text-[#94a3b8]">{t("Accounts with Changes", "Tài Khoản Có Thay Đổi")}</span>
-            <div className="mt-1 font-mono text-2xl font-bold text-amber-300">
+          <div className="rounded-xl border border-line bg-black/30 p-3.5">
+            <span className="text-[10px] font-bold uppercase tracking-wider text-faint">{t("Accounts with Changes", "Tài Khoản Có Thay Đổi")}</span>
+            <div className="mt-1 font-mono text-2xl font-bold text-warn">
               {(summary?.principals_with_changes || 0).toLocaleString()}
             </div>
           </div>
-          <div className="rounded-xl border border-white/10 bg-black/30 p-3.5">
-            <span className="text-[10px] font-bold uppercase tracking-wider text-[#94a3b8]">{t("Dormant Reactivated", "Tái Hoạt Động Sau Ngủ Đông")}</span>
-            <div className="mt-1 font-mono text-2xl font-bold text-rose-300">
+          <div className="rounded-xl border border-line bg-black/30 p-3.5">
+            <span className="text-[10px] font-bold uppercase tracking-wider text-faint">{t("Dormant Reactivated", "Tái Hoạt Động Sau Ngủ Đông")}</span>
+            <div className="mt-1 font-mono text-2xl font-bold text-bad">
               {(summary?.dormant_reactivated || 0).toLocaleString()}
             </div>
           </div>
@@ -130,21 +130,21 @@ export function UserDirectory() {
       </div>
 
       {/* Filter and Search Bar */}
-      <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-[rgba(255,255,255,0.18)] bg-[#171329] p-3.5 shadow-md">
+      <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-[rgba(255,255,255,0.18)] bg-surface-2 p-3.5 shadow-md">
         <div className="relative flex-1 min-w-[240px] max-w-md">
-          <Search className="absolute left-3 top-2.5 text-[#94a3b8]" size={14} />
+          <Search className="absolute left-3 top-2.5 text-faint" size={14} />
           <input
             type="text"
             placeholder={t("Search identities...")}
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            className="w-full rounded-lg border border-white/20 bg-black/40 pl-9 pr-3 py-1.5 text-xs text-white placeholder:text-[#94a3b8] focus:border-cyan-400 focus:outline-none"
+            className="w-full rounded-lg border border-line-strong bg-black/40 pl-9 pr-3 py-1.5 text-xs text-white placeholder:text-muted focus:border-accent focus:outline-none"
           />
         </div>
 
         <div className="flex flex-wrap items-center gap-2">
           {/* Active Filter */}
-          <div className="flex items-center rounded-lg border border-white/10 bg-black/40 p-0.5 text-xs">
+          <div className="flex items-center rounded-lg border border-line bg-black/40 p-0.5 text-xs">
             {[
               { id: "all", label: t("All Statuses") },
               { id: "active", label: t("Active (5m)") },
@@ -155,8 +155,8 @@ export function UserDirectory() {
                 onClick={() => setActiveFilter(af.id)}
                 className={`rounded px-2.5 py-1 font-semibold transition ${
                   activeFilter === af.id
-                    ? "bg-cyan-500 text-black font-bold shadow-sm"
-                    : "text-[#cbd5e1] hover:text-white"
+                    ? "bg-accent text-black font-bold shadow-sm"
+                    : "text-secondary hover:text-ink"
                 }`}
               >
                 {af.label}
@@ -168,7 +168,7 @@ export function UserDirectory() {
           <select
             value={sortKey}
             onChange={(e) => setSortKey(e.target.value)}
-            className="rounded-lg border border-white/20 bg-[#1e1938] px-2.5 py-1 text-xs font-semibold text-white focus:outline-none cursor-pointer"
+            className="rounded-lg border border-line-strong bg-surface px-2.5 py-1 text-xs font-semibold text-white focus:outline-none cursor-pointer"
           >
             <option value="most_changed">{t("Sort: Most Changed", "Xếp theo: Thay đổi nhiều nhất")}</option>
             <option value="most_active">{t("Sort: Most Active", "Xếp theo: Hoạt động nhiều nhất")}</option>
@@ -181,11 +181,11 @@ export function UserDirectory() {
       </div>
 
       {/* Users Table */}
-      <div className="rounded-2xl border border-[rgba(255,255,255,0.18)] bg-[#171329] shadow-xl overflow-hidden">
+      <div className="rounded-2xl border border-[rgba(255,255,255,0.18)] bg-surface-2 shadow-xl overflow-hidden">
         <div className="overflow-x-auto">
           <table className="w-full text-left text-xs">
             <thead>
-              <tr className="border-b border-white/10 bg-white/5 font-mono text-[10px] font-bold uppercase text-[#94a3b8]">
+              <tr className="border-b border-line bg-surface-2 font-mono text-[10px] font-bold uppercase text-faint">
                 <th className="px-5 py-3">{t("User / Identity")}</th>
                 <th className="px-4 py-3">{t("Type")}</th>
                 <th className="px-4 py-3">{t("Status")}</th>
@@ -201,13 +201,13 @@ export function UserDirectory() {
             <tbody className="divide-y divide-white/10 font-mono">
               {isLoading ? (
                 <tr>
-                  <td colSpan={10} className="py-12 text-center text-xs text-cyan-300 animate-pulse">
+                  <td colSpan={10} className="py-12 text-center text-xs text-entity-api animate-pulse">
                     {t("Loading...")}
                   </td>
                 </tr>
               ) : users.length === 0 ? (
                 <tr>
-                  <td colSpan={10} className="py-12 text-center text-xs text-[#cbd5e1]">
+                  <td colSpan={10} className="py-12 text-center text-xs text-secondary">
                     {t("No users matching criteria")}
                   </td>
                 </tr>
@@ -224,7 +224,7 @@ export function UserDirectory() {
                       className="cursor-pointer hover:bg-white/[0.06] transition"
                     >
                       <td className="px-5 py-3 font-bold text-white flex items-center gap-2.5">
-                        <div className="grid h-7 w-7 place-items-center rounded-lg bg-white/10 text-cyan-300 font-sans text-xs">
+                        <div className="grid h-7 w-7 place-items-center rounded-lg bg-surface-2 text-entity-api font-sans text-xs">
                           <User size={14} />
                         </div>
                         <EntityLink entity={{ kind: "user", principal: u.principal_name }} className="truncate max-w-[220px] hover:underline" title={u.principal_name}>
@@ -232,7 +232,7 @@ export function UserDirectory() {
                         </EntityLink>
                       </td>
 
-                      <td className="px-4 py-3 font-sans text-xs text-[#cbd5e1]">
+                      <td className="px-4 py-3 font-sans text-xs text-secondary">
                         <span className="capitalize">{t(u.principal_type || "service", u.principal_type || "Dịch vụ")}</span>
                       </td>
 
@@ -240,11 +240,11 @@ export function UserDirectory() {
                         <span
                           className={`inline-flex items-center gap-1.5 rounded-md px-2 py-0.5 text-[11px] font-bold ${
                             u.status === "Active"
-                              ? "bg-emerald-500/20 text-emerald-300 border border-emerald-500/40"
-                              : "bg-slate-800 text-slate-400 border border-slate-700"
+                              ? "bg-good/20 text-good border border-good/40"
+                              : "bg-surface-2 text-muted border border-line"
                           }`}
                         >
-                          <span className={`h-1.5 w-1.5 rounded-full ${u.status === "Active" ? "bg-emerald-400" : "bg-slate-500"}`} />
+                          <span className={`h-1.5 w-1.5 rounded-full ${u.status === "Active" ? "bg-good" : "bg-surface-2"}`} />
                           <span>{t(u.status || "Active")}</span>
                         </span>
                       </td>
@@ -253,10 +253,10 @@ export function UserDirectory() {
                         <span
                           className={`inline-flex items-center gap-1.5 rounded-md px-2 py-0.5 text-[11px] font-bold border ${
                             isHigh
-                              ? "border-rose-500/50 bg-rose-500/15 text-rose-300"
+                              ? "border-bad/50 bg-bad/15 text-bad"
                               : isMed
-                              ? "border-amber-500/50 bg-amber-500/15 text-amber-300"
-                              : "border-emerald-500/50 bg-emerald-500/15 text-emerald-300"
+                              ? "border-warn/50 bg-warn/15 text-warn"
+                              : "border-good/50 bg-good/15 text-good"
                           }`}
                         >
                           {isHigh ? <ShieldAlert size={12} /> : <Shield size={12} />}
@@ -268,15 +268,15 @@ export function UserDirectory() {
                         {(u.total_requests || 0).toLocaleString()}
                       </td>
 
-                      <td className="px-4 py-3 text-right text-cyan-300">
+                      <td className="px-4 py-3 text-right text-entity-api">
                         {u.unique_targets || 0}
                       </td>
 
-                      <td className="px-4 py-3 text-right text-violet-300">
+                      <td className="px-4 py-3 text-right text-entity-user">
                         {u.unique_callers || 0}
                       </td>
 
-                      <td className="px-4 py-3 text-right text-emerald-300">
+                      <td className="px-4 py-3 text-right text-good">
                         {u.unique_operations || 0}
                       </td>
 
@@ -284,8 +284,8 @@ export function UserDirectory() {
                         <span
                           className={`rounded px-2 py-0.5 text-[10px] font-bold ${
                             (u.recent_changes || 0) > 0
-                              ? "bg-amber-400/20 text-amber-300 border border-amber-400/40"
-                              : "text-[#94a3b8]"
+                              ? "bg-warn/20 text-warn border border-warn/40"
+                              : "text-faint"
                           }`}
                         >
                           {u.recent_changes || 0} {t("changes", "thay đổi")}
@@ -293,7 +293,7 @@ export function UserDirectory() {
                       </td>
 
                       <td className="px-5 py-3 text-right">
-                        <EntityLink entity={{ kind: "user", principal: u.principal_name }} className="inline-flex items-center gap-1 rounded-lg border border-cyan-400/50 bg-cyan-500/15 px-2.5 py-1 text-xs font-bold text-cyan-200 hover:bg-cyan-500/30 transition">
+                        <EntityLink entity={{ kind: "user", principal: u.principal_name }} className="inline-flex items-center gap-1 rounded-lg border border-line/50 bg-accent/15 px-2.5 py-1 text-xs font-bold text-accent hover:bg-accent/30 transition">
                           <span>{t("Inspect Workspace")}</span>
                           <ArrowRight size={12} />
                         </EntityLink>

@@ -1,5 +1,5 @@
 import { ServiceAccessBoard } from "../components/ServiceAccessBoard";
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useNavigate, useParams } from "react-router-dom";
 import {
@@ -70,21 +70,21 @@ export function ServicesPage() {
   return <Page eyebrow={t("Service inventory", "Danh mục Service")} title={t("Services")}
     description={t("Find a service, review its signals, and open its operational detail.", "Tìm Service, kiểm tra tín hiệu và mở chi tiết vận hành.")}>
     {query.isLoading ? <Loading /> : query.isError ? <><ErrorState message={query.error.message} /><button className="btn" onClick={() => query.refetch()}>{t("Retry")}</button></> : <>
-      <dl className="mb-4 grid grid-cols-2 overflow-hidden rounded border border-[#2a2d30] bg-[#111217] lg:grid-cols-4">
+      <dl className="mb-4 grid grid-cols-2 overflow-hidden rounded border border-line bg-surface lg:grid-cols-4">
         {[
           [t("Observed services", "Service đã quan sát"), n(services.length), t("Selected scope · up to 500", "Phạm vi đã chọn · tối đa 500")],
           [t("APIs", "API"), services.some(service => service.operations_count != null) ? n(apiCount) : "—", t("Across loaded services", "Trên các Service đã tải")],
           [t("Environments", "Môi trường"), n(environments), t("With observed services", "Có Service đã quan sát")],
           [t("Service groups", "Nhóm Service"), n(groups), t("From service metadata", "Theo metadata của Service")],
-        ].map(([label, value, note]) => <div key={label} className="min-w-0 border-l border-[#2a2d30] px-4 py-3 first:border-l-0 max-lg:[&:nth-child(3)]:border-l-0 max-lg:[&:nth-child(n+3)]:border-t">
-          <dt className="text-xs text-[#a7a9ab]">{label}</dt>
-          <dd className="mt-1 font-mono text-xl tabular-nums text-[#d8d9da]">{value}</dd>
-          <dd className="mt-1 text-[11px] text-[#a7a9ab]">{note}</dd>
+        ].map(([label, value, note]) => <div key={label} className="min-w-0 border-l border-line px-4 py-3 first:border-l-0 max-lg:[&:nth-child(3)]:border-l-0 max-lg:[&:nth-child(n+3)]:border-t">
+          <dt className="text-xs text-muted">{label}</dt>
+          <dd className="mt-1 font-mono text-xl tabular-nums text-ink">{value}</dd>
+          <dd className="mt-1 text-[11px] text-muted">{note}</dd>
         </div>)}
       </dl>
-      {(filters.account || filters.operation) && <p className="mb-3 rounded border border-[#2a2d30] px-3 py-2 text-xs text-[#a7a9ab]">{t("The catalog aggregates all APIs and principals for each service. Account and operation filters do not narrow this inventory.", "Danh mục tổng hợp tất cả API và principal của từng Service. Bộ lọc account và operation không thu hẹp danh mục này.")}</p>}
+      {(filters.account || filters.operation) && <p className="mb-3 rounded border border-line px-3 py-2 text-xs text-muted">{t("The catalog aggregates all APIs and principals for each service. Account and operation filters do not narrow this inventory.", "Danh mục tổng hợp tất cả API và principal của từng Service. Bộ lọc account và operation không thu hẹp danh mục này.")}</p>}
       <FleetTriage key={qs} services={services} search={`?${qs}`} catalog />
-      <p className="mt-3 text-[11px] text-[#a7a9ab]">{t("Observed telemetry is not an availability or SLO measurement. No open anomaly does not establish service health.", "Telemetry quan sát không đo độ sẵn sàng hay SLO. Không có bất thường đang mở chưa đủ để kết luận Service hoạt động tốt.")} {query.data?.items.length === 500 && t("Only the first 500 services are loaded.", "Chỉ tải 500 Service đầu tiên.")}</p>
+      <p className="mt-3 text-[11px] text-muted">{t("Observed telemetry is not an availability or SLO measurement. No open anomaly does not establish service health.", "Telemetry quan sát không đo độ sẵn sàng hay SLO. Không có bất thường đang mở chưa đủ để kết luận Service hoạt động tốt.")} {query.data?.items.length === 500 && t("Only the first 500 services are loaded.", "Chỉ tải 500 Service đầu tiên.")}</p>
     </>}
   </Page>;
 }
@@ -115,7 +115,7 @@ type Detail = {
   bandwidth?: { metrics?: Record<string, number>; series?: unknown[] };
 };
 
-type ServiceSeriesPoint = SeriesPoint & {
+export type ServiceSeriesPoint = SeriesPoint & {
   requests: number;
   expected_tps?: number;
   request_bytes_per_second?: number;
@@ -143,7 +143,7 @@ function formatServiceByteRate(value: number) {
   return `${normalized.toFixed(unitIndex === 0 ? 0 : 1)} ${units[unitIndex]}`;
 }
 
-function normalizeServiceBandwidth(rows: unknown) {
+export function normalizeServiceBandwidth(rows: unknown) {
   if (!Array.isArray(rows)) return [];
   return rows.flatMap((value) => {
     if (!value || typeof value !== "object") return [];
@@ -164,7 +164,7 @@ function normalizeServiceBandwidth(rows: unknown) {
   }).sort((a, b) => a.timestamp_ms - b.timestamp_ms);
 }
 
-function mergeServiceBandwidth(series: ServiceSeriesPoint[], bandwidthSeries: ReturnType<typeof normalizeServiceBandwidth>) {
+export function mergeServiceBandwidth(series: ServiceSeriesPoint[], bandwidthSeries: ReturnType<typeof normalizeServiceBandwidth>) {
   const points = new Map<number, Record<string, number>>();
   series.forEach((point) => points.set(point.timestamp_ms, { ...point, observed_tps: point.tps, expected_tps: point.baseline_rps }));
   bandwidthSeries.forEach((point) => {
@@ -173,7 +173,7 @@ function mergeServiceBandwidth(series: ServiceSeriesPoint[], bandwidthSeries: Re
   return [...points.values()].sort((a, b) => a.timestamp_ms - b.timestamp_ms);
 }
 
-function normalizeServiceSeries(rows: unknown): ServiceSeriesPoint[] {
+export function normalizeServiceSeries(rows: unknown): ServiceSeriesPoint[] {
   if (!Array.isArray(rows)) return [];
 
   return rows
@@ -224,7 +224,7 @@ function normalizeServiceSeries(rows: unknown): ServiceSeriesPoint[] {
     .sort((a, b) => a.timestamp_ms - b.timestamp_ms);
 }
 
-function ServicePerformancePanel({
+export function ServicePerformancePanel({
   series,
   bandwidthSeries,
   chartSeries,
@@ -235,6 +235,8 @@ function ServicePerformancePanel({
   failureRate,
   worstP95,
   bandwidthMetrics,
+  aside,
+  latencyDetail,
 }: {
   series: ServiceSeriesPoint[];
   bandwidthSeries: ReturnType<typeof normalizeServiceBandwidth>;
@@ -246,10 +248,15 @@ function ServicePerformancePanel({
   failureRate: number;
   worstP95: number;
   bandwidthMetrics: Record<string, number>;
+  aside?: ReactNode;
+  latencyDetail?: string;
 }) {
   const { t } = useI18n();
   const [selectedMetric, setSelectedMetric] = useState<ServiceChartMetric>("tps");
-  const latest = series[series.length - 1];
+  const nowMs = Date.now();
+  const bucketMs = 60_000;
+  const completedSeries = series.filter((p) => p.timestamp_ms + bucketMs <= nowMs);
+  const latest = completedSeries.length > 0 ? completedSeries[completedSeries.length - 1] : series[series.length - 1];
   const currentTps = serviceNumber(latest?.tps);
   const averageTps = totalRequests / Math.max(1, durationSec);
   const peakTps = Math.max(0, ...series.map((point) => serviceNumber(point.tps)));
@@ -261,8 +268,8 @@ function ServicePerformancePanel({
   const hasExpectedTps = series.some((point) => serviceNumber(point.expected_tps) > 0);
 
   const tpsLines: ServiceChartLine[] = [
-    { dataKey: "observed_tps", label: t("Observed TPS"), color: "#5794f2", width: 2.4 },
-    ...(hasExpectedTps ? [{ dataKey: "expected_tps", label: t("Expected TPS"), color: "#a78bfa", dashed: true, width: 1.5 }] : []),
+    { dataKey: "observed_tps", label: t("Observed TPS"), color: "var(--series-1)", width: 2.4 },
+    ...(hasExpectedTps ? [{ dataKey: "expected_tps", label: t("Expected TPS"), color: "var(--series-2)", dashed: true, width: 1.5 }] : []),
   ];
   const seriesMaximum = (lines: ServiceChartLine[]) => chartSeries.reduce(
     (maximum, point) => lines.reduce((value, line) => Math.max(value, serviceNumber(point[line.dataKey])), maximum), 0,
@@ -276,27 +283,27 @@ function ServicePerformancePanel({
   const chartVariables: Record<ServiceChartMetric, ServiceChartVariable> = {
     tps: { lines: tpsLines, formatAxis: formatTpsAxis, minimumAxisMax: 0, available: true },
     requests: {
-      lines: [{ dataKey: "requests", label: t("Requests / minute"), color: "#b877d9", width: 2 }],
+      lines: [{ dataKey: "requests", label: t("Requests / minute"), color: "var(--series-3)", width: 2 }],
       formatAxis: (value) => `${n(value, 0)}`,
       minimumAxisMax: 1,
       available: true,
     },
     error: {
-      lines: [{ dataKey: "failure_rate", label: t("Error rate"), color: "#f2495c", width: 2.2 }],
+      lines: [{ dataKey: "failure_rate", label: t("Error rate"), color: "var(--bad)", width: 2.2 }],
       formatAxis: (value) => pct(value),
       minimumAxisMax: 0.01,
       available: true,
     },
     latency: {
-      lines: [{ dataKey: "p95_ms", label: t("P95 Latency"), color: "#ff9830", width: 2.2 }],
+      lines: [{ dataKey: "p95_ms", label: t("P95 Latency"), color: "var(--warn)", width: 2.2 }],
       formatAxis: (value) => `${n(value, 0)} ms`,
       minimumAxisMax: 1,
       available: true,
     },
     bandwidth: {
       lines: [
-        { dataKey: "request_bytes_per_second", label: t("Request bytes/s"), color: "#b877d9", width: 2 },
-        { dataKey: "response_bytes_per_second", label: t("Response bytes/s"), color: "#56b9a8", width: 2 },
+        { dataKey: "request_bytes_per_second", label: t("Request bytes/s"), color: "var(--series-3)", width: 2 },
+        { dataKey: "response_bytes_per_second", label: t("Response bytes/s"), color: "var(--entity-api)", width: 2 },
       ],
       formatAxis: formatServiceByteRate,
       minimumAxisMax: 1,
@@ -325,10 +332,10 @@ function ServicePerformancePanel({
           detail={`${t("avg")} ${n(averageTps, 2)} · ${t("peak")} ${n(peakTps, 2)}`}
           subDetail={`${n(totalRequests, 0)} ${t("requests")}`}
           data={tpsSpark}
-          color="#5794f2"
+          color="var(--series-1)"
           selected={selectedMetric === "tps"}
           onSelect={() => setSelectedMetric("tps")}
-          valueClass="text-[#5794f2]"
+          valueClass="text-accent"
         />
         <InteractiveMetricCard
           label={t("Requests")}
@@ -336,7 +343,7 @@ function ServicePerformancePanel({
           detail={t("Server transactions")}
           subDetail={`${n(Math.max(0, ...series.map((point) => point.requests)), 0)}/min peak`}
           data={requestSpark}
-          color="#b877d9"
+          color="var(--series-3)"
           selected={selectedMetric === "requests"}
           onSelect={() => setSelectedMetric("requests")}
         />
@@ -345,18 +352,18 @@ function ServicePerformancePanel({
           value={pct(failureRate)}
           detail={`≈ ${n(totalErrors, 0)} ${t("errors")}`}
           data={errorSpark}
-          color="#f2495c"
+          color="var(--bad)"
           selected={selectedMetric === "error"}
           onSelect={() => setSelectedMetric("error")}
-          valueClass={failureRate >= 0.05 ? "text-[#f2495c]" : "text-[#d8d9da]"}
+          valueClass={failureRate >= 0.05 ? "text-bad" : "text-ink"}
         />
         <InteractiveMetricCard
           label={t("Max bucket P95", "P95 bucket lớn nhất")}
           value={`${n(worstP95, 0)} ms`}
-          detail={`${t("Across")} ${n(operationsCount, 0)} ${t("Operations").toLowerCase()}`}
+          detail={latencyDetail ?? `${t("Across")} ${n(operationsCount, 0)} ${t("Operations").toLowerCase()}`}
           subDetail={`${t("Latest bucket", "Bucket cuối")} ${n(currentP95, 0)} ms`}
           data={latencySpark}
-          color="#ff9830"
+          color="var(--warn)"
           selected={selectedMetric === "latency"}
           onSelect={() => setSelectedMetric("latency")}
         />
@@ -366,37 +373,109 @@ function ServicePerformancePanel({
           detail={t("Request + response throughput")}
           subDetail={`↑ ${formatServiceByteRate(currentRequestRate)} · ↓ ${formatServiceByteRate(currentResponseRate)}`}
           data={bandwidthSpark}
-          color="#56b9a8"
+          color="var(--entity-api)"
           selected={selectedMetric === "bandwidth"}
           onSelect={() => setSelectedMetric("bandwidth")}
         />
       </div>
 
-      {!series.length && <p className="text-xs text-[#a7a9ab]">{t("No telemetry points in the selected window")}</p>}
-      <Panel title={hasExpectedTps ? t("TPS vs Expected") : t("TPS")} subtitle={t("TPS on left · selected KPI on right")}>
-        <div className="space-y-0">
-          <div className="flex h-8 min-w-0 items-center gap-4 overflow-x-auto whitespace-nowrap px-3 text-[10px] text-[#a7a9ab]">
-            {chartLegend.map(({ label, color, dashed }) => <span key={label}><span className={`mr-1 inline-block w-3 border-t-2 align-middle ${dashed ? "border-dashed" : ""}`} style={{ borderColor: color }} />{label}</span>)}
-          </div>
-          <div className="relative h-[230px] px-2 pb-1 pt-1">
-            <ResponsiveContainer width="100%" height="100%">
-              <LineChart data={chartSeries} margin={{ top: 6, right: 16, bottom: 0, left: 0 }}>
-                <CartesianGrid stroke="#303236" vertical={false} />
-                <XAxis dataKey="timestamp_ms" type="number" domain={["dataMin", "dataMax"]} minTickGap={52} tick={{ fill: "#7b7d80", fontSize: 10 }} tickFormatter={(value) => new Date(Number(value)).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })} axisLine={{ stroke: "#2a2d30" }} tickLine={false} />
-                <YAxis yAxisId="tps" width={48} domain={[0, tpsAxisMaximum]} ticks={[0, 0.25, 0.5, 0.75, 1].map((fraction) => tpsAxisMaximum * fraction)} allowDataOverflow tick={{ fill: "#7b7d80", fontSize: 10 }} axisLine={false} tickLine={false} tickFormatter={(value) => n(Number(value), tpsAxisDigits)} />
-                <YAxis yAxisId="metric" orientation="right" width={78} domain={[0, rightAxisMaximum]} allowDataOverflow tick={false} axisLine={false} tickLine={false} />
-                <Tooltip {...chartTooltip} labelFormatter={(value) => new Date(Number(value)).toLocaleString()} />
-                {tpsLines.map((line) => <Line key={line.dataKey} yAxisId="tps" type="monotone" dataKey={line.dataKey} name={line.label} stroke={line.color} strokeWidth={line.width} strokeDasharray={line.dashed ? "5 4" : undefined} dot={false} connectNulls isAnimationActive={false} />)}
-                {overlayLines.map((line) => <Line key={line.dataKey} yAxisId="metric" type="monotone" dataKey={line.dataKey} name={line.label} stroke={line.color} strokeWidth={line.width} strokeDasharray={line.dashed ? "5 4" : undefined} dot={false} connectNulls isAnimationActive={false} />)}
-              </LineChart>
-            </ResponsiveContainer>
-            <div data-testid="service-metric-axis" aria-label={t("Selected metric scale")} className="pointer-events-none absolute bottom-[33px] right-[24px] top-[11px] flex w-[70px] flex-col justify-between text-left text-[10px] text-[#7b7d80]">
-              {[1, 0.75, 0.5, 0.25, 0].map((fraction) => <span key={fraction}>{rightVariable.formatAxis(rightAxisMaximum * fraction)}</span>)}
+      {!series.length && <p className="text-xs text-muted">{t("No telemetry points in the selected window")}</p>}
+      <div className="grid grid-cols-1 items-stretch gap-4 lg:grid-cols-5">
+        <div className={aside ? "min-w-0 lg:col-span-3" : "col-span-full min-w-0"}>
+          <Panel
+            title={hasExpectedTps ? t("TPS vs Expected") : t("TPS")}
+            subtitle={t("TPS on left · selected KPI on right")}
+            className="flex h-full flex-col"
+          >
+            <div className="flex flex-1 flex-col justify-between space-y-0">
+              <div className="flex h-8 min-w-0 items-center gap-4 overflow-x-auto whitespace-nowrap px-3 text-[10px] text-muted">
+                {chartLegend.map(({ label, color, dashed }) => <span key={label}><span className={`mr-1 inline-block w-3 border-t-2 align-middle ${dashed ? "border-dashed" : ""}`} style={{ borderColor: color }} />{label}</span>)}
+              </div>
+              <div className="relative h-[230px] px-2 pb-1 pt-1">
+                <ResponsiveContainer width="100%" height="100%">
+                  <LineChart data={chartSeries} margin={{ top: 6, right: 16, bottom: 0, left: 0 }}>
+                    <CartesianGrid stroke="var(--grid)" vertical={false} />
+                    <XAxis dataKey="timestamp_ms" type="number" domain={["dataMin", "dataMax"]} minTickGap={52} tick={{ fill: "var(--muted)", fontSize: 10 }} tickFormatter={(value) => new Date(Number(value)).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })} axisLine={{ stroke: "var(--border)" }} tickLine={false} />
+                    <YAxis yAxisId="tps" width={48} domain={[0, tpsAxisMaximum]} ticks={[0, 0.25, 0.5, 0.75, 1].map((fraction) => tpsAxisMaximum * fraction)} allowDataOverflow tick={{ fill: "var(--muted)", fontSize: 10 }} axisLine={false} tickLine={false} tickFormatter={(value) => n(Number(value), tpsAxisDigits)} />
+                    <YAxis yAxisId="metric" orientation="right" width={78} domain={[0, rightAxisMaximum]} allowDataOverflow tick={false} axisLine={false} tickLine={false} />
+                    <Tooltip {...chartTooltip} labelFormatter={(value) => new Date(Number(value)).toLocaleString()} />
+                    {tpsLines.map((line) => <Line key={line.dataKey} yAxisId="tps" type="monotone" dataKey={line.dataKey} name={line.label} stroke={line.color} strokeWidth={line.width} strokeDasharray={line.dashed ? "5 4" : undefined} dot={false} connectNulls isAnimationActive={false} />)}
+                    {overlayLines.map((line) => <Line key={line.dataKey} yAxisId="metric" type="monotone" dataKey={line.dataKey} name={line.label} stroke={line.color} strokeWidth={line.width} strokeDasharray={line.dashed ? "5 4" : undefined} dot={false} connectNulls isAnimationActive={false} />)}
+                  </LineChart>
+                </ResponsiveContainer>
+                <div data-testid="service-metric-axis" aria-label={t("Selected metric scale")} className="pointer-events-none absolute bottom-[33px] right-[24px] top-[11px] flex w-[70px] flex-col justify-between text-left text-[10px] text-muted">
+                  {[1, 0.75, 0.5, 0.25, 0].map((fraction) => <span key={fraction}>{rightVariable.formatAxis(rightAxisMaximum * fraction)}</span>)}
+                </div>
+              </div>
             </div>
-          </div>
+          </Panel>
         </div>
-      </Panel>
+        {aside && (
+          <div className="min-w-0 lg:col-span-2">
+            {aside}
+          </div>
+        )}
+      </div>
     </div>
+  );
+}
+
+export function RecentChangesPanel({ query, viewAllHref, search, emptyText }: {
+  query: { isLoading: boolean; isError: boolean; error: Error | null; data?: EpisodeResponse };
+  viewAllHref: string;
+  search: string;
+  emptyText: string;
+}) {
+  const { t } = useI18n();
+  const nav = useNavigate();
+  const changes = query.data?.items || [];
+  return (
+    <Panel
+      title={t("Recent Changes")}
+      subtitle={t("Latest episodes · up to 10 loaded, 5 shown", "Episode gần nhất · tải tối đa 10, hiển thị 5")}
+      className="flex h-full flex-col min-w-0"
+      action={
+        <button onClick={() => nav(viewAllHref)} className="shrink-0 text-[11px] font-semibold text-accent text-accent hover:text-ink">
+          {t("View all")} <ArrowRight size={12} className="inline" />
+        </button>
+      }
+    >
+      {query.isLoading ? (
+        <div className="flex flex-1 items-center justify-center p-6"><Loading /></div>
+      ) : query.isError ? (
+        <div className="p-4"><ErrorState message={query.error?.message || ""} /></div>
+      ) : changes.length ? (
+        <div className="flex-1 min-h-0 overflow-y-auto divide-y divide-line max-h-[262px]">
+          {changes.slice(0, 5).map((change) => (
+            <div key={change.id} className="flex items-start gap-2.5 px-3 py-2 transition hover:bg-hover">
+              <span className="shrink-0"><EpisodeStatusBadge episode={change} /></span>
+              <span className="min-w-0 flex-1">
+                <EntityLink
+                  entity={{ kind: "change", id: change.id }}
+                  search={search}
+                  title={change.summary}
+                  className="block truncate text-xs font-semibold text-ink hover:text-accent"
+                >
+                  {change.summary}
+                </EntityLink>
+                <div className="mt-0.5 truncate text-[10px] text-muted">
+                  {change.context.operation && change.context.target
+                    ? <EntityLink entity={{ kind: "api", service: change.context.target, operation: change.context.operation }}>{change.context.operation}</EntityLink>
+                    : change.context.target
+                      ? <EntityLink entity={{ kind: "service", name: change.context.target }}>{change.context.target}</EntityLink>
+                      : change.subject.type === "user"
+                        ? <EntityLink entity={{ kind: "user", principal: change.subject.name }}>{change.subject.name}</EntityLink>
+                        : <EntityLink entity={{ kind: "service", name: change.subject.name }}>{change.subject.name}</EntityLink>}
+                </div>
+              </span>
+              <span className="shrink-0 font-mono text-[10px] text-muted">{change.last_seen_at ? new Date(change.last_seen_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : "—"}</span>
+            </div>
+          ))}
+        </div>
+      ) : (
+        <div className="flex flex-1 items-center justify-center p-6 text-center text-xs text-muted">{emptyText}</div>
+      )}
+    </Panel>
   );
 }
 
@@ -487,7 +566,6 @@ export function ServiceDetailPage() {
     1,
     (new Date(filters.end).getTime() - new Date(filters.start).getTime()) / 1000,
   );
-  const changes = serviceChanges.data?.items || [];
   const traces = serviceTraces.data?.items || [];
 
   return (
@@ -519,48 +597,21 @@ export function ServiceDetailPage() {
         failureRate={fail}
         worstP95={p95}
         bandwidthMetrics={bandwidthMetrics}
+        aside={
+          <RecentChangesPanel
+            query={serviceChanges}
+            viewAllHref={`/changes?${qs}&service=${encodeURIComponent(name)}`}
+            search={`?${qs}`}
+            emptyText={t("No behavior changes for this service in the current window.")}
+          />
+        }
       />
 
       <div className="mt-4 space-y-4">
-      {/* 8. Changes */}
-      <Panel
-        title={t("Recent Changes")}
-        subtitle={t("Latest episodes · up to 10 loaded, 5 shown", "Episode gần nhất · tải tối đa 10, hiển thị 5")}
-        className="min-w-0"
-        action={<button onClick={() => nav(`/changes?${qs}&service=${encodeURIComponent(name)}`)} className="text-[11px] font-semibold text-[#5794f2] hover:text-white">{t("View all")} <ArrowRight size={12} className="inline" /></button>}
-      >
-        {serviceChanges.isLoading ? (
-          <Loading />
-        ) : serviceChanges.isError ? (<ErrorState message={serviceChanges.error.message} />) : changes.length ? (
-          <div className="divide-y divide-[#2a2d30]">
-            {changes.slice(0, 5).map((change) => (
-              <div key={change.id} className="flex items-start gap-2.5 px-3 py-2.5 transition hover:bg-[#181b1f]">
-                <EpisodeStatusBadge episode={change} />
-                <span className="min-w-0 flex-1">
-                  <EntityLink entity={{ kind: "change", id: change.id }} search={`?${qs}`} className="block truncate text-xs font-semibold text-[#d8d9da] hover:text-[#5794f2]">{change.summary}</EntityLink>
-                  <div className="mt-0.5 truncate text-[10px] text-[#7b7d80]">
-                    {change.context.operation && change.context.target
-                      ? <EntityLink entity={{ kind: "api", service: change.context.target, operation: change.context.operation }}>{change.context.operation}</EntityLink>
-                      : change.context.target
-                        ? <EntityLink entity={{ kind: "service", name: change.context.target }}>{change.context.target}</EntityLink>
-                        : change.subject.type === "user"
-                          ? <EntityLink entity={{ kind: "user", principal: change.subject.name }}>{change.subject.name}</EntityLink>
-                          : <EntityLink entity={{ kind: "service", name: change.subject.name }}>{change.subject.name}</EntityLink>}
-                  </div>
-                </span>
-                <span className="shrink-0 font-mono text-[10px] text-[#7b7d80]">{change.last_seen_at ? new Date(change.last_seen_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : "—"}</span>
-              </div>
-            ))}
-          </div>
-        ) : (
-          <div className="p-6 text-center text-xs text-[#7b7d80]">{t("No behavior changes for this service in the current window.")}</div>
-        )}
-      </Panel>
-
         <ServiceAccessBoard key={`${name}:${qs}`} service={name} accounts={accounts} operations={operations} filters={filters} />
       </div>
-      <div className="mt-5 flex flex-wrap gap-2 border-b border-[#2a2d30] pb-3" role="group" aria-label={t("Service detail views", "Góc nhìn Service")}>
-        {[["operations", "APIs", operations.length], ["users", t("Users"), serviceUsers.data?.total ?? "—"], ["instances", t("Instances", "Instance"), instances.length], ["traces", t("Traces"), traces.length]].map(([value, label, count]) => <button key={value} aria-pressed={detailTab === value} className={`rounded border px-3 py-2 text-xs ${detailTab === value ? "border-[#5794f2] bg-[#5794f2]/10 text-[#5794f2]" : "border-[#34373b] text-[#a7a9ab] hover:text-white"}`} onClick={() => setDetailTab(String(value))}>{label} <span className="ml-2 font-mono">{count}</span></button>)}
+      <div className="mt-5 flex flex-wrap gap-2 border-b border-line pb-3" role="group" aria-label={t("Service detail views", "Góc nhìn Service")}>
+        {[["operations", "APIs", operations.length], ["users", t("Users"), serviceUsers.data?.total ?? "—"], ["instances", t("Instances", "Instance"), instances.length], ["traces", t("Traces"), traces.length]].map(([value, label, count]) => <button key={value} aria-pressed={detailTab === value} className={`rounded border px-3 py-2 text-xs ${detailTab === value ? "border-accent bg-accent-soft text-accent" : "border-line-strong text-muted hover:text-ink"}`} onClick={() => setDetailTab(String(value))}>{label} <span className="ml-2 font-mono">{count}</span></button>)}
       </div>
       {detailTab === "operations" && <>
       {/* 4. APIs */}
@@ -570,38 +621,38 @@ export function ServiceDetailPage() {
         className="mt-4"
       >
         {attentionOperations.length ? (
-          <div className="divide-y divide-[#2a2d30]">
+          <div className="divide-y divide-line">
             {attentionOperations.map((operation) => (
               <EntityLink
                 entity={{ kind: "api", service: name, operation: operation.name }}
                 search={`?${qs}`}
                 key={`attention-${operation.name}`}
-                className="flex w-full flex-wrap items-center justify-between gap-2 px-4 py-3 text-left transition hover:bg-[#181b1f]"
+                className="flex w-full flex-wrap items-center justify-between gap-2 px-4 py-3 text-left transition hover:bg-hover"
               >
-                <span className="min-w-0 truncate font-semibold text-[#d8d9da] hover:text-[#5794f2]">{operation.name}</span>
+                <span className="min-w-0 truncate font-semibold text-ink hover:text-accent">{operation.name}</span>
                 <span className="flex flex-wrap items-center gap-3 font-mono text-[11px] tabular-nums">
-                  <span className={operation.failure_rate > 0.02 ? "text-[#f2495c]" : "text-[#73bf69]"}>{pct(operation.failure_rate || 0)} {t("error")}</span>
-                  <span className={operation.p95_ms > 500 ? "text-[#ff9830]" : "text-[#b877d9]"}>{n(operation.p95_ms || 0, 1)} ms p95</span>
-                  <span className="text-[#a7a9ab]">{n(operation.requests || 0, 0)} {t("requests")}</span>
+                  <span className={operation.failure_rate > 0.02 ? "text-bad" : "text-good"}>{pct(operation.failure_rate || 0)} {t("error")}</span>
+                  <span className={operation.p95_ms > 500 ? "text-warn" : "text-entity-user"}>{n(operation.p95_ms || 0, 1)} ms p95</span>
+                  <span className="text-muted">{n(operation.requests || 0, 0)} {t("requests")}</span>
                 </span>
               </EntityLink>
             ))}
           </div>
         ) : (
-          <div className="p-6 text-center text-xs text-[#7b7d80]">{t("No operations observed in this window")}</div>
+          <div className="p-6 text-center text-xs text-muted">{t("No operations observed in this window")}</div>
         )}
       </Panel>
 
       <Panel
         title={t("Operation Performance Inventory")}
         subtitle={t("Maximum bucket percentiles · error rate weighted by requests", "Phân vị bucket lớn nhất · tỷ lệ lỗi có trọng số theo request")}
-        action={<input aria-label={t("Search APIs", "Tìm API")} placeholder={t("Search APIs", "Tìm API")} value={operationSearch} onChange={event => { setOperationSearch(event.target.value); setOperationPage(0); }} className="w-40 max-w-full rounded border border-[#34373b] bg-[#181b1f] px-3 py-2 text-xs" />}
+        action={<input aria-label={t("Search APIs", "Tìm API")} placeholder={t("Search APIs", "Tìm API")} value={operationSearch} onChange={event => { setOperationSearch(event.target.value); setOperationPage(0); }} className="w-40 max-w-full rounded border border-line-strong bg-surface-2 px-3 py-2 text-xs" />}
         className="mt-4"
       >
         <div className="overflow-auto scrollbar">
           <table className="w-full min-w-[850px] text-left text-xs">
             <thead>
-              <tr className="border-b border-[#2a2d30]">
+              <tr className="border-b border-line">
                 {[
                   t("Operation"),
                   t("Volume"),
@@ -617,27 +668,27 @@ export function ServiceDetailPage() {
                 ))}
               </tr>
             </thead>
-            <tbody className="divide-y divide-[#2a2d30]">
+            <tbody className="divide-y divide-line">
               {visibleOperations.slice(currentOperationPage * 15, currentOperationPage * 15 + 15).map((o) => (
                 <tr
                   key={o.name}
                   onClick={() => nav(entityPath({ kind: "api", service: name, operation: o.name }) + `?${qs}`)}
-                  className="cursor-pointer hover:bg-[#181b1f] transition"
+                  className="cursor-pointer hover:bg-hover transition"
                 >
-                  <td className="px-4 py-2.5 font-medium text-[#5794f2]"><EntityLink entity={{ kind: "api", service: name, operation: o.name }} search={`?${qs}`} className="hover:underline">{o.name}</EntityLink></td>
-                  <td className="px-4 font-mono tabular-nums text-[#d8d9da]">{n(o.requests)}</td>
-                  <td className="px-4 font-mono tabular-nums text-[#7b7d80]">{n(o.p50_ms || 0)} ms</td>
-                  <td className="px-4 font-mono tabular-nums text-[#b877d9]">{n(o.p95_ms || 0)} ms</td>
-                  <td className="px-4 font-mono tabular-nums text-[#f2495c]">{n(o.p99_ms || 0)} ms</td>
-                  <td className="px-4 font-mono tabular-nums text-[#ff9830]">{pct(o.failure_rate || 0)}</td>
+                  <td className="px-4 py-2.5 font-medium text-accent text-accent"><EntityLink entity={{ kind: "api", service: name, operation: o.name }} search={`?${qs}`} className="hover:underline">{o.name}</EntityLink></td>
+                  <td className="px-4 font-mono tabular-nums text-ink text-ink">{n(o.requests)}</td>
+                  <td className="px-4 font-mono tabular-nums text-muted text-muted">{n(o.p50_ms || 0)} ms</td>
+                  <td className="px-4 font-mono tabular-nums text-entity-user">{n(o.p95_ms || 0)} ms</td>
+                  <td className="px-4 font-mono tabular-nums text-bad text-bad">{n(o.p99_ms || 0)} ms</td>
+                  <td className="px-4 font-mono tabular-nums text-warn text-warn">{pct(o.failure_rate || 0)}</td>
                   <td className="px-4 font-mono tabular-nums">{pct(total ? o.requests / total : 0)}</td>
                 </tr>
               ))}
-              {!visibleOperations.length && <tr><td colSpan={7} className="p-8 text-center text-[#a7a9ab]">{t("No matching APIs", "Không có API phù hợp")}</td></tr>}
+              {!visibleOperations.length && <tr><td colSpan={7} className="p-8 text-center text-muted">{t("No matching APIs", "Không có API phù hợp")}</td></tr>}
             </tbody>
           </table>
         </div>
-        <div className="flex flex-wrap items-center justify-between gap-2 border-t border-[#2a2d30] p-3 text-xs text-[#a7a9ab]">
+        <div className="flex flex-wrap items-center justify-between gap-2 border-t border-line p-3 text-xs text-muted">
           <span>{visibleOperations.length ? currentOperationPage * 15 + 1 : 0}–{Math.min(currentOperationPage * 15 + 15, visibleOperations.length)} / {visibleOperations.length} APIs</span>
           <div className="flex gap-2"><button className="btn disabled:opacity-40" disabled={currentOperationPage === 0} onClick={() => setOperationPage(currentOperationPage - 1)}>{t("Previous", "Trước")}</button><button className="btn disabled:opacity-40" disabled={currentOperationPage === lastOperationPage} onClick={() => setOperationPage(currentOperationPage + 1)}>{t("Next", "Tiếp")}</button></div>
         </div>
@@ -651,26 +702,26 @@ export function ServiceDetailPage() {
         <div className="overflow-auto">
           <table className="w-full text-left text-xs">
             <thead>
-              <tr className="border-b border-[#2a2d30]">
+              <tr className="border-b border-line">
                 {[t("Principal Identity"), t("Volume"), t("Callers"), t("Operations"), t("First seen"), t("Last seen"), t("Recent change")].map((h) => (
                   <th className="table-head px-3 py-2" key={h}>{h}</th>
                 ))}
               </tr>
             </thead>
-            <tbody className="divide-y divide-[#2a2d30]">
+            <tbody className="divide-y divide-line">
               {(serviceUsers.data?.items || []).map((u: any) => (
-                <tr key={u.principal_name} onClick={() => nav(entityPath({ kind: "user", principal: u.principal_name }) + `?${qs}`)} className="cursor-pointer hover:bg-[#181b1f] transition">
-                  <td className="px-3 py-2 font-mono text-[#5794f2]"><EntityLink entity={{ kind: "user", principal: u.principal_name }} search={`?${qs}`} className="hover:underline">{u.principal_name}</EntityLink></td>
-                  <td className="px-3 font-mono tabular-nums text-[#d8d9da]">{n(u.total_requests || u.requests || 0, 0)}</td>
-                  <td className="px-3 font-mono tabular-nums text-[#a7a9ab]">{u.unique_callers ?? u.callers ?? "—"}</td>
-                  <td className="px-3 font-mono tabular-nums text-[#a7a9ab]">{u.unique_operations ?? u.operations ?? "—"}</td>
-                  <td className="px-3 text-[#7b7d80]">{u.first_seen ? new Date(u.first_seen).toLocaleString() : "—"}</td>
-                  <td className="px-3 text-[#7b7d80]">{u.last_seen ? new Date(u.last_seen).toLocaleString() : "—"}</td>
-                  <td className="px-3">{u.recent_changes || u.recent_change ? <span className="rounded-[2px] bg-[#ff9830]/10 border border-[#ff9830]/40 px-1.5 py-0.5 text-[10px] text-[#ff9830]">{t("Changed")}</span> : "—"}</td>
+                <tr key={u.principal_name} onClick={() => nav(entityPath({ kind: "user", principal: u.principal_name }) + `?${qs}`)} className="cursor-pointer hover:bg-hover transition">
+                  <td className="px-3 py-2 font-mono text-accent text-accent"><EntityLink entity={{ kind: "user", principal: u.principal_name }} search={`?${qs}`} className="hover:underline">{u.principal_name}</EntityLink></td>
+                  <td className="px-3 font-mono tabular-nums text-ink text-ink">{n(u.total_requests || u.requests || 0, 0)}</td>
+                  <td className="px-3 font-mono tabular-nums text-muted text-muted">{u.unique_callers ?? u.callers ?? "—"}</td>
+                  <td className="px-3 font-mono tabular-nums text-muted text-muted">{u.unique_operations ?? u.operations ?? "—"}</td>
+                  <td className="px-3 text-muted text-muted">{u.first_seen ? new Date(u.first_seen).toLocaleString() : "—"}</td>
+                  <td className="px-3 text-muted text-muted">{u.last_seen ? new Date(u.last_seen).toLocaleString() : "—"}</td>
+                  <td className="px-3">{u.recent_changes || u.recent_change ? <span className="rounded-[2px] bg-warn-bg/10 border border-warn/40 px-1.5 py-0.5 text-[10px] text-warn text-warn">{t("Changed")}</span> : "—"}</td>
                 </tr>
               ))}
               {!(serviceUsers.data?.items || []).length && (
-                <tr><td colSpan={7} className="px-3 py-8 text-center text-xs text-[#7b7d80]">{t("No users recorded for this service in this window.")}</td></tr>
+                <tr><td colSpan={7} className="px-3 py-8 text-center text-xs text-muted">{t("No users recorded for this service in this window.")}</td></tr>
               )}
             </tbody>
           </table>
@@ -707,7 +758,7 @@ export function ServiceDetailPage() {
         title={t("Representative Traces")}
         subtitle={t("Recent distributed traces for this service")}
         className="mt-4"
-        action={<button onClick={() => nav(`/traces?${qs}&service=${encodeURIComponent(name)}`)} className="text-[11px] font-semibold text-[#5794f2] hover:text-white">{t("Open in Traces")} <ArrowRight size={12} className="inline" /></button>}
+        action={<button onClick={() => nav(`/traces?${qs}&service=${encodeURIComponent(name)}`)} className="text-[11px] font-semibold text-accent text-accent hover:text-ink">{t("Open in Traces")} <ArrowRight size={12} className="inline" /></button>}
       >
         {serviceTraces.isLoading ? (
           <Loading />
@@ -715,7 +766,7 @@ export function ServiceDetailPage() {
           <div className="overflow-auto">
             <table className="w-full text-left text-xs">
               <thead>
-                <tr className="border-b border-[#2a2d30]">
+                <tr className="border-b border-line">
                   <th className="table-head px-3 py-2">{t("Trace ID")}</th>
                   <th className="table-head px-3 py-2">{t("Operation")}</th>
                   <th className="table-head px-3 py-2">{t("Principal")}</th>
@@ -723,19 +774,19 @@ export function ServiceDetailPage() {
                   <th className="table-head px-3 py-2 text-right">{t("Status")}</th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-[#2a2d30]">
+              <tbody className="divide-y divide-line">
                 {traces.map((tr: any) => (
                   <tr
                     key={tr.trace_id || tr.id}
                     onClick={() => nav(`/traces/${encodeURIComponent(tr.trace_id || tr.id)}`)}
-                    className="cursor-pointer hover:bg-[#181b1f] transition"
+                    className="cursor-pointer hover:bg-hover transition"
                   >
-                    <td className="px-3 py-2 font-mono text-[#5794f2]">{(tr.trace_id || tr.id || "").slice(0, 16)}…</td>
-                    <td className="px-3 text-[#d8d9da]">{tr.operation || tr.name || "—"}</td>
-                    <td className="px-3 font-mono text-[#a7a9ab]">{tr.principal_name || tr.user || "—"}</td>
-                    <td className="px-3 text-right font-mono tabular-nums text-[#d8d9da]">{tr.duration_ms != null ? `${Number(tr.duration_ms).toFixed(1)} ms` : "—"}</td>
+                    <td className="px-3 py-2 font-mono text-accent">{(tr.trace_id || tr.id || "").slice(0, 16)}…</td>
+                    <td className="px-3 text-ink">{tr.operation || tr.name || "—"}</td>
+                    <td className="px-3 font-mono text-muted">{tr.principal_name || tr.user || "—"}</td>
+                    <td className="px-3 text-right font-mono tabular-nums text-ink">{tr.duration_ms != null ? `${Number(tr.duration_ms).toFixed(1)} ms` : "—"}</td>
                     <td className="px-3 text-right font-mono">
-                      <span className={`rounded-[2px] px-1.5 py-0.5 text-[10px] uppercase font-semibold ${String(tr.status_code || tr.http_status || tr.status).startsWith("5") ? "text-[#f2495c] bg-[#f2495c]/10" : "text-[#73bf69] bg-[#73bf69]/10"}`}>
+                      <span className={`rounded-[2px] px-1.5 py-0.5 text-[10px] uppercase font-semibold ${String(tr.status_code || tr.http_status || tr.status).startsWith("5") ? "text-bad bg-bad-bg/10" : "text-good bg-good-bg/10"}`}>
                         {tr.status_code || tr.http_status || tr.status || "OK"}
                       </span>
                     </td>
@@ -745,7 +796,7 @@ export function ServiceDetailPage() {
             </table>
           </div>
         ) : (
-          <div className="p-6 text-center text-xs text-[#7b7d80]">{t("No recent traces recorded for this service.")}</div>
+          <div className="p-6 text-center text-xs text-muted">{t("No recent traces recorded for this service.")}</div>
         )}
       </Panel></>}
     </Page>
@@ -768,19 +819,19 @@ function SimpleTable({
           className="flex items-center justify-between px-4 py-2.5 text-xs hover:bg-white/[0.02]"
         >
           <div className="min-w-0">
-            <span className="break-all font-medium text-[#f0f3f6]">{r.name}</span>
+            <span className="break-all font-medium text-ink">{r.name}</span>
             {r.operation && (
-              <span className="ml-2 text-[10px] text-[#8b949e]">{r.operation}</span>
+              <span className="ml-2 text-[10px] text-muted">{r.operation}</span>
             )}
           </div>
-          <div className="shrink-0 pl-3 text-right font-mono text-xs tabular-nums text-[#a7a9ab]">
+          <div className="shrink-0 pl-3 text-right font-mono text-xs tabular-nums text-muted">
             {n(r.requests)} · {pct(total ? r.requests / total : 0)}
             {r.avg_ms !== undefined && ` · ${n(r.avg_ms)} ms avg`}
           </div>
         </div>
       ))}
       {!safeRows.length && (
-        <div className="p-8 text-center text-xs text-[#8b949e]">{t("No records found.")}</div>
+        <div className="p-8 text-center text-xs text-muted">{t("No records found.")}</div>
       )}
     </div>
   );

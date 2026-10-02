@@ -1,0 +1,409 @@
+---
+# Source: tracescope-obi/templates/obi-rbac.yaml
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: tracescope-obi
+  namespace: tracescope
+  labels:
+    helm.sh/chart: tracescope-obi-0.2.0
+    app.kubernetes.io/instance: tracescope-obi
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/part-of: tracescope
+    app.kubernetes.io/name: tracescope-obi
+
+---
+# Source: tracescope-obi/templates/collector-configmap.yaml
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: tracescope-obi-collector
+  namespace: tracescope
+  labels:
+    helm.sh/chart: tracescope-obi-0.2.0
+    app.kubernetes.io/instance: tracescope-obi
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/part-of: tracescope
+    app.kubernetes.io/name: tracescope-obi-collector
+data:
+  config.yaml: |
+    receivers:
+      otlp:
+        protocols:
+          grpc:
+            endpoint: 0.0.0.0:4317
+          http:
+            endpoint: 0.0.0.0:4318
+
+    processors:
+      memory_limiter:
+        check_interval: 1s
+        limit_percentage: 75
+        spike_limit_percentage: 20
+      batch:
+        send_batch_size: 2000
+        timeout: 200ms
+        send_batch_max_size: 5000
+      filter/drop_internal_spans:
+        error_mode: ignore
+        traces:
+          span:
+            - 'name == "in queue" or name == "processing"'
+      transform/wsse:
+        error_mode: ignore
+        trace_statements:
+          - context: span
+            statements:
+              # 1. Extract WSSE username from SOAP XML or JSON request body (OBI-native: http.request.body.content)
+              - merge_maps(attributes, ExtractPatterns(attributes["http.request.body.content"], "(?i)<(?:[a-zA-Z0-9_-]+:)?Username(?:\\s+[^>]*)?>\\s*(?P<wsse_user>[^<>\\s]+)\\s*</(?:[a-zA-Z0-9_-]+:)?Username>"), "upsert") where IsString(attributes["http.request.body.content"]) and IsMatch(attributes["http.request.body.content"], "(?i)<(?:[a-zA-Z0-9_-]+:)?Username")
+              - merge_maps(attributes, ExtractPatterns(attributes["http.request.body.content"], "(?i)\"(?:wsse:)?(?:user|username)\"\\s*:\\s*\"(?P<wsse_user>[^\"]+)\""), "upsert") where IsString(attributes["http.request.body.content"]) and IsMatch(attributes["http.request.body.content"], "(?i)\"(?:wsse:)?(?:user|username)\"\\s*:")
+              # 2. Extract WSSE username from HTTP header if present (X-WSSE / Authorization)
+              - merge_maps(attributes, ExtractPatterns(attributes["http.request.header.x-wsse"], "(?i)Username=\"(?P<wsse_user>[^\"]+)\""), "upsert") where IsString(attributes["http.request.header.x-wsse"]) and IsMatch(attributes["http.request.header.x-wsse"], "(?i)Username=")
+              # 3. Extract SOAPAction header
+              - set(attributes["soap.action"], attributes["http.request.header.soapaction"]) where attributes["http.request.header.soapaction"] != nil
+              # 4. Standard OpenTelemetry user identity attributes
+              - set(attributes["enduser.id"], attributes["wsse_user"]) where attributes["wsse_user"] != nil
+              - set(attributes["user.name"], attributes["wsse_user"]) where attributes["wsse_user"] != nil
+              - set(attributes["wsse.username"], attributes["wsse_user"]) where attributes["wsse_user"] != nil
+              - set(attributes["client.user"], attributes["wsse_user"]) where attributes["wsse_user"] != nil
+              - set(attributes["auth.scheme"], "wsse") where attributes["wsse_user"] != nil
+              # 5. Redact Password values from body to prevent credential leaks
+              - replace_all_patterns(attributes, "value", "(?i)<(?:[a-zA-Z0-9_-]+:)?Password(?:[^>]*)>[^<]*</(?:[a-zA-Z0-9_-]+:)?Password>", "<wsse:Password>***REDACTED***</wsse:Password>")
+              # 6. Normalize HTTP status code and method for APM Server compatibility
+              - set(attributes["http.status_code"], attributes["http.response.status_code"]) where attributes["http.status_code"] == nil and attributes["http.response.status_code"] != nil
+              - set(attributes["http.response.status_code"], attributes["http.status_code"]) where attributes["http.response.status_code"] == nil and attributes["http.status_code"] != nil
+              - set(attributes["http.method"], attributes["http.request.method"]) where attributes["http.method"] == nil and attributes["http.request.method"] != nil
+              - set(attributes["http.request.method"], attributes["http.method"]) where attributes["http.request.method"] == nil and attributes["http.method"] != nil
+              # 7. Normalize client IP and proxy headers (X-Forwarded-For, X-Real-IP)
+              - set(attributes["x_forwarded_for"], attributes["http.request.header.x-forwarded-for"]) where attributes["http.request.header.x-forwarded-for"] != nil
+              - set(attributes["x_real_ip"], attributes["http.request.header.x-real-ip"]) where attributes["http.request.header.x-real-ip"] != nil
+              - set(attributes["client.address"], attributes["network.peer.address"]) where attributes["network.peer.address"] != nil and IsMatch(attributes["network.peer.address"], "^[0-9]+\\.[0-9]+\\.[0-9]+\\.[0-9]+$")
+              - set(attributes["client.ip"], attributes["network.peer.address"]) where attributes["network.peer.address"] != nil and IsMatch(attributes["network.peer.address"], "^[0-9]+\\.[0-9]+\\.[0-9]+\\.[0-9]+$")
+              # 8. Set span status to ERROR (2) for HTTP 4xx and 5xx responses
+              - set(status.code, 2) where attributes["http.response.status_code"] >= 400 or attributes["http.status_code"] >= 400
+              # 9. Normalize byte sizes for Elastic APM Server compatibility (ECS & legacy semconv)
+              - set(attributes["http.request_content_length"], attributes["http.request.body.size"]) where attributes["http.request_content_length"] == nil and attributes["http.request.body.size"] != nil
+              - set(attributes["http.response_content_length"], attributes["http.response.body.size"]) where attributes["http.response_content_length"] == nil and attributes["http.response.body.size"] != nil
+              - set(attributes["http.request.bytes"], attributes["http.request.body.size"]) where attributes["http.request.bytes"] == nil and attributes["http.request.body.size"] != nil
+              - set(attributes["http.response.bytes"], attributes["http.response.body.size"]) where attributes["http.response.bytes"] == nil and attributes["http.response.body.size"] != nil
+              # 10. Normalize network & socket attributes matching Elastic APM ECS format
+              - set(attributes["net.protocol.name"], "http") where attributes["net.protocol.name"] == nil
+              - set(attributes["net.protocol.version"], attributes["network.protocol.version"]) where attributes["net.protocol.version"] == nil and attributes["network.protocol.version"] != nil
+              - set(attributes["net.sock.peer.addr"], attributes["network.peer.address"]) where attributes["net.sock.peer.addr"] == nil and attributes["network.peer.address"] != nil
+              - set(attributes["net.sock.peer.addr"], attributes["client.address"]) where attributes["net.sock.peer.addr"] == nil and attributes["client.address"] != nil
+              - set(attributes["net.sock.peer.port"], attributes["network.peer.port"]) where attributes["net.sock.peer.port"] == nil and attributes["network.peer.port"] != nil
+              - set(attributes["net.sock.host.addr"], attributes["server.address"]) where attributes["net.sock.host.addr"] == nil and attributes["server.address"] != nil
+              # 11. Normalize User Agent
+              - set(attributes["user_agent.original"], attributes["http.request.header.user-agent"]) where attributes["user_agent.original"] == nil and attributes["http.request.header.user-agent"] != nil
+              # 12. Normalize HTTP Route
+              - set(attributes["http.route"], attributes["url.path"]) where attributes["http.route"] == nil and attributes["url.path"] != nil
+      transform/redact:
+        error_mode: ignore
+        trace_statements:
+          - context: span
+            statements:
+              - delete_key(attributes, "http.request.header.x-wsse")
+              - delete_key(attributes, "http.request.body.content")
+              - delete_key(attributes, "http.response.body.content")
+
+    exporters:
+      otlp_http/tracescope:
+        endpoint: http://tracescope-ingest.tracescope.svc.cluster.local:30103
+        encoding: proto
+        compression: gzip
+        timeout: 10s
+
+    service:
+      pipelines:
+        traces:
+          receivers: [otlp]
+          processors:
+            - memory_limiter
+            - filter/drop_internal_spans
+            - transform/wsse
+            - transform/redact
+            - batch
+          exporters:
+            - otlp_http/tracescope
+      telemetry:
+        logs:
+          level: info
+        metrics:
+          level: none
+
+---
+# Source: tracescope-obi/templates/obi-configmap.yaml
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: tracescope-obi
+  namespace: tracescope
+  labels:
+    helm.sh/chart: tracescope-obi-0.2.0
+    app.kubernetes.io/instance: tracescope-obi
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/part-of: tracescope
+    app.kubernetes.io/name: tracescope-obi
+data:
+  obi.yml: |
+    attributes:
+      kubernetes:
+        enable: true
+    discovery:
+      exclude_instrument:
+      - k8s_namespace: kube-system
+      instrument:
+      - k8s_namespace: default
+    ebpf:
+      buffer_sizes:
+        http: 2048
+      payload_extraction:
+        http:
+          enrichment:
+            enabled: true
+            policy:
+              default_action:
+                body: exclude
+                headers: exclude
+            rules:
+            - action: include
+              match:
+                patterns:
+                - content-type
+                - soapaction
+                - x-forwarded-for
+                - x-real-ip
+                - x-wsse
+                - authorization
+                - user-agent
+              scope: request
+              type: headers
+            - action: include
+              match:
+                methods:
+                - POST
+                - PUT
+              scope: request
+              type: body
+            - action: include
+              match:
+                methods:
+                - POST
+                - PUT
+              scope: response
+              type: body
+      track_request_headers: true
+    log_level: info
+    otel_traces_export:
+      endpoint: http://tracescope-obi-collector.tracescope.svc.cluster.local:4317
+      protocol: grpc
+
+---
+# Source: tracescope-obi/templates/obi-rbac.yaml
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: tracescope-obi
+  labels:
+    helm.sh/chart: tracescope-obi-0.2.0
+    app.kubernetes.io/instance: tracescope-obi
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/part-of: tracescope
+    app.kubernetes.io/name: tracescope-obi
+rules:
+  - apiGroups: [""]
+    resources:
+      - pods
+      - services
+      - nodes
+      - namespaces
+    verbs: [get, list, watch]
+  - apiGroups: ["apps"]
+    resources: [replicasets, deployments, daemonsets, statefulsets]
+    verbs: [get, list, watch]
+
+---
+# Source: tracescope-obi/templates/obi-rbac.yaml
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: tracescope-obi
+  labels:
+    helm.sh/chart: tracescope-obi-0.2.0
+    app.kubernetes.io/instance: tracescope-obi
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/part-of: tracescope
+    app.kubernetes.io/name: tracescope-obi
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: tracescope-obi
+subjects:
+  - kind: ServiceAccount
+    name: tracescope-obi
+    namespace: tracescope
+
+---
+# Source: tracescope-obi/templates/collector-service.yaml
+apiVersion: v1
+kind: Service
+metadata:
+  name: tracescope-obi-collector
+  namespace: tracescope
+  labels:
+    helm.sh/chart: tracescope-obi-0.2.0
+    app.kubernetes.io/instance: tracescope-obi
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/part-of: tracescope
+    app.kubernetes.io/name: tracescope-obi-collector
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: tracescope-obi-collector
+    app.kubernetes.io/instance: tracescope-obi
+  ports:
+    - name: otlp-grpc
+      port: 4317
+      targetPort: 4317
+    - name: otlp-http
+      port: 4318
+      targetPort: 4318
+    - name: metrics
+      port: 8888
+      targetPort: 8888
+
+---
+# Source: tracescope-obi/templates/obi-daemonset.yaml
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: tracescope-obi
+  namespace: tracescope
+  labels:
+    helm.sh/chart: tracescope-obi-0.2.0
+    app.kubernetes.io/instance: tracescope-obi
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/part-of: tracescope
+    app.kubernetes.io/name: tracescope-obi
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: tracescope-obi
+      app.kubernetes.io/instance: tracescope-obi
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: tracescope-obi
+        app.kubernetes.io/instance: tracescope-obi
+        obi.variant: custom
+      annotations:
+        checksum/config: 3c154ba3b38441db293b5b2185b75da8e7cc69429259d6a448072aee8289a338
+    spec:
+      serviceAccountName: tracescope-obi
+      hostPID: true
+      hostNetwork: true
+      dnsPolicy: ClusterFirstWithHostNet
+      tolerations:
+        - effect: NoSchedule
+          operator: Exists
+        - effect: NoExecute
+          operator: Exists
+      containers:
+        - name: obi
+          image: "xhatsu101/ebpf-instrument:xmlCustom-0.13.0"
+          imagePullPolicy: IfNotPresent
+          securityContext:
+            privileged: true
+          env:
+            - name: OTEL_EBPF_CONFIG_PATH
+              value: /etc/obi/obi.yml
+            - name: OTEL_METRICS_EXPORTER
+              value: "none"
+            - name: OTEL_LOGS_EXPORTER
+              value: "none"
+            - name: OTEL_EBPF_KUBE_METADATA_ENABLE
+              value: "true"
+          volumeMounts:
+            - name: config
+              mountPath: /etc/obi
+            - name: sys-kernel-debug
+              mountPath: /sys/kernel/debug
+            - name: sys-fs-cgroup
+              mountPath: /sys/fs/cgroup
+            - name: sys-fs-bpf
+              mountPath: /sys/fs/bpf
+          resources:
+            limits:
+              cpu: 500m
+              memory: 512Mi
+            requests:
+              cpu: 100m
+              memory: 128Mi
+      volumes:
+        - name: config
+          configMap:
+            name: tracescope-obi
+        - name: sys-kernel-debug
+          hostPath:
+            path: /sys/kernel/debug
+        - name: sys-fs-cgroup
+          hostPath:
+            path: /sys/fs/cgroup
+        - name: sys-fs-bpf
+          hostPath:
+            path: /sys/fs/bpf
+
+---
+# Source: tracescope-obi/templates/collector-deployment.yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: tracescope-obi-collector
+  namespace: tracescope
+  labels:
+    helm.sh/chart: tracescope-obi-0.2.0
+    app.kubernetes.io/instance: tracescope-obi
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/part-of: tracescope
+    app.kubernetes.io/name: tracescope-obi-collector
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: tracescope-obi-collector
+      app.kubernetes.io/instance: tracescope-obi
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: tracescope-obi-collector
+        app.kubernetes.io/instance: tracescope-obi
+      annotations:
+        checksum/config: e9b02ad63962ea6d009fa42adb8d31a15c6e8962456dffb62e3377d912495682
+    spec:
+      containers:
+        - name: collector
+          image: "otel/opentelemetry-collector-contrib:0.161.0"
+          imagePullPolicy: IfNotPresent
+          args:
+            - "--config=/etc/otelcol-contrib/config.yaml"
+          ports:
+            - name: otlp-grpc
+              containerPort: 4317
+            - name: otlp-http
+              containerPort: 4318
+            - name: metrics
+              containerPort: 8888
+          resources:
+            limits:
+              cpu: 500m
+              memory: 512Mi
+            requests:
+              cpu: 100m
+              memory: 128Mi
+          volumeMounts:
+            - name: config
+              mountPath: /etc/otelcol-contrib
+      volumes:
+        - name: config
+          configMap:
+            name: tracescope-obi-collector

@@ -56,8 +56,15 @@ class AggregateRepository:
         caller: Optional[str] = None,
         operation: Optional[str] = None,
     ) -> List[Dict[str, Any]]:
-        clauses = ["bucket_size = ?", "bucket_start >= ?", "bucket_start < ?"]
-        args: List[Any] = [bucket_size, start_sec, end_sec]
+        now_sec = int(time.time())
+        settled_cutoff_sec = now_sec - 60
+        effective_end_sec = min(end_sec, settled_cutoff_sec)
+        if effective_end_sec - bucket_size >= start_sec:
+            clauses = ["bucket_size = ?", "bucket_start >= ?", "bucket_start <= ?"]
+            args: List[Any] = [bucket_size, start_sec, effective_end_sec - bucket_size]
+        else:
+            clauses = ["bucket_size = ?", "bucket_start >= ?", "bucket_start < ?"]
+            args: List[Any] = [bucket_size, start_sec, end_sec]
         if service:
             clauses.append("target_service = ?")
             args.append(service)

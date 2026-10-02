@@ -3,6 +3,7 @@ apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
   name: {{ include "tracescope.fullname" . }}-clickhouse-data
+  namespace: {{ .Release.Namespace }}
   labels:
     {{- include "tracescope.labels" . | nindent 4 }}
     app.kubernetes.io/component: clickhouse

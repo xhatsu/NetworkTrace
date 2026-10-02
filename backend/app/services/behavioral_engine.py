@@ -169,10 +169,11 @@ def evaluate_readiness(
     if detector in {"AUTH_FAILURE_BURST", "FAILURE_THEN_SUCCESS", "SOURCE_IDENTITY_FANOUT", "DATA_QUALITY_GAP", "NEW_PRINCIPAL_ON_SOURCE"}:
         return True, "ready"
 
+    # Ingest-maintained aggregate (fed by trace inserts, no TTL); never reads raw traces.
     row = db.execute(
-        "SELECT MIN(timestamp_ms), MAX(timestamp_ms), COUNT(DISTINCT timestamp_ms / 86400000), COUNT(*) "
-        "FROM traces WHERE principal_id = ? OR (principal_id IS NULL AND principal_name = ?)",
-        (principal_id, p_name)
+        "SELECT minMerge(first_seen_state), maxMerge(last_seen_state), uniqExactMerge(active_days_state), "
+        "countMerge(observation_count_state) FROM principal_readiness_summary WHERE principal_id = ?",
+        (principal_id,)
     ).fetchone()
 
     return evaluate_readiness_from_stats(row, detector, current_time_ms)
@@ -655,18 +656,41 @@ def emit_behavioral_change(
 # -----------------------------------------------------------------------------
 # 6. Advanced Behavioral Detectors & Telemetry Gates
 # -----------------------------------------------------------------------------
+#
+# Detectors read the five-minute per-credential rollup (principal_activity_5m), never
+# raw traces. A window [start, end) covers the buckets starting in
+# [floor5(start), end); history is every earlier bucket the rollup still retains.
+
+ACTIVITY = "principal_activity_5m FINAL"
+ACTIVITY_BUCKET_MS = 300_000
+
+
+def _window_floor(window_start_ms: int) -> int:
+    return int(window_start_ms) // ACTIVITY_BUCKET_MS * ACTIVITY_BUCKET_MS
+
+
+def _sample_traces(db, where_sql: str, params: tuple) -> List[str]:
+    """Up to three representative trace IDs kept by the rollup rows that match."""
+    row = db.execute(
+        f"SELECT groupUniqArrayArray(3)(sample_trace_ids) FROM {ACTIVITY} WHERE {where_sql}", params,
+    ).fetchone()
+    return [str(trace_id) for trace_id in (row[0] if row and row[0] else [])][:3]
 
 def detect_telemetry_quality_gates(db, window_start_ms: int, window_end_ms: int) -> dict[str, Any]:
     """
-    Evaluates telemetry health in the window:
+    Evaluates telemetry health in the window from the worker's one-minute metric buckets:
     - Collection gap: 0 requests during normally active periods
-    - Caller linkage rate: fraction of server spans with reliable caller attribution
+    - Caller linkage rate: fraction of requests with reliable caller attribution
     - Username extraction rate: fraction of requests with known principal
     """
-    total_spans = db.execute(
-        "SELECT COUNT(*) FROM traces WHERE timestamp_ms >= ? AND timestamp_ms < ?",
-        (window_start_ms, window_end_ms)
-    ).fetchone()[0]
+    row = db.execute(
+        "SELECT sum(request_count), "
+        "sumIf(request_count, caller_service NOT IN ('', 'unknown')), "
+        "sumIf(request_count, principal_name NOT IN ('', 'unknown')) "
+        "FROM metric_buckets FINAL WHERE bucket_size = 60 AND bucket_start >= ? AND bucket_start < ?",
+        (window_start_ms // 1000, -(-window_end_ms // 1000))
+    ).fetchone()
+    total_spans = int(row[0] or 0) if row else 0
 
     if total_spans == 0:
         return {
@@ -676,17 +700,8 @@ def detect_telemetry_quality_gates(db, window_start_ms: int, window_end_ms: int)
             "sampling_ratio": 1.0,
         }
 
-    linked_callers = db.execute(
-        "SELECT COUNT(*) FROM traces WHERE timestamp_ms >= ? AND timestamp_ms < ? "
-        "AND caller_service IS NOT NULL AND caller_service NOT IN ('', 'unknown')",
-        (window_start_ms, window_end_ms)
-    ).fetchone()[0]
-
-    extracted_users = db.execute(
-        "SELECT COUNT(*) FROM traces WHERE timestamp_ms >= ? AND timestamp_ms < ? "
-        "AND principal_name IS NOT NULL AND principal_name NOT IN ('', 'unknown')",
-        (window_start_ms, window_end_ms)
-    ).fetchone()[0]
+    linked_callers = int(row[1] or 0)
+    extracted_users = int(row[2] or 0)
 
     caller_linkage_rate = linked_callers / float(total_spans)
     username_rate = extracted_users / float(total_spans)
@@ -719,27 +734,28 @@ def detect_operation_mix_shift(
     ready, _ = evaluate_readiness(db, principal_id, "OPERATION_MIX_SHIFT", window_end_ms)
     if not ready:
         return None
+    window_floor = _window_floor(window_start_ms)
 
     # Current window operations for this principal + target
-    current_rows = db.execute("""
-        SELECT operation_key, COUNT(*) as cnt
-        FROM traces
+    current_rows = db.execute(f"""
+        SELECT operation_key, sum(request_count) AS cnt
+        FROM {ACTIVITY}
         WHERE principal_id = ? AND target_service = ?
-          AND timestamp_ms >= ? AND timestamp_ms < ?
+          AND bucket_start_ms >= ? AND bucket_start_ms < ?
         GROUP BY operation_key
-    """, (principal_id, target_service, window_start_ms, window_end_ms)).fetchall()
+    """, (principal_id, target_service, window_floor, window_end_ms)).fetchall()
 
     current_total = sum(r[1] for r in current_rows)
     if current_total < 100:
         return None
 
     # Historical baseline shares (prior to current window)
-    hist_rows = db.execute("""
-        SELECT operation_key, COUNT(*) as cnt
-        FROM traces
-        WHERE principal_id = ? AND target_service = ? AND timestamp_ms < ?
+    hist_rows = db.execute(f"""
+        SELECT operation_key, sum(request_count) AS cnt
+        FROM {ACTIVITY}
+        WHERE principal_id = ? AND target_service = ? AND bucket_start_ms < ?
         GROUP BY operation_key
-    """, (principal_id, target_service, window_start_ms)).fetchall()
+    """, (principal_id, target_service, window_floor)).fetchall()
 
     hist_total = sum(r[1] for r in hist_rows)
     if hist_total < 200:
@@ -753,10 +769,10 @@ def detect_operation_mix_shift(
         # Shift >= 20 percentage points (0.20)
         if cur_share >= (base_share + 0.20) and cur_cnt >= 25:
             delta_pct = round((cur_share - base_share) * 100, 1)
-            traces = [r[0] for r in db.execute(
-                "SELECT trace_id FROM traces WHERE principal_id = ? AND target_service = ? AND operation_key = ? AND timestamp_ms >= ? LIMIT 3",
-                (principal_id, target_service, op_key, window_start_ms)
-            ).fetchall()]
+            traces = _sample_traces(
+                db, "principal_id = ? AND target_service = ? AND operation_key = ? AND bucket_start_ms >= ?",
+                (principal_id, target_service, op_key, window_floor),
+            )
 
             return emit_behavioral_change(
                 db,
@@ -787,28 +803,28 @@ def detect_caller_principal_switch(
     """
     if not caller_service or caller_service == "unknown":
         return None
+    window_floor = _window_floor(window_start_ms)
 
     # Current window identities for this caller + target + operation
-    current_rows = db.execute("""
-        SELECT principal_id, principal_name, COUNT(*) as cnt
-        FROM traces
+    current_rows = db.execute(f"""
+        SELECT principal_id, any(principal_name), sum(request_count) AS cnt
+        FROM {ACTIVITY}
         WHERE caller_service = ? AND target_service = ? AND operation_key = ?
-          AND timestamp_ms >= ? AND timestamp_ms < ?
-          AND principal_name IS NOT NULL AND principal_name NOT IN ('unknown', '-anonymous-', 'anonymous', '')
-        GROUP BY principal_id, principal_name
-    """, (caller_service, target_service, operation_key, window_start_ms, window_end_ms)).fetchall()
+          AND bucket_start_ms >= ? AND bucket_start_ms < ?
+        GROUP BY principal_id
+    """, (caller_service, target_service, operation_key, window_floor, window_end_ms)).fetchall()
 
     if not current_rows:
         return None
 
     # Historical dominant identity
-    hist_rows = db.execute("""
-        SELECT principal_id, COUNT(*) as cnt
-        FROM traces
+    hist_rows = db.execute(f"""
+        SELECT principal_id, sum(request_count) AS cnt
+        FROM {ACTIVITY}
         WHERE caller_service = ? AND target_service = ? AND operation_key = ?
-          AND timestamp_ms < ? AND principal_name IS NOT NULL AND principal_name NOT IN ('unknown', '-anonymous-', 'anonymous', '')
+          AND bucket_start_ms < ?
         GROUP BY principal_id ORDER BY cnt DESC
-    """, (caller_service, target_service, operation_key, window_start_ms)).fetchall()
+    """, (caller_service, target_service, operation_key, window_floor)).fetchall()
 
     hist_total = sum(r[1] for r in hist_rows)
     if hist_total < 100:
@@ -821,10 +837,10 @@ def detect_caller_principal_switch(
     if usual_share >= 0.80:
         for cur_pid, cur_pname, cur_cnt in current_rows:
             if cur_pid != usual_principal_id and cur_cnt >= 10:
-                traces = [r[0] for r in db.execute(
-                    "SELECT trace_id FROM traces WHERE caller_service = ? AND target_service = ? AND principal_id = ? AND timestamp_ms >= ? LIMIT 3",
-                    (caller_service, target_service, cur_pid, window_start_ms)
-                ).fetchall()]
+                traces = _sample_traces(
+                    db, "caller_service = ? AND target_service = ? AND principal_id = ? AND bucket_start_ms >= ?",
+                    (caller_service, target_service, cur_pid, window_floor),
+                )
 
                 return emit_behavioral_change(
                     db,
@@ -855,23 +871,24 @@ def detect_target_fanout_surge(
     ready, _ = evaluate_readiness(db, principal_id, "TARGET_FANOUT_SURGE", window_end_ms)
     if not ready:
         return None
+    window_floor = _window_floor(window_start_ms)
 
-    cur_targets = db.execute("""
-        SELECT COUNT(DISTINCT target_service)
-        FROM traces
-        WHERE principal_id = ? AND timestamp_ms >= ? AND timestamp_ms < ?
-    """, (principal_id, window_start_ms, window_end_ms)).fetchone()[0]
+    cur_targets = db.execute(f"""
+        SELECT uniqExact(target_service)
+        FROM {ACTIVITY}
+        WHERE principal_id = ? AND bucket_start_ms >= ? AND bucket_start_ms < ?
+    """, (principal_id, window_floor, window_end_ms)).fetchone()[0]
 
     if cur_targets < 3:
         return None
 
     # Historical median and max targets per 15-minute window
-    hist_counts = [r[0] for r in db.execute("""
-        SELECT COUNT(DISTINCT target_service) as cnt
-        FROM traces
-        WHERE principal_id = ? AND timestamp_ms < ?
-        GROUP BY (timestamp_ms / 900000)
-    """, (principal_id, window_start_ms)).fetchall()]
+    hist_counts = [r[0] for r in db.execute(f"""
+        SELECT uniqExact(target_service) AS cnt
+        FROM {ACTIVITY}
+        WHERE principal_id = ? AND bucket_start_ms < ?
+        GROUP BY intDiv(bucket_start_ms, 900000)
+    """, (principal_id, window_floor)).fetchall()]
 
     if len(hist_counts) < 10:
         return None
@@ -903,23 +920,24 @@ def detect_source_fanout_surge(
     Counts distinct reliable source hosts/groups per principal per window.
     Excludes untrusted forwarded addresses.
     """
-    cur_sources = db.execute("""
-        SELECT COUNT(DISTINCT source_group)
-        FROM traces
-        WHERE principal_id = ? AND timestamp_ms >= ? AND timestamp_ms < ?
-          AND source_group IS NOT NULL AND source_group != 'other'
-    """, (principal_id, window_start_ms, window_end_ms)).fetchone()[0]
+    window_floor = _window_floor(window_start_ms)
+    cur_sources = db.execute(f"""
+        SELECT uniqExact(source_group)
+        FROM {ACTIVITY}
+        WHERE principal_id = ? AND bucket_start_ms >= ? AND bucket_start_ms < ?
+          AND source_group NOT IN ('', 'other')
+    """, (principal_id, window_floor, window_end_ms)).fetchone()[0]
 
     if cur_sources < 3:
         return None
 
-    hist_counts = [r[0] for r in db.execute("""
-        SELECT COUNT(DISTINCT source_group)
-        FROM traces
-        WHERE principal_id = ? AND timestamp_ms < ?
-          AND source_group IS NOT NULL AND source_group != 'other'
-        GROUP BY (timestamp_ms / 900000)
-    """, (principal_id, window_start_ms)).fetchall()]
+    hist_counts = [r[0] for r in db.execute(f"""
+        SELECT uniqExact(source_group)
+        FROM {ACTIVITY}
+        WHERE principal_id = ? AND bucket_start_ms < ?
+          AND source_group NOT IN ('', 'other')
+        GROUP BY intDiv(bucket_start_ms, 900000)
+    """, (principal_id, window_floor)).fetchall()]
 
     if len(hist_counts) < 10:
         return None
@@ -954,11 +972,12 @@ def detect_principal_rate_surge(
     ready, _ = evaluate_readiness(db, principal_id, "PRINCIPAL_RATE_SURGE", window_end_ms)
     if not ready:
         return None
+    window_floor = _window_floor(window_start_ms)
 
-    current_count = db.execute("""
-        SELECT COUNT(*) FROM traces
-        WHERE principal_id = ? AND timestamp_ms >= ? AND timestamp_ms < ?
-    """, (principal_id, window_start_ms, window_end_ms)).fetchone()[0]
+    current_count = db.execute(f"""
+        SELECT sum(request_count) FROM {ACTIVITY}
+        WHERE principal_id = ? AND bucket_start_ms >= ? AND bucket_start_ms < ?
+    """, (principal_id, window_floor, window_end_ms)).fetchone()[0] or 0
 
     if current_count < 50:
         return None
@@ -967,12 +986,12 @@ def detect_principal_rate_surge(
     hod = dt.hour
 
     # Fetch counts for same hour-of-day in past windows
-    hist_counts = [r[0] for r in db.execute("""
-        SELECT COUNT(*) as cnt FROM traces
-        WHERE principal_id = ? AND timestamp_ms < ?
-          AND CAST(strftime('%H', timestamp_ms/1000, 'unixepoch') AS INTEGER) = ?
-        GROUP BY (timestamp_ms / 900000)
-    """, (principal_id, window_start_ms, hod)).fetchall()]
+    hist_counts = [r[0] for r in db.execute(f"""
+        SELECT sum(request_count) AS cnt FROM {ACTIVITY}
+        WHERE principal_id = ? AND bucket_start_ms < ?
+          AND toHour(toDateTime(intDiv(bucket_start_ms, 1000), 'UTC')) = ?
+        GROUP BY intDiv(bucket_start_ms, 900000)
+    """, (principal_id, window_floor, hod)).fetchall()]
 
     if len(hist_counts) < 5:
         return None
@@ -1004,36 +1023,42 @@ def detect_explicit_auth_anomalies(
     Detects explicit authentication anomalies:
     - AUTH_FAILURE_BURST: >= 5 explicit auth failures in window
     - FAILURE_THEN_SUCCESS: Explicit failure followed by explicit success in same window
+
+    Success after failure is judged per five-minute rollup row: a row in the same
+    caller/source/target scope whose latest success is later than the latest failure.
     """
     p_name = principal_id.split(":")[-1] if ":" in principal_id else principal_id
     if not p_name or p_name in ("-anonymous-", "unknown", "anonymous", ""):
         return []
 
     events_emitted = []
+    window_floor = _window_floor(window_start_ms)
 
     # Check explicit auth failure count
-    failures = db.execute("""
-        SELECT caller_service, caller_ip, target_service, auth_evidence, COUNT(*) as cnt, MIN(timestamp_ms), MAX(timestamp_ms)
-        FROM traces
-        WHERE principal_id = ? AND auth_result = 'failure'
-          AND timestamp_ms >= ? AND timestamp_ms < ?
-        GROUP BY caller_service, caller_ip, target_service, auth_evidence
-    """, (principal_id, window_start_ms, window_end_ms)).fetchall()
+    failures = db.execute(f"""
+        SELECT caller_service, source_ip, target_service, auth_evidence,
+               sum(auth_failure_count) AS cnt, max(last_failure_ms)
+        FROM {ACTIVITY}
+        WHERE principal_id = ? AND auth_failure_count > 0
+          AND bucket_start_ms >= ? AND bucket_start_ms < ?
+        GROUP BY caller_service, source_ip, target_service, auth_evidence
+    """, (principal_id, window_floor, window_end_ms)).fetchall()
 
-    for caller, ip, target, evidence, cnt, first_ts, last_ts in failures:
+    for caller, ip, target, evidence, cnt, last_ts in failures:
         if cnt >= 5:
-            traces = [r[0] for r in db.execute(
-                "SELECT trace_id FROM traces WHERE principal_id = ? AND auth_result = 'failure' AND timestamp_ms >= ? LIMIT 3",
-                (principal_id, window_start_ms)
-            ).fetchall()]
+            traces = _sample_traces(
+                db, "principal_id = ? AND auth_failure_count > 0 AND bucket_start_ms >= ?",
+                (principal_id, window_floor),
+            )
 
             # Check if followed by explicit success
-            success_after = db.execute("""
-                SELECT COUNT(*) FROM traces
-                WHERE principal_id = ? AND auth_result = 'success'
-                  AND timestamp_ms > ? AND timestamp_ms < ?
-                  AND caller_service = ? AND caller_ip = ? AND target_service = ?
-            """, (principal_id, last_ts, window_end_ms, caller, ip, target)).fetchone()[0]
+            success_after = db.execute(f"""
+                SELECT sum(auth_success_count) FROM {ACTIVITY}
+                WHERE principal_id = ? AND auth_success_count > 0
+                  AND last_success_ms > ? AND bucket_start_ms < ?
+                  AND bucket_start_ms >= ?
+                  AND caller_service = ? AND source_ip = ? AND target_service = ?
+            """, (principal_id, last_ts, window_end_ms, window_floor, caller, ip, target)).fetchone()[0] or 0
 
             if success_after > 0:
                 ev_id = emit_behavioral_change(

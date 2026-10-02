@@ -13,6 +13,8 @@ from backend.app.repositories.aggregate_repository import AggregateRepository
 from backend.app.repositories.db_context import db_transaction, get_connection
 from backend.app.repositories.topology_repository import TopologyRepository
 from backend.app.repositories.interactive_topology_repository import InteractiveTopologyRepository
+from backend.app.services.principal_activity import materialize_principal_activity
+from backend.app.services.trace_edge_resolution import resolve_slice, traces_source_sql
 
 FIVE_MINUTES_MS = 300_000
 AGGREGATION_SLICE_MS = 6 * 60 * 60 * 1000
@@ -47,7 +49,7 @@ SELECT
     0.9499999999999998,
     0.9899999999999999
   )(duration_ms) AS latency_quantiles
-FROM traces
+FROM __TRACES__
 WHERE timestamp_ms >= {start_ms:Int64} AND timestamp_ms < {end_ms:Int64}
 GROUP BY
   bucket_start, bucket_size, caller_service, target_service, principal_name, operation_dimension
@@ -70,7 +72,7 @@ SELECT
   countIfState(toUInt8(ifNull(http_status >= 400 OR outcome = 'failure', false))) AS error_count_state,
   sumState(toFloat64(duration_ms)) AS latency_sum_state,
   quantilesTDigestState(0.5, 0.95, 0.99)(toFloat64(duration_ms)) AS latency_quantiles_state
-FROM traces
+FROM __TRACES__
 WHERE timestamp_ms >= {start_ms:Int64} AND timestamp_ms < {end_ms:Int64}
 GROUP BY
   bucket_start, bucket_size, caller_service, target_service, principal_name, operation
@@ -123,7 +125,7 @@ def _query_bucket_rows(
     db: Any, bucket_size: int, start_ms: int, end_ms: int
 ) -> List[Dict[str, Any]]:
     result = db.client.query(
-        _BUCKET_AGGREGATION_SQL,
+        _BUCKET_AGGREGATION_SQL.replace("__TRACES__", traces_source_sql()),
         parameters={
             "bucket_ms": bucket_size * 1000,
             "bucket_seconds": bucket_size,
@@ -152,7 +154,7 @@ def _write_shadow_slice(start_ms: int, end_ms: int, db_path: Optional[str]) -> N
                 (bucket_size, start_ms // 1000, (end_ms + 999) // 1000),
             )
             db.client.command(
-                _SHADOW_AGGREGATION_SQL,
+                _SHADOW_AGGREGATION_SQL.replace("__TRACES__", traces_source_sql()),
                 parameters={
                     "bucket_ms": bucket_size * 1000,
                     "bucket_seconds": bucket_size,
@@ -192,6 +194,7 @@ def _aggregate_slice(start_ms: int, end_ms: int, db_path: Optional[str]) -> Dict
     """Recompute one bounded slice while fetching only SQL-completed bucket rows."""
     agg_repo = AggregateRepository(db_path)
     top_repo = TopologyRepository(db_path)
+    resolved = resolve_slice(start_ms, end_ms, db_path)
     with get_connection(db_path) as db:
         rows_1m = _query_bucket_rows(db, 60, start_ms, end_ms)
         rows_5m = _query_bucket_rows(db, 300, start_ms, end_ms)
@@ -234,6 +237,10 @@ def _aggregate_slice(start_ms: int, end_ms: int, db_path: Optional[str]) -> Dict
             principal_edge["errors"] += errors
             principal_edge["p95"] = max(principal_edge["p95"], p95)
 
+    if resolved["resolved_rows"]:
+        # A re-resolved span can change its caller, which changes the bucket key.
+        # Replacement by key would leave the old caller's rows behind and double count.
+        agg_repo.delete_window(start_ms // 1000, (end_ms + 999) // 1000)
     agg_repo.save_buckets(buckets_1m)
     agg_repo.save_buckets(buckets_5m)
     _write_shadow_slice(start_ms, end_ms, db_path)
@@ -280,6 +287,8 @@ def _aggregate_slice(start_ms: int, end_ms: int, db_path: Optional[str]) -> Dict
     # It is a no-op in Elasticsearch mode, where the read repository performs
     # server-side aggregations against the configured ELK index.
     InteractiveTopologyRepository(db_path).materialize_slice(start_ms, end_ms)
+    # User behavior reads only this per-credential rollup, never raw traces.
+    materialize_principal_activity(start_ms, end_ms, db_path)
     raw_rows = sum(bucket.request_count for bucket in buckets_1m)
     all_bucket_rows = len(buckets_1m) + len(buckets_5m)
     log.info(json.dumps({

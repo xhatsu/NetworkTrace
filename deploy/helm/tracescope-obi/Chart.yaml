@@ -1,0 +1,12 @@
+apiVersion: v2
+name: tracescope-obi
+description: OpenTelemetry eBPF Instrumentation (OBI) and OpenTelemetry Collector feeding TraceScope (via Elastic APM or directly over OTLP)
+type: application
+version: 0.2.0
+appVersion: "0.13.0"
+keywords:
+  - opentelemetry
+  - ebpf
+  - obi
+  - collector
+  - tracescope

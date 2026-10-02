@@ -86,7 +86,7 @@ class StorageRepository:
                         COUNT(DISTINCT target_service) AS active_services,
                         COUNT(DISTINCT principal_name) AS active_accounts,
                         COALESCE(MAX(latency_p95), 0.0) AS p95_latency_ms
-                    FROM metric_buckets
+                    FROM metric_buckets FINAL
                     WHERE {where}
                 """, args).fetchone()
 
@@ -105,7 +105,7 @@ class StorageRepository:
                 ).fetchone()
                 active_anomalies = int(anom_row[0]) if anom_row else 0
 
-                latest_row = db.execute("SELECT MAX(bucket_start+bucket_size)*1000 FROM metric_buckets WHERE bucket_size=300").fetchone()
+                latest_row = db.execute("SELECT MAX(bucket_start+bucket_size)*1000 FROM metric_buckets FINAL WHERE bucket_size=300").fetchone()
                 latest = int(latest_row[0]) if (latest_row and latest_row[0]) else None
 
                 try:
@@ -192,8 +192,17 @@ class StorageRepository:
                 else:  # 30d preset = 720h or longer
                     grain_sec = 3600
 
-                clauses = ["bucket_size = 60", "bucket_start >= ?", "bucket_start < ?"]
-                args: list[Any] = [start_sec, end_sec]
+                now_sec = int(time.time())
+                # Exclude incomplete in-progress buckets when querying live ranges so rates are not deflated
+                settled_cutoff_sec = now_sec - 60
+                effective_end_sec = min(end_sec, settled_cutoff_sec)
+                if effective_end_sec - grain_sec >= start_sec:
+                    clauses = ["bucket_size = 60", "bucket_start >= ?", "bucket_start <= ?"]
+                    args: list[Any] = [start_sec, effective_end_sec - grain_sec]
+                else:
+                    clauses = ["bucket_size = 60", "bucket_start >= ?", "bucket_start < ?"]
+                    args: list[Any] = [start_sec, end_sec]
+
                 if filters.get("service"):
                     clauses.append("target_service = ?")
                     args.append(filters["service"])
@@ -203,6 +212,9 @@ class StorageRepository:
                 if filters.get("account"):
                     clauses.append("principal_name = ?")
                     args.append(filters["account"])
+                if filters.get("caller"):
+                    clauses.append("caller_service = ?")
+                    args.append(filters["caller"])
                 where = " AND ".join(clauses)
 
                 if grain_sec == 60:
@@ -219,7 +231,7 @@ class StorageRepository:
                             COUNT(DISTINCT principal_name) AS active_users,
                             COUNT(DISTINCT target_service) AS active_services,
                             bucket_start
-                        FROM metric_buckets
+                        FROM metric_buckets FINAL
                         WHERE {where}
                         GROUP BY bucket_start
                         ORDER BY bucket_start ASC
@@ -238,7 +250,7 @@ class StorageRepository:
                             COUNT(DISTINCT principal_name) AS active_users,
                             COUNT(DISTINCT target_service) AS active_services,
                             (intDiv(bucket_start, {grain_sec}) * {grain_sec}) AS bucket_start
-                        FROM metric_buckets
+                        FROM metric_buckets FINAL
                         WHERE {where}
                         GROUP BY timestamp_ms, bucket_start
                         ORDER BY timestamp_ms ASC
@@ -246,12 +258,28 @@ class StorageRepository:
 
                 baseline_lookup: dict[tuple[int, int], float] = {}
                 try:
-                    if filters.get("service"):
+                    if filters.get("account") and filters.get("service"):
                         b_rows = db.execute("""
                             SELECT hour_of_day, day_of_week, rps_median
                             FROM baseline_metrics FINAL
-                            WHERE dimension_type = 'service' AND dimension_key = ?
-                        """, (filters["service"],)).fetchall()
+                            WHERE dimension_type = 'principal_target' AND dimension_key = ?
+                        """, (f"{filters['account']}->{filters['service']}",)).fetchall()
+                        for br in b_rows:
+                            baseline_lookup[(int(br["hour_of_day"]), int(br["day_of_week"]))] = float(br["rps_median"])
+                    elif filters.get("caller") and filters.get("service"):
+                        b_rows = db.execute("""
+                            SELECT hour_of_day, day_of_week, rps_median
+                            FROM baseline_metrics FINAL
+                            WHERE dimension_type = 'caller_target' AND dimension_key = ?
+                        """, (f"{filters['caller']}->{filters['service']}",)).fetchall()
+                        for br in b_rows:
+                            baseline_lookup[(int(br["hour_of_day"]), int(br["day_of_week"]))] = float(br["rps_median"])
+                    elif filters.get("service") and filters.get("operation"):
+                        b_rows = db.execute("""
+                            SELECT hour_of_day, day_of_week, rps_median
+                            FROM baseline_metrics FINAL
+                            WHERE dimension_type = 'target_operation' AND dimension_key = ?
+                        """, (f"{filters['service']}->{filters['operation']}",)).fetchall()
                         for br in b_rows:
                             baseline_lookup[(int(br["hour_of_day"]), int(br["day_of_week"]))] = float(br["rps_median"])
                     elif filters.get("account"):
@@ -271,6 +299,14 @@ class StorageRepository:
                         """, (f"%->{filters['operation']}",)).fetchall()
                         for br in b_rows:
                             baseline_lookup[(int(br["hour_of_day"]), int(br["day_of_week"]))] = float(br["rps_median"])
+                    elif filters.get("service"):
+                        b_rows = db.execute("""
+                            SELECT hour_of_day, day_of_week, rps_median
+                            FROM baseline_metrics FINAL
+                            WHERE dimension_type = 'service' AND dimension_key = ?
+                        """, (filters["service"],)).fetchall()
+                        for br in b_rows:
+                            baseline_lookup[(int(br["hour_of_day"]), int(br["day_of_week"]))] = float(br["rps_median"])
                     else:
                         # System-wide: sum baseline across all target services by hour-of-day and day-of-week
                         b_rows = db.execute("""
@@ -287,6 +323,8 @@ class StorageRepository:
                 if baseline_lookup:
                     non_zero = [v for v in baseline_lookup.values() if v > 0]
                     fallback_baseline = (sorted(non_zero)[len(non_zero) // 2]) if non_zero else 0.0
+                elif filters.get("account") or filters.get("caller"):
+                    fallback_baseline = 0.0
                 else:
                     rates = [float(r["rps"]) for r in rows]
                     fallback_baseline = (sorted(rates)[len(rates) // 2]) if rates else 0.0
@@ -362,7 +400,7 @@ class StorageRepository:
                         SUM(request_count) AS requests,
                         ROUND(AVG(latency_avg), 1) AS avg_ms,
                         ROUND(SUM(error_count)*1.0 / NULLIF(SUM(request_count),0), 4) AS failure_rate
-                    FROM metric_buckets
+                    FROM metric_buckets FINAL
                     WHERE bucket_size = 60 AND bucket_start >= ? AND bucket_start < ?
                     GROUP BY target_service ORDER BY requests DESC LIMIT 8
                 """, (start_sec, end_sec)).fetchall()]
@@ -374,7 +412,7 @@ class StorageRepository:
                         SUM(request_count) AS requests,
                         ROUND(AVG(latency_avg), 1) AS avg_ms,
                         ROUND(SUM(error_count)*1.0 / NULLIF(SUM(request_count),0), 4) AS slow_rate
-                    FROM metric_buckets
+                    FROM metric_buckets FINAL
                     WHERE bucket_size = 60 AND bucket_start >= ? AND bucket_start < ?
                     GROUP BY target_service, operation ORDER BY requests DESC LIMIT 10
                 """, (start_sec, end_sec)).fetchall()]
@@ -383,7 +421,7 @@ class StorageRepository:
                     SELECT
                         principal_name AS name,
                         SUM(request_count) AS requests
-                    FROM metric_buckets
+                    FROM metric_buckets FINAL
                     WHERE bucket_size = 60 AND bucket_start >= ? AND bucket_start < ? AND principal_name != ''
                     GROUP BY principal_name ORDER BY requests DESC LIMIT 8
                 """, (start_sec, end_sec)).fetchall()]
@@ -397,7 +435,7 @@ class StorageRepository:
                         SELECT target_service as service_name, operation as name,
                                COALESCE(MAX(latency_p95), 0.0) as current_p95_ms,
                                SUM(request_count) as current_samples
-                        FROM metric_buckets
+                        FROM metric_buckets FINAL
                         WHERE bucket_size = 60 AND bucket_start >= ? AND bucket_start < ?
                         GROUP BY target_service, operation
                     """, (start_sec, end_sec)).fetchall()
@@ -408,7 +446,7 @@ class StorageRepository:
                         SELECT target_service as service_name, operation as name,
                                COALESCE(MAX(latency_p95), 0.0) as baseline_p95_ms,
                                SUM(request_count) as baseline_samples
-                        FROM metric_buckets
+                        FROM metric_buckets FINAL
                         WHERE bucket_size = 60 AND bucket_start >= ? AND bucket_start < ?
                         GROUP BY target_service, operation
                     """, (prev_start, prev_end)).fetchall()

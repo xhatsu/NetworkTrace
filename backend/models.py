@@ -22,6 +22,7 @@ class QueryFilters(BaseModel):
     service: str | None = Field(default=None, max_length=200)
     operation: str | None = Field(default=None, max_length=500)
     account: str | None = Field(default=None, max_length=300)
+    caller: str | None = Field(default=None, max_length=200)
     comparison: Literal["previous", "week", "none"] = "previous"
 
     @model_validator(mode="after")

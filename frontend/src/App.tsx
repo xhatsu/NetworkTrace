@@ -14,6 +14,7 @@ import {
   AlertOctagon,
   BellRing,
   Boxes,
+  Waypoints,
   ChevronDown,
   Clock,
   Compass,
@@ -35,7 +36,7 @@ import { api, queryString } from "./api";
 import { useI18n, LanguageSwitcher } from "./i18n";
 import { OverviewPage } from "./pages/Overview";
 import { ServicesPage, ServiceDetailPage } from "./pages/Services";
-import { ApiDetailPage } from "./pages/ApiDetail";
+import { ApiDetailPage, ApisPage } from "./pages/ApiDetail";
 import { BehaviorPage, BehaviorDetailPage } from "./pages/Behavior";
 import { ChangesPage, ChangeDetailPage } from "./pages/Changes";
 import { TracesPage, TraceDetailPage } from "./pages/Traces";
@@ -76,56 +77,28 @@ const FilterContext = createContext<{
 
 export const useFilters = () => useContext(FilterContext);
 
-type ThemeMode = "dark" | "light";
-
-const ThemeContext = createContext<{
-  theme: ThemeMode;
-  toggleTheme: () => void;
-}>({
-  theme: "dark",
-  toggleTheme: () => {},
-});
-
-export const useTheme = () => useContext(ThemeContext);
-
-function initialTheme(): ThemeMode {
-  try {
-    return window.localStorage.getItem("tracescope-theme") === "light" ? "light" : "dark";
-  } catch {
-    return "dark";
-  }
-}
+import { ThemeProvider, useTheme, type ThemeMode } from "./theme";
+export { useTheme, type ThemeMode };
 
 function SideNav() {
   const { t } = useI18n();
   const location = useLocation();
+  // API detail lives under /services/:name/apis/:api but belongs to the APIs section.
+  const onApiDetail = /^\/services\/[^/]+\/apis\//.test(location.pathname);
+  const navActive = (to: string, routeActive: boolean) =>
+    to === "/apis" ? routeActive || onApiDetail : to === "/services" ? routeActive && !onApiDetail : routeActive;
   const groups = [
     {
       label: "Dashboard",
-      accent: "blue" as const,
-      headerClass: "text-[#5794f2] font-semibold",
-      dotClass: "bg-[#5794f2]",
-      activeClass: "bg-[#5794f2]/15 border border-[#5794f2]/70 text-white font-semibold",
-      pillClass: "bg-[#5794f2]",
-      iconActiveClass: "text-[#5794f2]",
-      focusRing: "focus-visible:ring-[#5794f2]",
-      hoverClass: "hover:bg-[#5794f2]/10 hover:text-white",
       links: [
         [LayoutDashboard, "Dashboard", "/dashboard"],
       ],
     },
     {
       label: "Explore",
-      accent: "blue" as const,
-      headerClass: "text-[#5794f2] font-semibold",
-      dotClass: "bg-[#5794f2]",
-      activeClass: "bg-[#5794f2]/15 border border-[#5794f2]/70 text-white font-semibold",
-      pillClass: "bg-[#5794f2]",
-      iconActiveClass: "text-[#5794f2]",
-      focusRing: "focus-visible:ring-[#5794f2]",
-      hoverClass: "hover:bg-[#5794f2]/10 hover:text-white",
       links: [
         [Boxes, "Services", "/services"],
+        [Waypoints, "APIs", "/apis"],
         [Users, "Users", "/users"],
         [Network, "Topology", "/topology"],
         [GitCompareArrows, "Learned behavior", "/behavior"],
@@ -133,14 +106,6 @@ function SideNav() {
     },
     {
       label: "Changes",
-      accent: "orange" as const,
-      headerClass: "text-[#ff9830] font-semibold",
-      dotClass: "bg-[#ff9830]",
-      activeClass: "bg-[#ff9830]/15 border border-[#ff9830]/70 text-white font-semibold",
-      pillClass: "bg-[#ff9830]",
-      iconActiveClass: "text-[#ff9830]",
-      focusRing: "focus-visible:ring-[#ff9830]",
-      hoverClass: "hover:bg-[#ff9830]/10 hover:text-white",
       links: [
         [AlertOctagon, "Changes", "/changes"],
         [BellRing, "Alerts", "/alerts"],
@@ -148,28 +113,12 @@ function SideNav() {
     },
     {
       label: "Investigate",
-      accent: "blue" as const,
-      headerClass: "text-[#5794f2] font-semibold",
-      dotClass: "bg-[#5794f2]",
-      activeClass: "bg-[#5794f2]/15 border border-[#5794f2]/70 text-white font-semibold",
-      pillClass: "bg-[#5794f2]",
-      iconActiveClass: "text-[#5794f2]",
-      focusRing: "focus-visible:ring-[#5794f2]",
-      hoverClass: "hover:bg-[#5794f2]/10 hover:text-white",
       links: [
         [Activity, "Traces", "/traces"],
       ],
     },
     {
       label: "System",
-      accent: "amber" as const,
-      headerClass: "text-[#ff9830] font-semibold",
-      dotClass: "bg-[#ff9830]",
-      activeClass: "bg-[#ff9830]/20 border border-[#ff9830]/60 text-white font-semibold",
-      pillClass: "bg-[#ff9830]",
-      iconActiveClass: "text-[#ff9830]",
-      focusRing: "focus-visible:ring-[#ff9830]",
-      hoverClass: "hover:bg-[#ff9830]/10 hover:text-white",
       links: [
         [Radio, "Agent Fleet", "/agent-stats"],
       ],
@@ -177,15 +126,15 @@ function SideNav() {
   ] as const;
 
   return (
-    <aside className="app-rail fixed inset-y-0 left-0 z-50 hidden w-[58px] flex-col border-r border-[#2a2d30] bg-[#111217] py-3 md:flex">
+    <aside className="app-rail fixed inset-y-0 left-0 z-50 hidden w-[230px] flex-col py-4 md:flex bg-bg border-r border-line">
       {/* Brand mark */}
-      <div className="mb-5 flex items-center gap-2 px-3">
-        <div className="grid h-8 w-8 shrink-0 place-items-center rounded-[2px] bg-blue-600 border border-blue-400/50 text-white font-bold">
-          <Activity size={20} strokeWidth={2.8} />
+      <div className="mb-5 flex items-center gap-2.5 px-3">
+        <div className="grid h-8 w-8 shrink-0 place-items-center rounded-ctl bg-accent text-white font-bold shadow-card">
+          <Activity size={18} strokeWidth={2.5} />
         </div>
         <div className="rail-label">
-          <div className="text-sm font-bold text-[#d8d9da] tracking-tight">TraceScope</div>
-          <div className="text-[10px] uppercase tracking-wider text-blue-300 font-bold">{t("Intelligence")}</div>
+          <div className="text-sm font-bold text-ink tracking-tight">TraceScope</div>
+          <div className="text-[10.5px] uppercase tracking-wider text-accent font-bold">{t("Intelligence")}</div>
         </div>
       </div>
 
@@ -193,8 +142,7 @@ function SideNav() {
       <nav className="flex w-full flex-1 flex-col gap-3 px-2">
         {groups.map((group) => (
           <div key={group.label}>
-            <div className={`mb-1.5 flex items-center gap-1.5 px-2 text-[10px] uppercase tracking-[.14em] ${group.headerClass}`}>
-              <span className={`h-1.5 w-1.5 rounded-full ${group.dotClass}`} />
+            <div className="mb-1.5 flex items-center gap-1.5 px-2 text-[11px] uppercase tracking-[.14em] font-semibold text-muted">
               <span className="rail-section-label">{t(group.label)}</span>
             </div>
             <div className="space-y-1">
@@ -207,30 +155,34 @@ function SideNav() {
                     event.preventDefault();
                     window.location.assign(to);
                   }}
-                  className={({ isActive }) =>
-                    `group relative flex h-8 w-full items-center gap-2 rounded-[2px] px-2 text-xs font-semibold transition duration-150 focus-visible:outline-none focus-visible:ring-2 ${group.focusRing} ${
+                  className={({ isActive: routeActive }) => {
+                    const isActive = navActive(to, routeActive);
+                    return `group relative flex h-8 w-full items-center gap-2.5 rounded-ctl px-2.5 text-[12.5px] font-medium transition duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent ${
                       isActive
-                        ? group.activeClass
-                        : `text-[#cbd5e1] ${group.hoverClass}`
-                    }`
-                  }
+                        ? "bg-surface-2 border border-line text-accent font-semibold"
+                        : "text-muted hover:bg-hover hover:text-ink"
+                    }`;
+                  }}
                 >
-                  {({ isActive }) => (
-                    <>
-                      {isActive && (
-                        <span className={`absolute left-0 h-5 w-1 rounded-r-full ${group.pillClass}`} />
-                      )}
-                      <Icon
-                        size={17}
-                        className={
-                          isActive
-                            ? group.iconActiveClass
-                            : "text-[#94a3b8] group-hover:text-white transition-colors"
-                        }
-                      />
-                      <span className="rail-label">{t(label)}</span>
-                    </>
-                  )}
+                  {({ isActive: routeActive }) => {
+                    const isActive = navActive(to, routeActive);
+                    return (
+                      <>
+                        {isActive && (
+                          <span className="absolute left-0 h-4.5 w-1 rounded-r-full bg-accent" />
+                        )}
+                        <Icon
+                          size={16}
+                          className={
+                            isActive
+                              ? "text-accent"
+                              : "text-muted group-hover:text-ink transition-colors"
+                          }
+                        />
+                        <span className="rail-label">{t(label)}</span>
+                      </>
+                    );
+                  }}
                 </NavLink>
               ))}
             </div>
@@ -239,17 +191,17 @@ function SideNav() {
       </nav>
 
       {/* Database/Storage status */}
-      <div className="flex items-center gap-2 px-3 text-[10px] text-[#a7a9ab] border-t border-[#2a2d30] pt-3">
+      <div className="flex items-center gap-2 px-3 text-[11px] text-muted border-t border-line pt-3">
         <div
           title={t("ClickHouse Store · Real-Time Analytics")}
-          className="relative grid h-7 w-7 shrink-0 place-items-center rounded-[2px] border border-green-500/50 bg-green-500/10 text-green-300"
+          className="relative grid h-7 w-7 shrink-0 place-items-center rounded-ctl border border-good-bd bg-good-bg text-good"
         >
           <Database size={14} />
-          <span className="absolute -top-0.5 -right-0.5 h-2 w-2 rounded-full bg-emerald-400" />
+          <span className="absolute -top-0.5 -right-0.5 h-2 w-2 rounded-full bg-good" />
         </div>
         <div className="rail-label flex flex-col">
-          <span className="text-[#d8d9da] font-bold leading-none">ClickHouse</span>
-          <span className="text-[10px] text-green-300 font-bold mt-0.5">● {t("Connected")}</span>
+          <span className="text-ink font-bold leading-none">ClickHouse</span>
+          <span className="text-[10px] text-good font-bold mt-0.5">● {t("Connected")}</span>
         </div>
       </div>
     </aside>
@@ -431,20 +383,20 @@ function FilterBar() {
         {/* Left: Branding, Current entity & Global Search */}
         <div className="flex items-center gap-3">
           <div className="flex items-center gap-2">
-            <span className="text-xs font-bold tracking-tight text-[#d8d9da]">
-              TraceScope / <span className="text-[#5794f2] font-semibold">{currentEntity}</span>
+            <span className="text-xs font-bold tracking-tight text-muted">
+              TraceScope / <span className="text-ink font-semibold">{currentEntity}</span>
             </span>
           </div>
 
           {/* Quick Global Search */}
           <form onSubmit={handleGlobalSearch} className="relative hidden lg:block">
-            <Search className="absolute left-2.5 top-2 text-[#7b7d80]" size={13} />
+            <Search className="absolute left-2.5 top-2 text-faint" size={13} />
             <input
               type="text"
               placeholder={t("Search service, API, user, IP, or trace ID...")}
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              className="toolbar-control h-7 w-64 pl-8 pr-3 text-[11px] placeholder:text-[#7b7d80] focus:border-blue-400 focus:outline-none"
+              className="h-7 w-64 rounded-ctl border border-line-strong bg-bg pl-8 pr-3 text-[11.5px] text-ink placeholder:text-faint focus:border-accent focus:outline-none"
             />
           </form>
         </div>
@@ -452,7 +404,7 @@ function FilterBar() {
         {/* Middle/Right: Operational window, Refresh, Filters, Language, Theme */}
         <div className="flex flex-wrap items-center gap-2">
           {/* Fixed operational window: current five-minute bucket with seven-day history. */}
-          <div className="flex items-center gap-2 border border-blue-500/35 bg-blue-500/10 px-2.5 py-1 text-[10px] font-semibold text-blue-300">
+          <div className="flex items-center gap-1.5 rounded-ctl border border-line bg-surface-2 px-2.5 py-1 text-[11px] font-semibold text-muted">
             <Clock size={13} />
             <span>{t("Current: 5m · History: 7d", "Hiện tại: 5 phút · Lịch sử: 7 ngày")}</span>
           </div>
@@ -462,9 +414,9 @@ function FilterBar() {
             aria-label={t("Refresh", "Làm mới")}
             title={t("Refresh telemetry data", "Làm mới dữ liệu")}
             onClick={handleRefresh}
-            className="toolbar-control flex items-center gap-1.5 px-2.5 py-1 text-[11px] font-semibold text-[#d8d9da] transition hover:border-[#5794f2] hover:text-white"
+            className="flex items-center gap-1.5 rounded-ctl border border-line-strong bg-bg px-2.5 py-1 text-[11px] font-semibold text-ink transition hover:bg-hover"
           >
-            <RefreshCw size={12} className={`text-[#5794f2] ${isRefreshing ? "animate-spin" : ""}`} />
+            <RefreshCw size={12} className={`text-accent ${isRefreshing ? "animate-spin" : ""}`} />
             <span className="hidden sm:inline">{t("Refresh", "Làm mới")}</span>
           </button>
 
@@ -473,12 +425,12 @@ function FilterBar() {
             aria-expanded={showFilters}
             aria-controls="toolbar-filters"
             onClick={() => setShowFilters(!showFilters)}
-            className={`btn ${showFilters || activeFilterKeys.length > 0 ? "border-cyan-400 bg-cyan-500/25 text-white" : ""}`}
+            className={`flex items-center gap-1.5 rounded-ctl border border-line-strong bg-bg px-2.5 py-1 text-[11px] font-semibold transition hover:bg-hover ${showFilters || activeFilterKeys.length > 0 ? "border-accent bg-accent-soft text-accent" : "text-ink"}`}
           >
             <SlidersHorizontal size={13} />
             <span>{t("Filters")}</span>
             {activeFilterKeys.length > 0 && (
-              <span className="grid h-4 w-4 place-items-center rounded-full bg-cyan-400 text-[10px] font-bold text-black">
+              <span className="grid h-4 w-4 place-items-center rounded-full bg-accent text-[10px] font-bold text-white">
                 {activeFilterKeys.length}
               </span>
             )}
@@ -486,31 +438,43 @@ function FilterBar() {
 
           <LanguageSwitcher />
 
-          <button
-            type="button"
-            aria-label={theme === "dark" ? t("Switch to light mode", "Chuyển sang chế độ sáng") : t("Switch to dark mode", "Chuyển sang chế độ tối")}
-            aria-pressed={theme === "light"}
-            title={theme === "dark" ? t("Switch to light mode", "Chuyển sang chế độ sáng") : t("Switch to dark mode", "Chuyển sang chế độ tối")}
-            onClick={toggleTheme}
-            className="toolbar-control flex items-center gap-1.5 px-2.5 py-1 text-[11px] font-bold transition hover:border-orange-400 focus:outline-none focus-visible:ring-2 focus-visible:ring-orange-400"
-          >
-            {theme === "dark" ? <Sun size={13} className="text-amber-300" /> : <Moon size={13} className="text-indigo-500" />}
-            <span className="hidden xl:inline">{theme === "dark" ? t("Light", "Sáng") : t("Dark", "Tối")}</span>
-          </button>
+          <div className="seg flex items-center rounded-ctl border border-line-strong bg-bg p-0.5" role="group" aria-label="Theme">
+            {(["light", "dark"] as const).map((mode) => {
+              const active = theme === mode;
+              const Icon = mode === "light" ? Sun : Moon;
+              const label = mode === "light" ? t("Light", "Sáng") : t("Dark", "Tối");
+              return (
+                <button
+                  key={mode}
+                  type="button"
+                  aria-pressed={active}
+                  onClick={() => !active && toggleTheme()}
+                  className={`flex items-center gap-1 rounded-ctl px-2 py-0.5 text-[11px] font-semibold transition-colors ${
+                    active
+                      ? "bg-surface-2 text-ink shadow-sm"
+                      : "text-muted hover:text-ink"
+                  }`}
+                >
+                  <Icon size={12} />
+                  <span className="hidden xl:inline">{label}</span>
+                </button>
+              );
+            })}
+          </div>
 
           <select
             aria-label={t("Timezone")}
             value={filters.timezone}
             onChange={(e) => setFilter("timezone", e.target.value)}
-            className="btn toolbar-control cursor-pointer"
+            className="rounded-ctl border border-line-strong bg-bg px-2 py-1 text-[11px] font-semibold text-ink cursor-pointer"
           >
-            <option value="local" className="bg-[#181b1f]">{t("Browser Local", "Browser local")} ({Intl.DateTimeFormat().resolvedOptions().timeZone})</option>
-            <option value="UTC" className="bg-[#181b1f]">UTC</option>
-            <option value="Asia/Ho_Chi_Minh" className="bg-[#181b1f]">Asia/Ho Chi Minh</option>
+            <option value="local">{t("Browser Local", "Browser local")} ({Intl.DateTimeFormat().resolvedOptions().timeZone})</option>
+            <option value="UTC">UTC</option>
+            <option value="Asia/Ho_Chi_Minh">Asia/Ho Chi Minh</option>
           </select>
 
-          <div className="chip font-mono text-[10px] font-bold text-emerald-300 border-emerald-500/40 bg-emerald-500/15">
-            <Radio size={11} className="text-emerald-400" />
+          <div className="chip font-mono text-[10.5px] font-bold text-good border border-good-bd bg-good-bg rounded-ctl">
+            <Radio size={11} className="text-good" />
             <span>{t("Live", "Trực tiếp")}</span>
           </div>
         </div>
@@ -518,7 +482,7 @@ function FilterBar() {
 
       {/* Expanded filter panel */}
       {showFilters && (
-        <div id="toolbar-filters" className="mt-2 grid grid-cols-2 gap-2 border-t border-[#2a2d30] pt-2 sm:grid-cols-3 lg:grid-cols-6">
+        <div id="toolbar-filters" className="mt-2 grid grid-cols-2 gap-2 border-t border-line pt-2 sm:grid-cols-3 lg:grid-cols-6">
           {entityFilterFields.map(({ key, label }) => {
             const source = key === "account" ? accountOptionsQuery : key === "operation" ? operationOptionsQuery : serviceOptionsQuery;
             const needsService = key === "operation" && !filters.service;
@@ -529,7 +493,7 @@ function FilterBar() {
               : values.length === 0 ? t("No observed values", "Chưa có giá trị quan sát")
               : (key === "account" || key === "service") && values.length >= 500 ? t("Showing up to 500 values", "Hiển thị tối đa 500 giá trị") : "";
             return <div key={key} className="flex min-w-0 flex-col gap-1">
-              <label htmlFor={`toolbar-filter-${key}`} className="text-[10px] font-bold uppercase tracking-wider text-[#a7a9ab]">{t(label)}</label>
+              <label htmlFor={`toolbar-filter-${key}`} className="text-[10px] font-bold uppercase tracking-wider text-muted">{t(label)}</label>
               <div className="flex items-center gap-1">
                 <select
                   id={`toolbar-filter-${key}`}
@@ -538,14 +502,14 @@ function FilterBar() {
                   value={filters[key] || ""}
                   disabled={needsService && !filters[key]}
                   onChange={(event) => setFilter(key, event.target.value)}
-                  className="toolbar-control min-w-0 flex-1 cursor-pointer px-2 py-1 text-[11px] focus:border-[#5794f2] focus:outline-none disabled:cursor-not-allowed disabled:opacity-50"
+                  className="min-w-0 flex-1 cursor-pointer rounded-ctl border border-line-strong bg-bg px-2 py-1 text-[11px] text-ink focus:border-accent focus:outline-none disabled:cursor-not-allowed disabled:opacity-50"
                 >
                   <option value="">{t("All", "Tất cả")} · {t(label)}</option>
                   {values.map((value) => <option key={value} value={value}>{value}</option>)}
                 </select>
-                {filters[key] && <button type="button" aria-label={`${t("Clear", "Xóa")} ${t(label)}`} onClick={() => setFilter(key, "")} className="p-1 text-[#a7a9ab] hover:text-[#d8d9da] focus-visible:outline focus-visible:outline-2"><X size={12} /></button>}
+                {filters[key] && <button type="button" aria-label={`${t("Clear", "Xóa")} ${t(label)}`} onClick={() => setFilter(key, "")} className="p-1 text-muted hover:text-ink focus-visible:outline focus-visible:outline-2"><X size={12} /></button>}
               </div>
-              {hint && <span id={`toolbar-filter-${key}-hint`} className="text-[10px] text-[#a7a9ab]">{hint}{source.isError && !needsService && <button type="button" onClick={() => source.refetch()} className="ml-1 text-[#5794f2] underline">{t("Retry", "Thử lại")}</button>}</span>}
+              {hint && <span id={`toolbar-filter-${key}-hint`} className="text-[10px] text-faint">{hint}{source.isError && !needsService && <button type="button" onClick={() => source.refetch()} className="ml-1 text-accent underline">{t("Retry", "Thử lại")}</button>}</span>}
             </div>;
           })}
         </div>
@@ -557,9 +521,9 @@ function FilterBar() {
 function Layout() {
   const location = useLocation();
   return (
-    <div className="min-h-screen bg-[#0b0c0e] text-[#d8d9da]">
+    <div className="min-h-screen bg-page text-ink">
       <SideNav />
-      <main className="md:pl-[58px]">
+      <main className="md:pl-[230px]">
         <header className="sticky top-0 z-20">
           <FilterBar />
         </header>
@@ -601,6 +565,7 @@ function Layout() {
             <Route path="/services" element={<ServicesPage />} />
             <Route path="/services/:name" element={<ServiceDetailPage />} />
             <Route path="/services/:name/apis/:api" element={<ApiDetailPage />} />
+            <Route path="/apis" element={<ApisPage />} />
             <Route path="/traces" element={<TracesPage />} />
             <Route path="/traces/:id" element={<TraceDetailPage />} />
             <Route path="/agent-stats" element={<AgentStatsPage />} />
@@ -620,9 +585,8 @@ function Layout() {
   );
 }
 
-export default function App() {
+function AppInner() {
   const [params, setParams] = useSearchParams();
-  const [theme, setTheme] = useState<ThemeMode>(initialTheme);
   const filters = useMemo<Filters>(
     () => ({
       start: params.get("start") || defaultStart,
@@ -652,23 +616,17 @@ export default function App() {
     );
   }
 
-  useEffect(() => {
-    document.documentElement.dataset.theme = theme;
-    document.documentElement.style.colorScheme = theme;
-    const themeColor = document.querySelector('meta[name="theme-color"]');
-    if (themeColor) themeColor.setAttribute("content", theme === "light" ? "#f5f7fb" : "#0b0c0e");
-    try {
-      window.localStorage.setItem("tracescope-theme", theme);
-    } catch {
-      // Some embedded/browser privacy modes disable localStorage; the current session still works.
-    }
-  }, [theme]);
-
   return (
-    <ThemeContext.Provider value={{ theme, toggleTheme: () => setTheme((current) => current === "dark" ? "light" : "dark") }}>
-      <FilterContext.Provider value={{ filters, setFilter }}>
-        <Layout />
-      </FilterContext.Provider>
-    </ThemeContext.Provider>
+    <FilterContext.Provider value={{ filters, setFilter }}>
+      <Layout />
+    </FilterContext.Provider>
+  );
+}
+
+export default function App() {
+  return (
+    <ThemeProvider>
+      <AppInner />
+    </ThemeProvider>
   );
 }

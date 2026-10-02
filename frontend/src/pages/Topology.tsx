@@ -12,6 +12,7 @@ import {
 import { api, queryString } from "../api";
 import { ErrorState, Loading, Page, Panel, n, pct } from "../components";
 import { useFilters } from "../App";
+import { useTheme, getThemeTokens } from "../theme";
 import type { Edge, NodeItem } from "../types";
 import { EntityLink } from "../components/EntityLink";
 type Graph = {
@@ -125,7 +126,7 @@ export function TopologyPage() {
     <Page
       eyebrow="Dependency evidence"
       title="Service topology"
-      description="Grouped level-of-detail view. Solid calls have parent linkage; dashed calls rely on explicit destination evidence."
+      description="Grouped level-of-detail view."
       actions={
         <div className="flex gap-2">
           <span className="chip">{view.nodes.length} visible nodes</span>
@@ -134,18 +135,18 @@ export function TopologyPage() {
       }
     >
       <div className="card mb-4 flex flex-wrap items-center gap-2.5 p-3">
-        <div className="flex min-w-56 flex-1 items-center gap-2 rounded-lg border border-[rgba(255,255,255,0.08)] bg-white/[0.03] px-3 focus-within:border-indigo-500/60">
-          <Search size={14} className="text-[#8b949e]" />
+        <div className="flex min-w-56 flex-1 items-center gap-2 rounded-ctl border border-line bg-surface px-3 focus-within:border-accent">
+          <Search size={14} className="text-muted" />
           <input
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             onKeyDown={(e) => e.key === "Enter" && focusSearch()}
             placeholder="Search and focus a service node…"
-            className="w-full bg-transparent py-1.5 text-xs text-[#f0f3f6] placeholder:text-[#6e7681] outline-none"
+            className="w-full bg-transparent py-1.5 text-xs text-ink placeholder:text-muted outline-none"
           />
           <button
             onClick={focusSearch}
-            className="rounded bg-indigo-500/20 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-indigo-300 hover:bg-indigo-500/30"
+            className="rounded-ctl bg-accent-soft px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-accent hover:opacity-80"
           >
             Focus
           </button>
@@ -155,14 +156,14 @@ export function TopologyPage() {
           value={evidence}
           onChange={(e) => setEvidence(e.target.value)}
         >
-          <option value="" className="bg-[#12151a]">All Evidence</option>
-          <option value="confirmed" className="bg-[#12151a]">Confirmed Only</option>
-          <option value="inferred" className="bg-[#12151a]">Inferred Only</option>
+          <option value="" className="bg-surface text-ink">All Evidence</option>
+          <option value="confirmed" className="bg-surface text-ink">Confirmed Only</option>
+          <option value="inferred" className="bg-surface text-ink">Inferred Only</option>
         </select>
         <label className="btn flex items-center gap-2">
           <span>Traffic ≥</span>
           <input
-            className="w-14 bg-transparent font-mono text-center outline-none border-b border-white/20"
+            className="w-14 bg-transparent font-mono text-center outline-none border-b border-line"
             type="number"
             min="1"
             value={minTraffic}
@@ -170,7 +171,7 @@ export function TopologyPage() {
           />
         </label>
         <button
-          className={`btn ${neighbors ? "border-indigo-500/50 bg-indigo-500/20 text-indigo-300" : ""}`}
+          className={`btn ${neighbors ? "border-accent bg-accent-soft text-accent" : ""}`}
           onClick={() => setNeighbors(!neighbors)}
         >
           Immediate Neighbors
@@ -216,7 +217,7 @@ export function TopologyPage() {
                 onExpand={(g) => setExpanded((old) => new Set(old).add(g))}
               />
             ) : (
-              <div className="grid min-h-72 place-items-center p-8 text-center text-xs text-[#7e7489]">
+              <div className="grid min-h-72 place-items-center p-8 text-center text-xs text-muted">
                 <div>
                   <Network className="mx-auto mb-3" />
                   <p>
@@ -233,11 +234,11 @@ export function TopologyPage() {
         title="Accessible edge table"
         subtitle="Keyboard-accessible equivalent of the canvas · sorted by observed traffic"
         className="mt-4"
-        action={<Table2 size={15} className="text-[#81768d]" />}
+        action={<Table2 size={15} className="text-muted" />}
       >
         <div className="max-h-80 overflow-auto scrollbar">
           <table className="w-full min-w-[800px]">
-            <thead className="sticky top-0 bg-panel">
+            <thead className="sticky top-0 bg-surface">
               <tr>
                 {[
                   "Source",
@@ -263,12 +264,12 @@ export function TopologyPage() {
                     tabIndex={0}
                     onClick={() => setSelected(edge)}
                     onKeyDown={(e) => e.key === "Enter" && setSelected(edge)}
-                    className="focus-ring cursor-pointer border-t border-line hover:bg-[#292133]"
+                    className="focus-ring cursor-pointer border-t border-line hover:bg-hover"
                   >
-                    <td className="px-4 py-3 text-xs text-white">
+                    <td className="px-4 py-3 text-xs text-ink">
                       {edge.source}
                     </td>
-                    <td className="px-4 text-xs text-white">{edge.target}</td>
+                    <td className="px-4 text-xs text-ink">{edge.target}</td>
                     <td className="px-4">
                       <span className="chip">{edge.evidence}</span>
                     </td>
@@ -281,7 +282,7 @@ export function TopologyPage() {
                     <td className="px-4 font-mono text-xs">
                       {pct(edge.failure_rate)}
                     </td>
-                    <td className="px-4 text-xs text-[#8c8297]">
+                    <td className="px-4 text-xs text-muted">
                       {new Date(edge.freshness_ms).toLocaleTimeString()}
                     </td>
                   </tr>
@@ -290,12 +291,12 @@ export function TopologyPage() {
           </table>
         </div>
       </Panel>
-      <div className="mt-3 flex flex-wrap gap-4 text-[10px] text-[#7e7489]">
+      <div className="mt-3 flex flex-wrap gap-4 text-[10px] text-muted">
         <span>
-          <b className="text-[#b9b0c2]">Solid</b> parent-linked confirmed call
+          <b className="text-ink">Solid</b> parent-linked confirmed call
         </span>
         <span>
-          <b className="text-[#b9b0c2]">Dashed</b> explicit destination,
+          <b className="text-ink">Dashed</b> explicit destination,
           inferred direction
         </span>
         <span>
@@ -329,8 +330,8 @@ function Selection({
         <div className="label">
           {item.aggregate ? "Aggregate group" : "Service"}
         </div>
-        <div className="mt-2 text-lg text-white">{item.label}</div>
-        <div className="mt-1 text-xs text-[#887e94]">
+        <div className="mt-2 text-lg text-ink font-semibold">{item.label}</div>
+        <div className="mt-1 text-xs text-muted">
           {item.group} / {item.module}
         </div>
         <dl className="mt-5 grid grid-cols-2 gap-3">
@@ -344,12 +345,12 @@ function Selection({
             onClick={() =>
               onExpand(item.id.startsWith("module:") ? item.id : item.group)
             }
-            className="btn mt-5 w-full"
+            className="btn mt-5 w-full justify-center"
           >
             Expand {item.members.length} services
           </button>
         )}
-        <p className="mt-4 text-[10px] leading-4 text-[#756b81]">
+        <p className="mt-4 text-[10px] leading-4 text-muted">
           Service detail provides outcomes, accounts, operation percentiles,
           instances, anomalies, and supporting traces.
         </p>
@@ -359,9 +360,9 @@ function Selection({
   return (
     <div className="p-4">
       <div className="label">Directed {item.evidence} edge</div>
-      <div className="mt-2 flex items-center gap-2 text-sm text-white">
+      <div className="mt-2 flex items-center gap-2 text-sm text-ink font-semibold">
         <span>{item.source}</span>
-        <span className="text-lime">→</span>
+        <span className="text-good">→</span>
         <span>{item.target}</span>
       </div>
       <dl className="mt-5 grid grid-cols-2 gap-3">
@@ -377,14 +378,14 @@ function Selection({
       {/* Top Principals on this Edge */}
       {item.top_principals && item.top_principals.length > 0 && (
         <div className="mt-4">
-          <div className="text-[10px] font-semibold uppercase tracking-wider text-[#8b949e] mb-1.5">
+          <div className="text-[10px] font-semibold uppercase tracking-wider text-muted mb-1.5">
             Top Principals on Edge
           </div>
           <div className="space-y-1">
             {item.top_principals.map((p) => (
-              <div key={p.principal_name} className="flex w-full items-center justify-between text-xs bg-white/[0.02] p-2 rounded border border-[rgba(255,255,255,0.06)] hover:border-indigo-500/40">
-                <EntityLink entity={{ kind: "user", principal: p.principal_name }} className="max-w-[170px] truncate font-mono text-indigo-300 hover:underline">{p.principal_name}</EntityLink>
-                <span className="font-mono text-[#8b949e] text-[10px]">{n(p.requests)} reqs</span>
+              <div key={p.principal_name} className="flex w-full items-center justify-between text-xs bg-surface-2 p-2 rounded-ctl border border-line hover:border-accent">
+                <EntityLink entity={{ kind: "user", principal: p.principal_name }} className="max-w-[170px] truncate font-mono text-entity-user hover:underline">{p.principal_name}</EntityLink>
+                <span className="font-mono text-muted text-[10px]">{n(p.requests)} reqs</span>
               </div>
             ))}
           </div>
@@ -394,27 +395,27 @@ function Selection({
       {/* Top Operations on this Edge */}
       {item.top_operations && item.top_operations.length > 0 && (
         <div className="mt-3">
-          <div className="text-[10px] font-semibold uppercase tracking-wider text-[#8b949e] mb-1.5">
+          <div className="text-[10px] font-semibold uppercase tracking-wider text-muted mb-1.5">
             Top Operations on Edge
           </div>
           <div className="space-y-1">
             {item.top_operations.map((o) => (
-              <div key={o.operation} className="flex items-center justify-between text-xs bg-white/[0.02] p-2 rounded border border-[rgba(255,255,255,0.06)]">
-                <span className="font-mono text-[#f0f3f6] truncate max-w-[170px]">{o.operation}</span>
-                <span className="font-mono text-[#8b949e] text-[10px]">{n(o.requests)} reqs</span>
+              <div key={o.operation} className="flex items-center justify-between text-xs bg-surface-2 p-2 rounded-ctl border border-line">
+                <span className="font-mono text-ink truncate max-w-[170px]">{o.operation}</span>
+                <span className="font-mono text-muted text-[10px]">{n(o.requests)} reqs</span>
               </div>
             ))}
           </div>
         </div>
       )}
 
-      <div className="mt-4 rounded-lg border border-[rgba(255,255,255,0.06)] bg-white/[0.02] p-3">
-        <div className="text-[10px] font-semibold uppercase text-[#8b949e] mb-1">Evidence</div>
-        <p className="text-xs leading-5 text-[#aba2b5]">
+      <div className="mt-4 rounded-ctl border border-line bg-surface-2 p-3">
+        <div className="text-[10px] font-semibold uppercase text-muted mb-1">Evidence</div>
+        <p className="text-xs leading-5 text-ink">
           {item.evidence_detail}
         </p>
       </div>
-      <p className="mt-2 text-[10px] text-[#756b81]">
+      <p className="mt-2 text-[10px] text-muted">
         Shared trace IDs or usernames alone are never used to create this edge.
       </p>
     </div>
@@ -422,9 +423,9 @@ function Selection({
 }
 function Stat({ k, v }: { k: string; v: string }) {
   return (
-    <div className="rounded-lg border border-line p-3">
+    <div className="rounded-ctl border border-line p-3 bg-surface">
       <dt className="label">{k}</dt>
-      <dd className="mt-1 font-mono text-xs text-white">{v}</dd>
+      <dd className="mt-1 font-mono text-xs text-ink">{v}</dd>
     </div>
   );
 }
@@ -444,6 +445,7 @@ function TopologyCanvas({
   onExpand: (g: string) => void;
   neighbors: boolean;
 }) {
+  const { theme } = useTheme();
   const canvas = useRef<HTMLCanvasElement>(null);
   const positions = useRef(new Map<string, { x: number; y: number }>());
   const spatial = useRef(new Map<string, VNode[]>());
@@ -471,6 +473,9 @@ function TopologyCanvas({
     cancelAnimationFrame(frame.current);
     frame.current = requestAnimationFrame(draw);
   }
+  useEffect(() => {
+    invalidate();
+  }, [theme]);
   useEffect(() => {
     const p = positions.current;
     nodes.forEach((node, i) => {
@@ -553,6 +558,7 @@ function TopologyCanvas({
     x.save();
     x.translate(s.ox, s.oy);
     x.scale(s.scale, s.scale);
+    const tokens = getThemeTokens(theme);
     const selectedNode = selected && "aggregate" in selected ? selected.id : "";
     spatial.current.clear();
     for (const node of nodes) {
@@ -584,16 +590,15 @@ function TopologyCanvas({
       x.lineTo(b.x, b.y);
       x.strokeStyle =
         edge.failure_rate > 0.03
-          ? "#f43f5e"
+          ? tokens.red
           : edge.avg_ms > 300
-            ? "#f59e0b"
+            ? tokens.orange
             : edge.evidence === "inferred"
-              ? "#818cf8"
-              : "#0284c7";
-      x.lineWidth = Math.min(6, 1.2 + Math.sqrt(edge.requests) / 7);
-      x.setLineDash(edge.evidence === "inferred" ? [6, 5] : []);
-      x.stroke();
+              ? tokens.purple
+              : tokens.borderStrong;
+      x.lineWidth = 1.2;
       x.setLineDash([]);
+      x.stroke();
       const t = 0.72,
         px = a.x + (b.x - a.x) * t,
         py = a.y + (b.y - a.y) * t,
@@ -616,23 +621,15 @@ function TopologyCanvas({
 
       const isSelected = selected && "aggregate" in selected && selected.id === node.id;
       x.fillStyle = isSelected
-        ? "#7c3aed"
-        : node.aggregate
-          ? "#1e1b4b"
-          : node.group?.toLowerCase().includes("gateway") || node.group?.toLowerCase().includes("ingress")
-            ? "#083344"
-            : "#1e1638";
+        ? tokens.purple
+        : tokens.surface;
       x.fill();
       x.strokeStyle = isSelected
-        ? "#c4b5fd"
-        : node.aggregate
-          ? "#818cf8"
-          : node.group?.toLowerCase().includes("gateway") || node.group?.toLowerCase().includes("ingress")
-            ? "#06b6d4"
-            : "#8b5cf6";
-      x.lineWidth = isSelected ? 2.5 : 1.8;
+        ? tokens.purple
+        : tokens.border;
+      x.lineWidth = isSelected ? 2.5 : 1.5;
       x.stroke();
-      x.fillStyle = isSelected ? "#ffffff" : "#f5f3fa";
+      x.fillStyle = isSelected ? tokens.accent : tokens.text;
       x.font = `${node.aggregate ? "600" : "500"} 13px Inter, system-ui, sans-serif`;
       x.textAlign = "center";
       x.fillText(
@@ -641,7 +638,7 @@ function TopologyCanvas({
         p.y + 4,
       );
       if (node.aggregate) {
-        x.fillStyle = "#a78bfa";
+        x.fillStyle = tokens.textMuted;
         x.font = "600 12px JetBrains Mono";
         x.fillText(String(node.members.length), p.x, p.y + 42);
       }
@@ -735,7 +732,7 @@ function TopologyCanvas({
         ref={canvas}
         role="img"
         aria-label={`Interactive service topology with ${nodes.length} nodes and ${edges.length} directed edges. Use the edge table below for a keyboard-accessible view.`}
-        className="h-[640px] w-full touch-none bg-[radial-gradient(#332a3e_1px,transparent_1px)] [background-size:24px_24px]"
+        className="h-[640px] w-full touch-none bg-page"
         onPointerDown={down}
         onPointerMove={move}
         onPointerUp={up}
@@ -749,7 +746,7 @@ function TopologyCanvas({
       />
       {tooltip && (
         <div
-          className="pointer-events-none absolute z-10 max-w-56 rounded-lg border border-line bg-[#171220]/95 px-3 py-2 text-[11px] text-white shadow-panel"
+          className="pointer-events-none absolute z-10 max-w-56 rounded-inner border border-line-strong bg-surface px-3 py-2 text-[11px] text-ink shadow-pop"
           style={{ left: tooltip.x, top: tooltip.y }}
         >
           {tooltip.text}

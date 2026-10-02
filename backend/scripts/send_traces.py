@@ -248,6 +248,9 @@ def run_direct_mode(args: argparse.Namespace):
             from backend.app.services.principal_relationships import process_principal_intelligence
             from backend.app.repositories.db_context import get_connection
 
+            from backend.app.services.principal_activity import materialize_principal_activity
+            # User behavior and the user/IP detector read the activity rollup, not raw traces.
+            materialize_principal_activity(0, 4_102_444_800_000, database)
             print(" Computing rolling baselines (median & MAD per dimension)...")
             b_count = rebuild_baselines(db_path=database)
             print(f" Baselines computed: {b_count}")

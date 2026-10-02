@@ -1,0 +1,100 @@
+{{- if .Values.obi.enabled }}
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ include "tracescope-obi.obiName" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "tracescope-obi.labels" . | nindent 4 }}
+    app.kubernetes.io/name: tracescope-obi
+{{- $rbac := default dict .Values.obi.rbac }}
+{{- $create := true }}
+{{- if hasKey $rbac "create" }}{{- $create = $rbac.create }}{{- end }}
+{{- $clusterScoped := true }}
+{{- if hasKey $rbac "clusterScoped" }}{{- $clusterScoped = $rbac.clusterScoped }}{{- end }}
+{{- if $create }}
+{{- if $clusterScoped }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ include "tracescope-obi.obiName" . }}
+  labels:
+    {{- include "tracescope-obi.labels" . | nindent 4 }}
+    app.kubernetes.io/name: tracescope-obi
+rules:
+  - apiGroups: [""]
+    resources:
+      - pods
+      - services
+      - nodes
+      - namespaces
+    verbs: [get, list, watch]
+  - apiGroups: ["apps"]
+    resources: [replicasets, deployments, daemonsets, statefulsets]
+    verbs: [get, list, watch]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ include "tracescope-obi.obiName" . }}
+  labels:
+    {{- include "tracescope-obi.labels" . | nindent 4 }}
+    app.kubernetes.io/name: tracescope-obi
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: {{ include "tracescope-obi.obiName" . }}
+subjects:
+  - kind: ServiceAccount
+    name: {{ include "tracescope-obi.obiName" . }}
+    namespace: {{ .Release.Namespace }}
+{{- else }}
+{{- $targetNamespaces := list .Release.Namespace }}
+{{- if .Values.obi.discovery }}
+  {{- range .Values.obi.discovery.instrument }}
+    {{- if .k8s_namespace }}
+      {{- $targetNamespaces = append $targetNamespaces .k8s_namespace }}
+    {{- end }}
+  {{- end }}
+{{- end }}
+{{- range ($targetNamespaces | uniq) }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: {{ include "tracescope-obi.obiName" $ }}
+  namespace: {{ . }}
+  labels:
+    {{- include "tracescope-obi.labels" $ | nindent 4 }}
+    app.kubernetes.io/name: tracescope-obi
+rules:
+  - apiGroups: [""]
+    resources:
+      - pods
+      - services
+    verbs: [get, list, watch]
+  - apiGroups: ["apps"]
+    resources: [replicasets, deployments, daemonsets, statefulsets]
+    verbs: [get, list, watch]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ include "tracescope-obi.obiName" $ }}
+  namespace: {{ . }}
+  labels:
+    {{- include "tracescope-obi.labels" $ | nindent 4 }}
+    app.kubernetes.io/name: tracescope-obi
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: {{ include "tracescope-obi.obiName" $ }}
+subjects:
+  - kind: ServiceAccount
+    name: {{ include "tracescope-obi.obiName" $ }}
+    namespace: {{ $.Release.Namespace }}
+{{- end }}
+{{- end }}
+{{- end }}
+{{- end }}

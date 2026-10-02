@@ -1,0 +1,169 @@
+# Default values for the tracescope-obi chart.
+#
+# Data paths (collector.exporter.mode):
+#   elk        : OBI -> collector -> Elastic APM Server -> Elasticsearch -> TraceScope worker
+#                (TraceScope: storage.pipelineMode=elk_to_clickhouse)
+#   tracescope : OBI -> collector -> TraceScope OTLP/HTTP /v1/traces -> ClickHouse
+#                (TraceScope: storage.pipelineMode=clickhouse, elasticsearch.syncEnabled=false,
+#                 storage.clickhouseOnlyAgentTraces=false)
+
+nameOverride: ""
+fullnameOverride: ""
+
+# -----------------------------------------------------------------------------
+# OBI (eBPF auto-instrumentation DaemonSet; privileged, hostPID, ClusterRole)
+# -----------------------------------------------------------------------------
+obi:
+  enabled: true
+
+  # standard : upstream OBI. Captures headers and JSON bodies.
+  # custom   : OBI fork with XML body extraction. Only needed for SOAP/XML
+  #            workloads where the identity (WSSE UsernameToken) is in the body.
+  variant: standard
+  image:
+    standard:
+      repository: otel/ebpf-instrument
+      tag: v0.13.0
+    custom:
+      # NOTE: the current custom build is linux/arm64 only.
+      repository: xhatsu101/ebpf-instrument
+      tag: xmlCustom-0.13.0
+    pullPolicy: IfNotPresent
+
+  # Instrumentation targets, rendered verbatim into OBI `discovery`.
+  # Each entry is an OBI glob criteria object; supported keys include
+  # k8s_namespace, k8s_deployment_name, k8s_daemonset_name, k8s_statefulset_name,
+  # k8s_pod_name, k8s_pod_labels, k8s_pod_annotations, open_ports, exe_path, name.
+  discovery:
+    instrument:
+      - k8s_namespace: default
+    # e.g. - k8s_namespace: kube-system
+    excludeInstrument: []
+    # Any further `discovery` keys (poll_interval, exclude_otel_instrumented_services, ...)
+    extra: {}
+
+  # Request headers captured as http.request.header.<name>.
+  headers:
+    enabled: true
+    include:
+      - content-type
+      - soapaction
+      - x-forwarded-for
+      - x-real-ip
+      - x-wsse
+      - authorization
+      - user-agent
+
+  # HTTP body capture (http.request.body.content / http.response.body.content).
+  # Off: no payload bodies leave the node; WSSE-in-body identity is unavailable.
+  bodyCapture:
+    enabled: true
+    request:
+      enabled: true
+      methods: [POST, PUT]
+    response:
+      enabled: true
+      methods: [POST, PUT]
+    # Max bytes OBI buffers per HTTP message for body inspection.
+    bufferSize: 2048
+
+  kubernetesMetadata: true
+  # RBAC for Kubernetes metadata enrichment (pod names, deployment labels).
+  # If your cluster blocks ClusterRole / ClusterRoleBinding:
+  #   clusterScoped: false -> renders namespace-scoped Role & RoleBinding
+  #   create: false        -> renders no Role/RoleBinding (set kubernetesMetadata: false)
+  rbac:
+    create: true
+    clusterScoped: true
+  logLevel: info
+
+  export:
+    # Empty = the in-chart collector (gRPC 4317).
+    endpoint: ""
+    protocol: grpc
+
+  # Raw OBI config deep-merged over the generated config (lists are replaced).
+  extraConfig: {}
+
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+  nodeSelector: {}
+  tolerations:
+    - operator: Exists
+      effect: NoSchedule
+    - operator: Exists
+      effect: NoExecute
+  priorityClassName: ""
+
+# -----------------------------------------------------------------------------
+# OpenTelemetry Collector (contrib)
+# -----------------------------------------------------------------------------
+collector:
+  enabled: true
+  replicas: 1
+  image:
+    repository: otel/opentelemetry-collector-contrib
+    tag: "0.161.0"
+    pullPolicy: IfNotPresent
+
+  exporter:
+    # elk | tracescope
+    mode: elk
+    elk:
+      # Elastic APM Server OTLP/gRPC intake.
+      endpoint: apm-server.tmp-elk.svc.cluster.local:8200
+      insecure: true
+      headers: {}
+    tracescope:
+      # TraceScope OTLP/HTTP receiver; the exporter appends /v1/traces.
+      # Any role serving /v1/traces works: the api service (all role) or the ingest service.
+      endpoint: http://tracescope-api.tracescope.svc.cluster.local:30102
+      # proto | json (TraceScope accepts both)
+      encoding: proto
+      compression: gzip
+      timeout: 10s
+      headers: {}
+      # Optional X-API-Key from an existing Secret (TraceScope OTEL_API_KEY).
+      apiKeySecret:
+        name: ""
+        key: api-key
+
+  # Credential handling applied after identity extraction.
+  redaction:
+    # Remove http.request.header.authorization (Basic/Bearer credentials).
+    authorizationHeader: false
+    # Remove http.request.header.x-wsse (contains PasswordDigest/Nonce).
+    wsseHeader: true
+    # Remove captured bodies after username extraction (keeps sizes).
+    dropBodies: false
+
+  batch:
+    sendBatchSize: 8192
+    # Hard upper bound per export (0 = unbounded). TraceScope /v1/traces rejects
+    # >10000 spans or >10 MiB per request with a non-retryable 413, so keep this
+    # <= 5000 in tracescope mode.
+    sendBatchMaxSize: 0
+    timeout: 200ms
+  memoryLimiter:
+    limitPercentage: 75
+    spikeLimitPercentage: 20
+
+  debug: false
+  telemetry:
+    logsLevel: info
+    metricsLevel: none
+
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+  nodeSelector: {}
+  tolerations: []

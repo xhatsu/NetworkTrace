@@ -64,6 +64,6 @@ def test_principal_cursor_remains_narrow_and_checkpoint_follows_flush():
     source = Path(service.__file__).read_text()
     process = source[source.index("def process_principal_intelligence"):]
 
-    assert "SELECT * FROM traces" not in process
-    assert "ORDER BY ingest_order,row_uid LIMIT ?" in process
+    assert "FROM traces" not in source
+    assert "ORDER BY updated_at_ms,bucket_start_ms,row_key LIMIT ?" in source
     assert process.index("batch.flush()") < process.index("INSERT INTO checkpoints")

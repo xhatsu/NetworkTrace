@@ -40,7 +40,7 @@ def _enrich_evidence(item: Dict[str, Any], include_traces: bool = False) -> None
               WHERE dimension_type='service' AND dimension_key=? AND hour_of_day=? AND day_of_week=?""",
               (service, dt.hour, dt.weekday())).fetchone()
             baseline = dict(row) if row else None
-            current_samples = int(db.execute("""SELECT COUNT(DISTINCT bucket_start) FROM metric_buckets
+            current_samples = int(db.execute("""SELECT COUNT(DISTINCT bucket_start) FROM metric_buckets FINAL
               WHERE bucket_size=300 AND target_service=? AND bucket_start*1000<?
                 AND (bucket_start+300)*1000>?""", (service, end_ms, start_ms)).fetchone()[0] or 0)
             rows = db.execute("""SELECT first_seen,last_seen FROM anomaly_events

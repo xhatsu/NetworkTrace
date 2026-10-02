@@ -77,7 +77,7 @@ async def get_principal_relationships(
               SUM(request_count) as requests,
               ROUND(SUM(error_count)*1.0 / NULLIF(SUM(request_count),0), 4) as error_rate,
               ROUND(MAX(latency_p95), 2) as p95_latency
-            FROM metric_buckets
+            FROM metric_buckets FINAL
             WHERE principal_name = ? AND bucket_size = 60 AND bucket_start >= ? AND bucket_start < ?
             GROUP BY caller_service, target_service
             ORDER BY requests DESC

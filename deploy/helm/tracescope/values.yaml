@@ -13,7 +13,7 @@ global:
   # Configure this once (e.g. "0.3.3") so all components share the unified version.
   # Can be overridden per workload below (app.image.tag, ingest.image.tag, etc.).
   image:
-    tag: "0.4.2"
+    tag: "0.4.7"
 
 nameOverride: ""
 fullnameOverride: ""
@@ -58,6 +58,16 @@ storage:
   # All trace, metric, topology, user, and behavior reads use ClickHouse.
   traceBackend: "clickhouse"
   clickhouseOnlyAgentTraces: false
+  # Caller resolution for OTLP traces stored in ClickHouse (pipelineMode=clickhouse):
+  # pairs each server span with its caller from the same trace, drops client/internal
+  # spans from request counts, and keeps unpaired root client calls as caller -> peer.
+  traceEdge:
+    # auto: on when pipelineMode=clickhouse | "true" | "false"
+    resolution: "auto"
+    # Clock-skew tolerance when matching a client span to the server span it called.
+    skewMs: 250
+    # Callers that propagate no trace context, by source IP: "10.1.2.3=billing,10.9.0.0/24=batch"
+    ipMap: ""
 
 elasticsearch:
   enabled: true
@@ -107,6 +117,10 @@ app:
         memory: 1Gi
   migrations:
     enabled: true
+  service:
+    type: NodePort
+    port: 30102
+    nodePort: 30102
 
 # -----------------------------------------------------------------------------
 # Ingestion Workload (Stateless Deployment)
@@ -115,7 +129,7 @@ ingest:
   # Set false when an external OpenTelemetry Collector owns ingestion.
   # This omits the ingest Deployment, Service, HPA, and public ingest routes.
   enabled: false
-  replicaCount: 2
+  replicaCount: 1
   image:
     repository: xhatsu101/tracescope
     # Defaults to global.image.tag when empty ("")
@@ -123,7 +137,7 @@ ingest:
     pullPolicy: IfNotPresent
   autoscaling:
     enabled: true
-    minReplicas: 3
+    minReplicas: 1
     maxReplicas: 12
     targetCPUUtilizationPercentage: 75
   resources:
@@ -258,7 +272,7 @@ config:
 # Ingress Configuration
 # -----------------------------------------------------------------------------
 ingress:
-  enabled: true
+  enabled: false
   className: nginx
   # server-snippet annotations are rejected by the cluster ingress admission
   # webhook (AllowSnippetAnnotations=false). /internal/* isolation is enforced
@@ -294,5 +308,5 @@ semantic:
 
 # Shadow relationship learning; does not change alerting or enforce access.
 behavior:
-  enabled: false
+  enabled: true
   budgetSeconds: 20

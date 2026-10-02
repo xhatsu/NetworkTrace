@@ -1,0 +1,162 @@
+{{- if .Values.collector.enabled }}
+{{- $c := .Values.collector -}}
+{{- $mode := $c.exporter.mode -}}
+{{- if not (has $mode (list "elk" "tracescope")) -}}
+{{- fail (printf "collector.exporter.mode must be elk or tracescope, got %q" $mode) -}}
+{{- end -}}
+{{- $redact := or $c.redaction.authorizationHeader $c.redaction.wsseHeader $c.redaction.dropBodies -}}
+{{- $exporter := ternary "otlp/elastic" "otlp_http/tracescope" (eq $mode "elk") }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "tracescope-obi.collectorName" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "tracescope-obi.labels" . | nindent 4 }}
+    app.kubernetes.io/name: tracescope-obi-collector
+data:
+  config.yaml: |
+    receivers:
+      otlp:
+        protocols:
+          grpc:
+            endpoint: 0.0.0.0:4317
+          http:
+            endpoint: 0.0.0.0:4318
+
+    processors:
+      memory_limiter:
+        check_interval: 1s
+        limit_percentage: {{ $c.memoryLimiter.limitPercentage }}
+        spike_limit_percentage: {{ $c.memoryLimiter.spikeLimitPercentage }}
+      batch:
+        send_batch_size: {{ $c.batch.sendBatchSize }}
+        timeout: {{ $c.batch.timeout }}
+        {{- if $c.batch.sendBatchMaxSize }}
+        send_batch_max_size: {{ $c.batch.sendBatchMaxSize }}
+        {{- end }}
+      filter/drop_internal_spans:
+        error_mode: ignore
+        traces:
+          span:
+            - 'name == "in queue" or name == "processing"'
+      transform/wsse:
+        error_mode: ignore
+        trace_statements:
+          - context: span
+            statements:
+              # 1. Extract WSSE username from SOAP XML or JSON request body (OBI-native: http.request.body.content)
+              - merge_maps(attributes, ExtractPatterns(attributes["http.request.body.content"], "(?i)<(?:[a-zA-Z0-9_-]+:)?Username(?:\\s+[^>]*)?>\\s*(?P<wsse_user>[^<>\\s]+)\\s*</(?:[a-zA-Z0-9_-]+:)?Username>"), "upsert") where IsString(attributes["http.request.body.content"]) and IsMatch(attributes["http.request.body.content"], "(?i)<(?:[a-zA-Z0-9_-]+:)?Username")
+              - merge_maps(attributes, ExtractPatterns(attributes["http.request.body.content"], "(?i)\"(?:wsse:)?(?:user|username)\"\\s*:\\s*\"(?P<wsse_user>[^\"]+)\""), "upsert") where IsString(attributes["http.request.body.content"]) and IsMatch(attributes["http.request.body.content"], "(?i)\"(?:wsse:)?(?:user|username)\"\\s*:")
+              # 2. Extract WSSE username from HTTP header if present (X-WSSE / Authorization)
+              - merge_maps(attributes, ExtractPatterns(attributes["http.request.header.x-wsse"], "(?i)Username=\"(?P<wsse_user>[^\"]+)\""), "upsert") where IsString(attributes["http.request.header.x-wsse"]) and IsMatch(attributes["http.request.header.x-wsse"], "(?i)Username=")
+              # 3. Extract SOAPAction header
+              - set(attributes["soap.action"], attributes["http.request.header.soapaction"]) where attributes["http.request.header.soapaction"] != nil
+              # 4. Standard OpenTelemetry user identity attributes
+              - set(attributes["enduser.id"], attributes["wsse_user"]) where attributes["wsse_user"] != nil
+              - set(attributes["user.name"], attributes["wsse_user"]) where attributes["wsse_user"] != nil
+              - set(attributes["wsse.username"], attributes["wsse_user"]) where attributes["wsse_user"] != nil
+              - set(attributes["client.user"], attributes["wsse_user"]) where attributes["wsse_user"] != nil
+              - set(attributes["auth.scheme"], "wsse") where attributes["wsse_user"] != nil
+              # 5. Redact Password values from body to prevent credential leaks
+              - replace_all_patterns(attributes, "value", "(?i)<(?:[a-zA-Z0-9_-]+:)?Password(?:[^>]*)>[^<]*</(?:[a-zA-Z0-9_-]+:)?Password>", "<wsse:Password>***REDACTED***</wsse:Password>")
+              # 6. Normalize HTTP status code and method for APM Server compatibility
+              - set(attributes["http.status_code"], attributes["http.response.status_code"]) where attributes["http.status_code"] == nil and attributes["http.response.status_code"] != nil
+              - set(attributes["http.response.status_code"], attributes["http.status_code"]) where attributes["http.response.status_code"] == nil and attributes["http.status_code"] != nil
+              - set(attributes["http.method"], attributes["http.request.method"]) where attributes["http.method"] == nil and attributes["http.request.method"] != nil
+              - set(attributes["http.request.method"], attributes["http.method"]) where attributes["http.request.method"] == nil and attributes["http.method"] != nil
+              # 7. Normalize client IP and proxy headers (X-Forwarded-For, X-Real-IP)
+              - set(attributes["x_forwarded_for"], attributes["http.request.header.x-forwarded-for"]) where attributes["http.request.header.x-forwarded-for"] != nil
+              - set(attributes["x_real_ip"], attributes["http.request.header.x-real-ip"]) where attributes["http.request.header.x-real-ip"] != nil
+              - set(attributes["client.address"], attributes["network.peer.address"]) where attributes["network.peer.address"] != nil and IsMatch(attributes["network.peer.address"], "^[0-9]+\\.[0-9]+\\.[0-9]+\\.[0-9]+$")
+              - set(attributes["client.ip"], attributes["network.peer.address"]) where attributes["network.peer.address"] != nil and IsMatch(attributes["network.peer.address"], "^[0-9]+\\.[0-9]+\\.[0-9]+\\.[0-9]+$")
+              # 8. Set span status to ERROR (2) for HTTP 4xx and 5xx responses
+              - set(status.code, 2) where attributes["http.response.status_code"] >= 400 or attributes["http.status_code"] >= 400
+              # 9. Normalize byte sizes for Elastic APM Server compatibility (ECS & legacy semconv)
+              - set(attributes["http.request_content_length"], attributes["http.request.body.size"]) where attributes["http.request_content_length"] == nil and attributes["http.request.body.size"] != nil
+              - set(attributes["http.response_content_length"], attributes["http.response.body.size"]) where attributes["http.response_content_length"] == nil and attributes["http.response.body.size"] != nil
+              - set(attributes["http.request.bytes"], attributes["http.request.body.size"]) where attributes["http.request.bytes"] == nil and attributes["http.request.body.size"] != nil
+              - set(attributes["http.response.bytes"], attributes["http.response.body.size"]) where attributes["http.response.bytes"] == nil and attributes["http.response.body.size"] != nil
+              # 10. Normalize network & socket attributes matching Elastic APM ECS format
+              - set(attributes["net.protocol.name"], "http") where attributes["net.protocol.name"] == nil
+              - set(attributes["net.protocol.version"], attributes["network.protocol.version"]) where attributes["net.protocol.version"] == nil and attributes["network.protocol.version"] != nil
+              - set(attributes["net.sock.peer.addr"], attributes["network.peer.address"]) where attributes["net.sock.peer.addr"] == nil and attributes["network.peer.address"] != nil
+              - set(attributes["net.sock.peer.addr"], attributes["client.address"]) where attributes["net.sock.peer.addr"] == nil and attributes["client.address"] != nil
+              - set(attributes["net.sock.peer.port"], attributes["network.peer.port"]) where attributes["net.sock.peer.port"] == nil and attributes["network.peer.port"] != nil
+              - set(attributes["net.sock.host.addr"], attributes["server.address"]) where attributes["net.sock.host.addr"] == nil and attributes["server.address"] != nil
+              # 11. Normalize User Agent
+              - set(attributes["user_agent.original"], attributes["http.request.header.user-agent"]) where attributes["user_agent.original"] == nil and attributes["http.request.header.user-agent"] != nil
+              # 12. Normalize HTTP Route
+              - set(attributes["http.route"], attributes["url.path"]) where attributes["http.route"] == nil and attributes["url.path"] != nil
+      {{- if $redact }}
+      transform/redact:
+        error_mode: ignore
+        trace_statements:
+          - context: span
+            statements:
+              {{- if $c.redaction.authorizationHeader }}
+              - delete_key(attributes, "http.request.header.authorization")
+              {{- end }}
+              {{- if $c.redaction.wsseHeader }}
+              - delete_key(attributes, "http.request.header.x-wsse")
+              {{- end }}
+              {{- if $c.redaction.dropBodies }}
+              - delete_key(attributes, "http.request.body.content")
+              - delete_key(attributes, "http.response.body.content")
+              {{- end }}
+      {{- end }}
+
+    exporters:
+      {{- if $c.debug }}
+      debug:
+        verbosity: detailed
+      {{- end }}
+      {{- if eq $mode "elk" }}
+      otlp/elastic:
+        endpoint: {{ $c.exporter.elk.endpoint }}
+        tls:
+          insecure: {{ $c.exporter.elk.insecure }}
+        {{- with $c.exporter.elk.headers }}
+        headers:
+          {{- toYaml . | nindent 10 }}
+        {{- end }}
+      {{- else }}
+      otlp_http/tracescope:
+        endpoint: {{ $c.exporter.tracescope.endpoint }}
+        encoding: {{ $c.exporter.tracescope.encoding }}
+        compression: {{ $c.exporter.tracescope.compression }}
+        timeout: {{ $c.exporter.tracescope.timeout }}
+        {{- if or $c.exporter.tracescope.headers $c.exporter.tracescope.apiKeySecret.name }}
+        headers:
+          {{- with $c.exporter.tracescope.headers }}
+          {{- toYaml . | nindent 10 }}
+          {{- end }}
+          {{- if $c.exporter.tracescope.apiKeySecret.name }}
+          X-API-Key: ${env:TRACESCOPE_API_KEY}
+          {{- end }}
+        {{- end }}
+      {{- end }}
+
+    service:
+      pipelines:
+        traces:
+          receivers: [otlp]
+          processors:
+            - memory_limiter
+            - filter/drop_internal_spans
+            - transform/wsse
+            {{- if $redact }}
+            - transform/redact
+            {{- end }}
+            - batch
+          exporters:
+            {{- if $c.debug }}
+            - debug
+            {{- end }}
+            - {{ $exporter }}
+      telemetry:
+        logs:
+          level: {{ $c.telemetry.logsLevel }}
+        metrics:
+          level: {{ $c.telemetry.metricsLevel }}
+{{- end }}

@@ -20,6 +20,7 @@ from backend.config import settings
 from backend.app.repositories.db_context import db_transaction, get_connection
 from backend.app.repositories.elasticsearch_trace_repository import ElasticsearchTraceRepository
 from backend.app.services.normalization import classify_source_ip_role
+from backend.app.services.trace_edge_resolution import traces_source_sql
 
 log = logging.getLogger("tracescope-interactive-topology")
 
@@ -69,10 +70,14 @@ def evidence_for(method: Any, confidence: Any = 0.0) -> Tuple[str, str, float]:
         score = max(0.0, min(1.0, float(confidence or 0.0)))
     except (TypeError, ValueError):
         score = 0.0
-    if method_text == "client_span":
-        return "OTEL_CLIENT_SERVER", "OTel client span to peer service", max(score, 1.0)
-    if method_text == "trace_parent":
-        return "OTEL_PARENT_CHILD", "OTel parent/child service relationship", max(score, 1.0)
+    if method_text in ("client_span", "client_retargeted", "client_exit"):
+        return "OTEL_CLIENT_SERVER", "OTel client span to peer service", max(score, {"client_span": 1.0, "client_retargeted": 0.8}.get(method_text, 0.7))
+    if method_text == "trace_peer_match":
+        return "OTEL_CLIENT_SERVER", "OTel client span in the same trace matching the called service", max(score, 0.9)
+    if method_text in ("trace_parent", "trace_intermediary"):
+        return "OTEL_PARENT_CHILD", "OTel parent/child service relationship", max(score, 1.0 if method_text == "trace_parent" else 0.9)
+    if method_text == "time_correlated":
+        return "IP_SERVICE_INFERRED", "Client call from another trace overlapping this request", max(score, 0.5)
     if method_text == "header":
         return "HTTP_NETWORK_OBSERVED", "HTTP peer/header service relationship", max(score, 0.8)
     if method_text == "network_ip":
@@ -257,12 +262,15 @@ class InteractiveTopologyRepository:
             coalesce(nullIf(trim(target_service), ''), 'unknown') AS target_service,
             coalesce(nullIf(trim(operation_key), ''), operation) AS raw_api,
             if(principal_name IN ('', 'unknown', '-anonymous-'), '-anonymous-', principal_name) AS principal,
-            if(caller_resolution_method = 'client_span', 'OTEL_CLIENT_SERVER',
-               if(caller_resolution_method = 'trace_parent', 'OTEL_PARENT_CHILD',
-                  if(caller_resolution_method = 'header', 'HTTP_NETWORK_OBSERVED', 'IP_SERVICE_INFERRED'))) AS evidence_type,
-            if(caller_resolution_method = 'client_span', 'OTel client span to peer service',
-               if(caller_resolution_method = 'trace_parent', 'OTel parent/child service relationship',
-                  if(caller_resolution_method = 'header', 'HTTP peer/header service relationship', 'Service inferred from network peer IP'))) AS evidence_detail,
+            multiIf(caller_resolution_method IN ('client_span', 'client_retargeted', 'client_exit', 'trace_peer_match'), 'OTEL_CLIENT_SERVER',
+                    caller_resolution_method IN ('trace_parent', 'trace_intermediary'), 'OTEL_PARENT_CHILD',
+                    caller_resolution_method = 'header', 'HTTP_NETWORK_OBSERVED', 'IP_SERVICE_INFERRED') AS evidence_type,
+            multiIf(caller_resolution_method IN ('client_span', 'client_retargeted', 'client_exit'), 'OTel client span to peer service',
+                    caller_resolution_method = 'trace_peer_match', 'OTel client span in the same trace matching the called service',
+                    caller_resolution_method IN ('trace_parent', 'trace_intermediary'), 'OTel parent/child service relationship',
+                    caller_resolution_method = 'header', 'HTTP peer/header service relationship',
+                    caller_resolution_method = 'time_correlated', 'Client call from another trace overlapping this request',
+                    'Service inferred from network peer IP') AS evidence_detail,
             greatest(0.0, least(1.0, toFloat64(caller_confidence))) AS confidence,
             if(effective_client_ip IS NULL OR effective_client_ip IN ('', 'unavailable', 'unknown'),
                ifNull(observed_ip, ''), effective_client_ip) AS source_ip
@@ -286,7 +294,7 @@ class InteractiveTopologyRepository:
             countIf(principal = '-anonymous-') anonymous_requests,
             min(timestamp_ms) first_seen_ms, max(timestamp_ms) last_seen_ms
         """
-        base = "FROM traces WHERE timestamp_ms >= {start_ms:Int64} AND timestamp_ms < {end_ms:Int64}"
+        base = f"FROM {traces_source_sql()} WHERE timestamp_ms >= {{start_ms:Int64}} AND timestamp_ms < {{end_ms:Int64}}"
         params = {"start_ms": start_ms, "end_ms": end_ms}
 
         def query(group_by: str) -> List[Dict[str, Any]]:

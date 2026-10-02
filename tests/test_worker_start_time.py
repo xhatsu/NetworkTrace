@@ -6,6 +6,7 @@ import pytest
 from backend.config import Settings, _parse_timestamp_setting, settings
 from backend.repository import StorageRepository
 from backend.app.services.aggregation import aggregate_traces
+from backend.app.services.principal_activity import materialize_principal_activity
 from backend.app.repositories.aggregate_repository import AggregateRepository
 from backend.app.repositories.trace_repository import TraceRepository
 from backend.app.services.normalization import normalize_otel_record
@@ -173,6 +174,7 @@ def test_elasticsearch_reader_initial_filter(monkeypatch):
 
 def test_principal_intelligence_skips_past_data_when_cutoff_configured(tmp_path):
     from backend.app.services.principal_relationships import process_principal_intelligence
+    from backend.app.services.principal_activity import materialize_principal_activity
 
     db_path = tmp_path / "principal_cutoff_test.db"
     StorageRepository(db_path).migrate()
@@ -192,6 +194,7 @@ def test_principal_intelligence_skips_past_data_when_cutoff_configured(tmp_path)
         for i in range(5)
     ]
     trace_repo.insert_traces(historical_traces)
+    materialize_principal_activity(1_700_000_000_000, 1_700_000_005_000, db_path)
 
     cutoff_ms = 1_700_050_000_000
     orig_time = settings.worker_start_time
@@ -209,7 +212,7 @@ def test_principal_intelligence_skips_past_data_when_cutoff_configured(tmp_path)
             assert row is not None
             cp = json.loads(row[0])
             assert cp["bootstrap_cutoff_ms"] == cutoff_ms
-            assert cp["ingest_order"] > 0
+            assert "updated_at_ms" in cp
 
         # Now insert 3 traces after cutoff
         new_traces = [
@@ -226,6 +229,7 @@ def test_principal_intelligence_skips_past_data_when_cutoff_configured(tmp_path)
             for i in range(3)
         ]
         trace_repo.insert_traces(new_traces)
+        materialize_principal_activity(1_700_100_000_000, 1_700_100_003_000, db_path)
 
         res2 = process_principal_intelligence(db_path=db_path)
         assert res2["processed"] == 3

@@ -59,6 +59,8 @@ def _test_safe_migrations(database=None):
             client = clickhouse_migrator.get_clickhouse_client(target_db)
             client.command("ALTER TABLE traces REMOVE TTL")
             client.command("ALTER TABLE metric_buckets REMOVE TTL")
+            client.command("ALTER TABLE principal_activity_5m REMOVE TTL")
+            client.command("ALTER TABLE principal_activity_consumed REMOVE TTL")
         except Exception:
             pass
     return res

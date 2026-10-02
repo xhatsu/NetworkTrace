@@ -22,6 +22,7 @@ import time
 from typing import Any, Dict, List, Optional, Tuple
 
 from backend.app.models.trace import NormalizedTrace
+from backend.app.services.normalization import normalize_operation_key
 from backend.app.services.wsse import (
     SOAP_BODY_ATTRIBUTES,
     WSSE_USERNAME_ATTRIBUTES,
@@ -393,6 +394,65 @@ def parse_otlp_json(data: dict) -> List[Dict[str, Any]]:
     return spans
 
 
+# Attributes that carry HTTP payload sizes. OBI emits ``http.*.body.size``; the
+# collector also mirrors them into the content-length and ``*.bytes`` spellings.
+_REQUEST_BYTES_ATTRIBUTES = (
+    "http.request.body.size", "http.request.bytes", "http.request_content_length",
+    "http.request.size", "http.request_content_length_uncompressed",
+)
+_RESPONSE_BYTES_ATTRIBUTES = (
+    "http.response.body.size", "http.response.bytes", "http.response_content_length",
+    "http.response.size", "http.response_content_length_uncompressed",
+)
+_PEER_ADDRESS_ATTRIBUTES = ("server.address", "net.peer.name", "network.peer.address", "net.peer.ip")
+_CLUSTER_SUFFIXES = (".svc.cluster.local", ".svc")
+
+
+def _byte_count(value: Any) -> Optional[int]:
+    """Return a non-negative byte count, or None when the span did not measure one."""
+    if value is None or isinstance(value, bool):
+        return None
+    try:
+        number = int(float(value))
+    except (TypeError, ValueError, OverflowError):
+        return None
+    return number if number >= 0 else None
+
+
+def _peer_service_name(host: Any) -> Optional[str]:
+    """Name the service a client span called from its destination address.
+
+    Cluster DNS names (``svc``, ``svc.ns.svc``, ``svc.ns.svc.cluster.local``) and
+    bare host names are the service itself. Any other name is kept whole, so an
+    external host such as ``api.example.com`` can never be mistaken for a service
+    called ``api``.
+    """
+    text = str(host or "").strip().lower().rstrip(".")
+    if not text:
+        return None
+    text = re.sub(r"^[a-z][a-z0-9+.-]*://", "", text).split("/", 1)[0]
+    if text.startswith("["):
+        text = text.split("]", 1)[0].lstrip("[")
+    elif text.count(":") == 1:
+        text = text.split(":", 1)[0]
+    if not text:
+        return None
+    for suffix in _CLUSTER_SUFFIXES:
+        if text.endswith(suffix):
+            return text[: -len(suffix)].split(".", 1)[0] or None
+    if "." not in text:
+        return text
+    return text
+
+
+def _canonical_operation(method: Optional[str], route: Optional[str], name: str, service: str) -> str:
+    """Canonical API key: ``METHOD /path/{id}`` for HTTP, else the span name."""
+    path = (route or "").split("?", 1)[0].strip()
+    if method and path.startswith("/"):
+        return normalize_operation_key(service, f"{method.upper()} {path}")
+    return normalize_operation_key(service, path or name)
+
+
 def otlp_span_to_normalized_trace(span: Dict[str, Any]) -> Optional[NormalizedTrace]:
     """Convert an OTLP span dictionary into a NormalizedTrace model."""
     res_attrs = span.get("resource_attributes") or {}
@@ -414,7 +474,8 @@ def otlp_span_to_normalized_trace(span: Dict[str, Any]) -> Optional[NormalizedTr
     # OPERATION & ROUTE
     name = str(span.get("name") or "unknown-operation")[:500]
     http_route = str(get_attr("http.route", "url.path", "http.target", default="") or "")[:500] or None
-    operation = http_route or name
+    if http_route:
+        http_route = http_route.split("?", 1)[0] or None
 
     # TIMESTAMPS & DURATION
     start_nano = span.get("start_time_unix_nano") or 0
@@ -488,6 +549,17 @@ def otlp_span_to_normalized_trace(span: Dict[str, Any]) -> Optional[NormalizedTr
     except (TypeError, ValueError): target_port = None
 
     if span_kind == "client":
+        # eBPF client spans carry no peer.service; the destination address names
+        # the called service (cluster DNS name) or an external host.
+        if not peer_service:
+            for key in _PEER_ADDRESS_ATTRIBUTES:
+                peer_service = _peer_service_name(get_attr(key))
+                if peer_service:
+                    break
+        if not peer_service:
+            full_url = get_attr("url.full", "http.url")
+            peer_service = _peer_service_name(full_url) if full_url else None
+        peer_service = peer_service[:200] if peer_service else None
         caller_service = service_name
         target_service = peer_service or "unknown-downstream"
     else:
@@ -531,6 +603,18 @@ def otlp_span_to_normalized_trace(span: Dict[str, Any]) -> Optional[NormalizedTr
         if v is not None: extra[tgt] = str(v)[:300]
 
     http_method = str(get_attr("http.request.method", "http.method", default="GET"))[:20].upper() or None
+    explicit_method = get_attr("http.request.method", "http.method")
+    operation = _canonical_operation(
+        str(explicit_method)[:20] if explicit_method else None, http_route, name, target_service,
+    )[:500]
+    request_bytes = next((v for v in (_byte_count(get_attr(k)) for k in _REQUEST_BYTES_ATTRIBUTES) if v is not None), None)
+    response_bytes = next((v for v in (_byte_count(get_attr(k)) for k in _RESPONSE_BYTES_ATTRIBUTES) if v is not None), None)
+    if span_kind == "client":
+        resolution_method, resolution_confidence = "client_span", (1.0 if peer_service else 0.0)
+    elif peer_service:
+        resolution_method, resolution_confidence = "header", 0.8
+    else:
+        resolution_method, resolution_confidence = "none", 0.0
     attributes_json = json.dumps(extra, separators=(',', ':')) if extra else None
 
     return NormalizedTrace(
@@ -562,5 +646,9 @@ def otlp_span_to_normalized_trace(span: Dict[str, Any]) -> Optional[NormalizedTr
         protocol="http",
         span_kind=span_kind,
         attributes_json=attributes_json,
+        caller_resolution_method=resolution_method,
+        caller_confidence=resolution_confidence,
+        request_bytes=request_bytes,
+        response_bytes=response_bytes,
         created_at=int(time.time() * 1000)
     )

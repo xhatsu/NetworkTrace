@@ -16,8 +16,11 @@ from backend.app.repositories.db_context import db_transaction, get_connection
 from backend.worker import run_jobs
 
 
+# principal_activity_5m is deliberately NOT listed: it keeps up to 35 days of user
+# behavior that raw traces (1-day TTL) can no longer rebuild. Its consumption ledger is
+# reset with the principal checkpoint, so the next bootstrap replays the kept rollup.
 DERIVED_TABLES = (
-    "accounts", "anomalies", "anomaly_events", "anomaly_occurrences",
+    "principal_activity_consumed", "accounts", "anomalies", "anomaly_events", "anomaly_occurrences",
     "baseline_metrics", "behavior_contracts", "behavior_daily",
     "behavior_deviations", "behavior_graph_models", "behavior_observations",
     "behavior_profiles", "behavior_state", "behavior_windows",
@@ -32,7 +35,7 @@ DERIVED_TABLES = (
     "telemetry_quality_windows", "topology_api_current", "topology_api_edges_5m",
     "topology_edges", "topology_principal_current", "topology_principal_edges_5m",
     "topology_principal_ip_5m", "topology_principal_ip_current",
-    "topology_service_current", "topology_service_edges_5m",
+    "topology_service_current", "topology_service_edges_5m", "trace_edge_resolutions",
 )
 
 

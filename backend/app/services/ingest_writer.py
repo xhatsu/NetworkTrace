@@ -70,6 +70,10 @@ class IngestWriter:
         "network_peer_ip", "original_client_ip", "original_client_ip_trusted",
         "source_group", "operation_key", "soap_fault_code", "outcome_class",
         "sampling_context", "dedup_key",
+        # IP evidence and measured payload sizes. Without these the high-throughput
+        # writer silently dropped bandwidth and left observed/effective IPs empty.
+        "observed_ip", "effective_client_ip", "ip_resolution", "client_identity_quality",
+        "context_quality", "traffic_class", "is_agent_trace", "request_bytes", "response_bytes",
     ]
 
     def __init__(

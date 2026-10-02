@@ -53,7 +53,7 @@ async def get_overview(
                    ROUND(SUM(request_count)*1.0 / ?, 2) as rps,
                    ROUND(SUM(error_count)*1.0 / NULLIF(SUM(request_count),0), 4) as error_rate,
                    ROUND(MAX(latency_p95), 2) as p95_latency
-            FROM metric_buckets
+            FROM metric_buckets FINAL
             WHERE bucket_size = 60 AND bucket_start >= ? AND bucket_start < ?
             GROUP BY target_service ORDER BY requests DESC LIMIT 6
         """, (time_span, start_sec, end_sec)).fetchall()]
@@ -63,7 +63,7 @@ async def get_overview(
                    ROUND(SUM(request_count)*1.0 / ?, 2) as rps,
                    ROUND(SUM(error_count)*1.0 / NULLIF(SUM(request_count),0), 4) as error_rate,
                    ROUND(MAX(latency_p95), 2) as p95_latency
-            FROM metric_buckets
+            FROM metric_buckets FINAL
             WHERE bucket_size = 60 AND bucket_start >= ? AND bucket_start < ? AND principal_name != ''
             GROUP BY principal_name ORDER BY requests DESC LIMIT 6
         """, (time_span, start_sec, end_sec)).fetchall()]
@@ -72,7 +72,7 @@ async def get_overview(
             SELECT operation as name, target_service as service,
                    ROUND(MAX(latency_p95), 2) as p95_latency,
                    SUM(request_count) as requests
-            FROM metric_buckets
+            FROM metric_buckets FINAL
             WHERE bucket_size = 60 AND bucket_start >= ? AND bucket_start < ?
             GROUP BY operation, target_service ORDER BY p95_latency DESC LIMIT 6
         """, (start_sec, end_sec)).fetchall()]
