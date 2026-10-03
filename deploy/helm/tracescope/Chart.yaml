@@ -2,8 +2,8 @@ apiVersion: v2
 name: tracescope
 description: TraceScope Behavioral Observability & OTel Transaction Analytics Platform
 type: application
-version: "0.3.11"
-appVersion: "0.4.7"
+version: "0.3.12"
+appVersion: "0.4.8"
 icon: https://raw.githubusercontent.com/tracescope/tracescope/main/docs/logo.png
 keywords:
   - opentelemetry
