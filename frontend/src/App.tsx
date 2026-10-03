@@ -37,6 +37,8 @@ import { useI18n, LanguageSwitcher } from "./i18n";
 import { OverviewPage } from "./pages/Overview";
 import { ServicesPage, ServiceDetailPage } from "./pages/Services";
 import { ApiDetailPage, ApisPage } from "./pages/ApiDetail";
+import { RelationshipMapPage } from "./workspace/MapPage";
+import { ApiWorkspacePage, ApisIndexPage, ServiceScopePage, ServicesIndexPage, UserWorkspacePage, UsersIndexPage } from "./workspace/pages";
 import { BehaviorPage, BehaviorDetailPage } from "./pages/Behavior";
 import { ChangesPage, ChangeDetailPage } from "./pages/Changes";
 import { TracesPage, TraceDetailPage } from "./pages/Traces";
@@ -92,6 +94,15 @@ function SideNav() {
       label: "Dashboard",
       links: [
         [LayoutDashboard, "Dashboard", "/dashboard"],
+      ],
+    },
+    {
+      label: "Workspace",
+      links: [
+        [Network, "Relationship map", "/workspace/map"],
+        [Users, "Users", "/workspace/users"],
+        [Waypoints, "APIs", "/workspace/apis"],
+        [Boxes, "Service scopes", "/workspace/services"],
       ],
     },
     {
@@ -260,6 +271,13 @@ function FilterBar() {
 
   const currentEntity = useMemo(() => {
     const path = location.pathname;
+    if (path.startsWith("/workspace")) {
+      const parts = path.split("/").filter(Boolean).map(decodeURIComponent);
+      if (parts[1] === "map") return t("Relationship map", "Bản đồ quan hệ");
+      if (parts[1] === "users") return parts[2] ? `${t("User")}: ${parts[2]}` : t("Users");
+      if (parts[1] === "apis") return parts[3] ? `${t("API")}: ${parts[3]} (${parts[2]})` : t("APIs");
+      if (parts[1] === "services") return parts[2] ? `${t("Service scope", "Phạm vi Service")}: ${parts[2]}` : t("Service scopes", "Phạm vi Service");
+    }
     if (path.startsWith("/users/")) {
       const parts = path.split("/").filter(Boolean);
       const principal = decodeURIComponent(parts[1] || "");
@@ -569,6 +587,14 @@ function Layout() {
             <Route path="/services/:name" element={<ServiceDetailPage />} />
             <Route path="/services/:name/apis/:api" element={<ApiDetailPage />} />
             <Route path="/apis" element={<ApisPage />} />
+            <Route path="/workspace" element={<Navigate to="/workspace/users" replace />} />
+            <Route path="/workspace/map" element={<RelationshipMapPage />} />
+            <Route path="/workspace/users" element={<UsersIndexPage />} />
+            <Route path="/workspace/users/:principal" element={<UserWorkspacePage />} />
+            <Route path="/workspace/apis" element={<ApisIndexPage />} />
+            <Route path="/workspace/apis/:service/:api" element={<ApiWorkspacePage />} />
+            <Route path="/workspace/services" element={<ServicesIndexPage />} />
+            <Route path="/workspace/services/:service" element={<ServiceScopePage />} />
             <Route path="/traces" element={<TracesPage />} />
             <Route path="/traces/:id" element={<TraceDetailPage />} />
             <Route path="/agent-stats" element={<AgentStatsPage />} />

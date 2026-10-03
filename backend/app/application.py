@@ -59,6 +59,7 @@ from backend.app.api.investigations import router as investigations_router
 from backend.app.api.changes import router as changes_router
 from backend.app.api.alerts import router as alerts_router
 from backend.app.api.behavior import router as behavior_router
+from backend.app.api.relationships import router as relationships_router
 from backend.app.services.ingest_writer import ingest_writer
 from backend.app.services.investigation import InvestigationRunner
 from backend.app.services.storage_owner_client import StorageOwnerError, storage_owner_client
@@ -89,6 +90,7 @@ _ANALYTICS_ROUTERS = (
     changes_router,
     alerts_router,
     behavior_router,
+    relationships_router,
     reference_compat_router,
 )
 

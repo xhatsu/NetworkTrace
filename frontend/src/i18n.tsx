@@ -11,6 +11,9 @@ interface I18nContextType {
 
 export const translations: Record<Language, Record<string, string>> = {
   vi: {
+    "Workspace": "Không gian làm việc",
+    "Relationship map": "Bản đồ quan hệ",
+    "Service scopes": "Phạm vi Service",
     // Top Navigation & Branding
     "Learned behavior": "Hành vi đã học",
     "TraceScope": "TraceScope",

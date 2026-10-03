@@ -2,6 +2,39 @@
 
 > Complete deployment, generator parameters, and stack setup guide: [GUIDE.md](file:///home/ubuntu/Viettel/OtelTrace/GUIDE.md).
 
+## Relationship map column order per anchor (2026-10-03, after the Anchor Explorer below; backend + frontend, local `:31102` restarted, committed)
+
+- Supersedes the side lists of the Anchor Explorer below. `/workspace/map` (`frontend/src/workspace/MapPage.tsx`) shows each anchor as a path: **User** = Source IP -> User -> API; **Unknown users** = Source IP -> Unknown users -> API; **Service** = User (incl. one "Unknown users" row) -> Service -> API; **API** = origin -> User -> API, where origin is the caller service or, when no caller service was recorded, the source IP (both in one column), with origin->user links drawn between the two columns and the API card at the end. All traffic / Group anchors keep Caller service -> Service. Hovering a row highlights its links; IP rows are not clickable. Moving from a user (or Unknown users) to a service/API keeps `scope_user` (`-anonymous-` for unknown); other anchors clear it. The centre card shows "—" instead of "new" when the previous window has no data. Row bars removed (line width shows volume); API labels keep the method and path end. The explorer is a `<section data-map-explorer>` (was a nested `<main>`).
+- Backend: new `GET /api/v1/relationships/links?left=&right=` (`origin|caller|principal|ip|service`, scope `principal|service|api(+service)`, `sel_principal`, `limit<=5000`, `from/to`): request counts per pair from `topology_principal_ip_5m FINAL`, with `state` and IP role/LB for IP ends; unknown principals are one `-anonymous-` row of kind `unknown`. Test `test_links_origin_to_user_for_one_api`; relationships + boundary + spelling suites 14/14.
+- Verified in Chromium (live data, VI) at 1440/390 px: `alice_wsse` (8 IPs, 19 APIs), `order-service` (14 users, 14 APIs), `POST /api/v1/orders/process` (9 origins incl. 6 pod IPs, 14 users), unknown users; user -> API click sets the scope chip; no page errors, no failed API calls, no overflow. Lint, build, colour guard 15/15.
+- Hover path (2026-10-03, later): hovering any row (IP rows included; they are `aria-disabled`, not `disabled`, so they get mouse events) draws its whole path in yellow (`--path-highlight`) and dims the rest: User / Unknown users IP <-> API, Service user <-> API, API origin <-> user -> API. Pairs come from `/relationships/links` (`left=ip&right=api` with `principal`, `left=principal&right=api` with `service`; new link end `api` returns `left_service`/`right_service`). Highlighted ribbons keep their total width (a user's or API's whole traffic, not only the hovered row's share). Tests 14/14; Chromium: 7 / 4 / 11 / 10 yellow paths on the four hover cases, no page errors.
+- Pins and breadcrumb (2026-10-03, later): clicking a row's dot pins it (URL `pin`, repeatable): its path stays yellow and the other column is filtered to the rows on that path (header shows `6 / 19`); a "Pinned: x" chip unpins. Clicking the row name still moves the centre. Picking from the left list or the search bar starts a new path (clears `trail` and pins) and never pins. Moving to an anchor already on the breadcrumb steps back to it instead of appending, so the path no longer repeats (`traffic-ui › Unknown › traffic-ui › …`). All ribbons have the same width (1.5 px, 2.5 px when highlighted). Chromium: pin on user / API / service views filters 19->6, 14->13, 14->7, breadcrumb loop stays one item, no page errors. Row hover background is on the row wrapper (inner buttons are transparent), so it no longer paints over the yellow outline.
+
+## Relationship map & Changes redesign: Anchor Explorer & Attention Feed (2026-10-03; backend + frontend, local :31102 restarted, verified, committed)
+
+- **Relationship map (`/workspace/map`, `frontend/src/workspace/MapPage.tsx`):**
+  - Anchor Explorer architecture (Concept A + D): Central entity card with <= 10 neighbour rows per side. Fixed row height (36px), cubic Bezier SVG connectors colored by state (new, surge >= 2.5x, silent dashed) with traffic-proportional stroke widths.
+  - Left rail (260px): Search input with debounced server search (`q=`, facets `principal,service,api`), keyboard navigation (arrows/Enter/Escape), catalog groups matching typed query prepended. Kind switcher **Users | APIs | Services** (URL `list=`). Users sorted by reach (service count desc, then requests) with fixed "All traffic" and "Unknown users" (warn color); APIs with service and unknown share; Services with group · module. Capped at 300 rows with client-side filter and server fallback. Active anchor highlighted.
+  - Navigation & User Scope: Clicking any row moves anchor and pushes previous anchor onto breadcrumb `trail` (max 6). Moving from user anchor to service/API sets `scope_user` ("Only traffic from X" removable chip); anchoring on a user clears `scope_user`. "+ N more" button opens an in-place filterable list. "No caller service" row is non-clickable.
+  - Centre Card: Entity eyebrow, mono title, requests in window, change vs previous window, unknown users share, side counts, top entity chips, and direct workspace link.
+- **Changes page (`/changes`, `frontend/src/pages/Changes.tsx`):**
+  - Attention Feed layout (Concept C): 3-column layout (`xl`), 1-column below.
+  - Left Rail: Critical count on top; View radio list (Needs attention / All / Reviewed) with live counts; Change type checklist (multi-select comma-separated `change_type`); Subject filter (All / Service / User); AI assessment `<select>`; active `where` filter chip with quick removal; "Clear filters" action.
+  - Central List: Finding rows with status/workflow badges, title (link to detail), one-line summary, entity path chips (`caller → target → operation · ip` in entity colors), type chips (click to add filter), signal count, AI semantic assessment badge, and actions (**View details**, **Investigate**, and **Explore map →** with computed anchor). Right side shows before / now mini comparison bars with delta and last seen time.
+  - Right Panel "Where changes are": Group | Service | User tabs (Group hidden when only 1 group exists). Shows name, traffic bar, matching episodes, and attention count. Click filters feed (`where=<kind>:<name>` URL param).
+  - Backward compatibility: All URL params (`view`, `subject`, `change_type`, `assessment`, `q`, `sort`, `where`) and `ChangeDetailPage` (`/changes/:id`) fully preserved.
+- **Backend Graph Endpoint Removal:**
+  - Removed `GET /api/v1/relationships/graph` and its helpers (`GRAPH_COLUMNS`, `GRAPH_KEY_SQL`, `_graph_key`, `_graph_node`, `OTHER`, `NO_CALLER`) from `backend/app/api/relationships.py`.
+  - Removed obsolete graph tests from `tests/test_relationships_api.py`.
+- **Verification:**
+  - Backend pytest: 13/13 passed (`tests/test_relationships_api.py`, `tests/test_api_read_model_boundary.py`, `tests/test_principal_ips_api_spelling.py`).
+  - Frontend: `npm run lint` clean; `npm run build` clean; `sh scripts/check-color-budget.sh` passes 15/15.
+  - Real browser Playwright test suite (`backend/scripts/test_redesign_playwright.py`):
+    - Desktop EN & VI (1440x900): 0 errors, full filter & navigation walk passed.
+    - Mobile EN (390x844): 0 horizontal overflow (0 px), responsive column stacking verified.
+    - Large Mocked Estate (240 services, 1,500 APIs, 180 users): exactly 10 visible rows per side, "+ N more" in-place filter confirmed. No "Other" folding node.
+  - Local dev server restarted with `./run_server.sh restart` serving on port `:31102`.
+
 ## Glacier (light) + Midnight (dark) palette, WCAG AA text contrast (2026-10-02; frontend only, built and served on `:31102`, not committed)
 
 - Replaces Graphite Blue (user found the dark sidebar/top bar too contrasty). Palette preview: https://claude.ai/artifact/RucpRmp5RCHpVqasajgRgq.

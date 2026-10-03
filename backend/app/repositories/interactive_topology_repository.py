@@ -1287,8 +1287,12 @@ class InteractiveTopologyRepository:
             clauses.append("service = ?")
             args.append(canonical_service(service))
         if api:
-            clauses.append("api = ?")
-            args.append(canonical_api(api, service or ""))
+            # The rollup spells an API both "service/METHOD /path" and bare "METHOD /path"; match either.
+            spelled = canonical_api(api, service or "")
+            owner = canonical_service(service) if service else ""
+            bare = spelled[len(owner) + 1:] if owner and spelled.startswith(f"{owner}/") else spelled
+            clauses.append("api IN (?, ?)")
+            args.extend([bare, f"{owner}/{bare}" if owner else bare])
         if decoded:
             if len(decoded) >= 5:
                 clauses.append("(source_ip > ? OR (source_ip = ? AND service > ?) OR (source_ip = ? AND service = ? AND api > ?) OR (source_ip = ? AND service = ? AND api = ? AND caller_service > ?) OR (source_ip = ? AND service = ? AND api = ? AND caller_service = ? AND principal > ?))")

@@ -1,0 +1,964 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+</head>
+<body>
+<title>Relationship Map Concepts</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+/* Layout: TraceScope console page. Header and problem strip, then four live prototypes on one mocked 240-service estate (tabs), then a comparison table. Palette follows the app's Glacier / Midnight tokens. */
+:root{
+  --page:#f1f4f9; --surface:#fbfcfe; --surface-2:#f5f8fc; --structure:#e8eff9;
+  --border:#d5deea; --border-strong:#c5d1e1;
+  --text:#162033; --muted:#4f5b70; --faint:#56617a;
+  --accent:#1e56d8; --accent-soft:#dbe7fd;
+  --warn:#9e4b08; --warn-soft:#fdebd6; --good:#14733a; --bad:#b91c1c; --bad-soft:#fde2e2;
+  --svc:#0c6f8a; --user:#a21caf; --api:#0e706a; --grp:#4f46e5; --none:#56617a;
+  --font:'Inter',system-ui,-apple-system,'Segoe UI',sans-serif;
+  --mono:'JetBrains Mono',ui-monospace,'SFMono-Regular',Menlo,monospace;
+  --r:6px;
+}
+@media (prefers-color-scheme: dark){ :root:not([data-theme="light"]){
+  --page:#0d1117; --surface:#151b23; --surface-2:#1a212b; --structure:#1b2330;
+  --border:#283140; --border-strong:#343e50;
+  --text:#e8edf4; --muted:#9aa5b5; --faint:#8c97a8;
+  --accent:#58a6ff; --accent-soft:#1c2a40;
+  --warn:#f0a43a; --warn-soft:#3a2a12; --good:#4ade80; --bad:#f87171; --bad-soft:#3b1717;
+  --svc:#22d3ee; --user:#e07ae8; --api:#4fc1b3; --grp:#a5b4fc; --none:#8c97a8;
+  color-scheme:dark;
+}}
+:root[data-theme="dark"]{
+  --page:#0d1117; --surface:#151b23; --surface-2:#1a212b; --structure:#1b2330;
+  --border:#283140; --border-strong:#343e50;
+  --text:#e8edf4; --muted:#9aa5b5; --faint:#8c97a8;
+  --accent:#58a6ff; --accent-soft:#1c2a40;
+  --warn:#f0a43a; --warn-soft:#3a2a12; --good:#4ade80; --bad:#f87171; --bad-soft:#3b1717;
+  --svc:#22d3ee; --user:#e07ae8; --api:#4fc1b3; --grp:#a5b4fc; --none:#8c97a8;
+  color-scheme:dark;
+}
+*{box-sizing:border-box}
+[hidden]{display:none!important}
+body{background:var(--page);color:var(--text);font:14px/1.5 var(--font);padding-inline:16px;padding-block:20px 48px}
+.wrap{max-width:1320px;margin:0 auto;display:flex;flex-direction:column;gap:20px}
+h1,h2,h3{margin:0;text-wrap:balance}
+h1{font-size:24px;font-weight:700;letter-spacing:-.01em}
+h2{font-size:17px;font-weight:600}
+h3{font-size:15px;font-weight:600}
+p{margin:0}
+.lede{color:var(--muted);max-width:72ch}
+.num,.mono{font-variant-numeric:tabular-nums}
+.mono{font-family:var(--mono);font-size:12px}
+.eyebrow{font-size:11px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--faint)}
+button{font:inherit;color:inherit}
+:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+
+.head{display:flex;flex-wrap:wrap;gap:16px;align-items:flex-end;justify-content:space-between}
+.facts{display:flex;flex-wrap:wrap;gap:8px}
+.fact{background:var(--surface);border:1px solid var(--border);border-radius:var(--r);padding:6px 10px;font-size:12px;color:var(--muted)}
+.fact b{color:var(--text);font-weight:600}
+
+.problem{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:12px}
+.pcell{background:var(--surface);border:1px solid var(--border);border-radius:var(--r);padding:12px 14px;display:flex;flex-direction:column;gap:4px;min-width:0}
+.pcell.rec{background:var(--accent-soft);border-color:transparent}
+.pcell .big{font-size:20px;font-weight:700;font-variant-numeric:tabular-nums}
+
+.tabs{display:flex;flex-wrap:wrap;gap:4px;border-bottom:1px solid var(--border)}
+.tab{background:none;border:0;border-bottom:2px solid transparent;padding:8px 12px;cursor:pointer;color:var(--muted);display:flex;gap:8px;align-items:baseline}
+.tab .ix{font-family:var(--mono);font-size:11px;color:var(--faint)}
+.tab[aria-selected="true"]{color:var(--text);border-bottom-color:var(--accent);font-weight:600}
+.tab:hover{color:var(--text)}
+
+.concept{display:flex;flex-direction:column;gap:14px}
+.brief{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:12px}
+.brief div{min-width:0}
+.brief .eyebrow{margin-bottom:2px}
+.brief p{color:var(--muted);font-size:13px}
+.stage{background:var(--surface);border:1px solid var(--border);border-radius:var(--r);padding:14px;min-width:0}
+
+.toolbar{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-bottom:12px}
+.seg{display:inline-flex;border:1px solid var(--border-strong);border-radius:var(--r);overflow:hidden}
+.seg button{background:var(--surface);border:0;padding:5px 10px;cursor:pointer;font-size:12px;color:var(--muted)}
+.seg button+button{border-left:1px solid var(--border-strong)}
+.seg button[aria-pressed="true"]{background:var(--accent-soft);color:var(--text);font-weight:600}
+.input{background:var(--surface);border:1px solid var(--border-strong);border-radius:var(--r);padding:6px 10px;font:inherit;font-size:13px;color:var(--text);min-width:0}
+select.input{padding:5px 8px}
+.crumbs{display:flex;flex-wrap:wrap;gap:4px;align-items:center;font-size:13px;color:var(--faint)}
+.crumbs button{background:none;border:0;padding:2px 4px;border-radius:4px;cursor:pointer;color:var(--accent)}
+.crumbs button:hover{background:var(--accent-soft)}
+.crumbs .cur{color:var(--text);font-weight:600}
+.chip{display:inline-flex;align-items:center;gap:4px;font-size:11px;font-weight:600;padding:1px 6px;border-radius:999px;white-space:nowrap;line-height:1.6}
+.chip.new{background:var(--accent-soft);color:var(--accent)}
+.chip.silent{background:var(--bad-soft);color:var(--bad)}
+.chip.surge{background:var(--warn-soft);color:var(--warn)}
+.chip.unk{background:var(--warn-soft);color:var(--warn)}
+.chip.kind{background:var(--surface-2);border:1px solid var(--border);color:var(--c,var(--muted))}
+.btn{background:var(--surface);border:1px solid var(--border-strong);border-radius:var(--r);padding:5px 10px;cursor:pointer;font-size:12px}
+.btn:hover{background:var(--surface-2)}
+.btn.link{border:0;background:none;color:var(--accent);padding:2px 4px}
+.muted{color:var(--muted)} .faint{color:var(--faint)}
+
+/* A: anchor explorer */
+.search{position:relative;flex:1 1 260px;max-width:420px;display:flex}
+.search .input{flex:1}
+.results{position:absolute;top:100%;left:0;right:0;z-index:5;margin-top:4px;background:var(--surface);border:1px solid var(--border-strong);border-radius:var(--r);box-shadow:0 8px 24px rgb(0 0 0 / .12);max-height:320px;overflow:auto}
+.results button{display:flex;gap:8px;align-items:center;width:100%;text-align:left;background:none;border:0;padding:6px 10px;cursor:pointer;font-size:13px}
+.results button:hover,.results button.on{background:var(--accent-soft)}
+.results .nm{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0;flex:1}
+.ego{display:grid;grid-template-columns:minmax(0,1fr) 56px minmax(220px,270px) 56px minmax(0,1fr);align-items:start}
+.side{min-width:0}
+.side h4{margin:0 0 6px;font-size:12px;font-weight:600;color:var(--muted);display:flex;justify-content:space-between;gap:8px}
+.rows{position:relative}
+.nrow{--c:var(--svc);display:grid;grid-template-columns:8px minmax(0,1fr) 54px 46px auto;gap:8px;align-items:center;height:36px;width:100%;background:none;border:0;border-radius:4px;padding:0 6px;text-align:left;cursor:pointer}
+.nrow:hover:not(:disabled){background:var(--surface-2)}
+.nrow:disabled{cursor:default}
+.nrow .dot{width:8px;height:8px;border-radius:2px;background:var(--c)}
+.nrow .nl{min-width:0;display:flex;flex-direction:column;line-height:1.2}
+.nrow .nm{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:13px}
+.nrow .sub{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:11px;color:var(--faint)}
+.nrow .bar{height:4px;background:var(--surface-2);border-radius:2px;overflow:hidden}
+.nrow .bar i{display:block;height:100%;background:var(--c);opacity:.7}
+.nrow .nv{font-size:12px;text-align:right;font-variant-numeric:tabular-nums;color:var(--muted)}
+.more{margin-top:6px}
+.morelist{margin-top:6px;border:1px solid var(--border);border-radius:var(--r);max-height:240px;overflow:auto;padding:4px}
+.morelist .input{width:100%;margin-bottom:4px}
+.center{border:1px solid var(--border-strong);border-radius:var(--r);background:var(--surface-2);padding:14px;display:flex;flex-direction:column;gap:10px;align-self:center}
+.center h3{font-family:var(--mono);font-size:14px;word-break:break-all}
+.kv{display:grid;grid-template-columns:1fr auto;gap:2px 12px;font-size:12px}
+.kv dt{color:var(--muted)} .kv dd{margin:0;text-align:right;font-variant-numeric:tabular-nums;font-weight:600}
+.chips{display:flex;flex-wrap:wrap;gap:4px}
+.pill{--c:var(--user);background:var(--surface);border:1px solid var(--border);border-radius:999px;padding:1px 8px;font-size:12px;cursor:pointer;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.pill:hover{border-color:var(--c)}
+.conn path{fill:none}
+.scope{display:inline-flex;gap:6px;align-items:center;background:var(--accent-soft);border-radius:999px;padding:2px 4px 2px 10px;font-size:12px}
+.scope button{background:none;border:0;cursor:pointer;color:var(--muted);padding:0 4px}
+
+/* B: matrix */
+.mx-wrap{display:grid;grid-template-columns:minmax(0,1fr) 260px;gap:14px;align-items:start}
+.mx-scroll{overflow:auto;max-height:640px;border:1px solid var(--border);border-radius:var(--r)}
+table.mx{border-collapse:separate;border-spacing:2px;font-size:12px}
+.mx th{font-weight:500;color:var(--muted);background:var(--surface)}
+.mx thead th{position:sticky;top:0;z-index:2;vertical-align:bottom;height:130px;padding:4px 0}
+.mx thead th .vl{writing-mode:vertical-rl;transform:rotate(180deg);white-space:nowrap;max-height:124px;overflow:hidden;text-overflow:ellipsis;display:inline-block}
+.mx tbody th{position:sticky;left:0;z-index:1;text-align:left;padding:0 8px;max-width:190px;min-width:150px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.mx thead th:first-child{left:0;z-index:3}
+.mx td{width:28px;height:26px;min-width:28px;border-radius:3px;text-align:center;cursor:pointer;font-size:11px;font-weight:700;color:var(--text)}
+.mx td.empty{background:var(--surface-2);cursor:default}
+.mx td.tot{background:none;cursor:default;width:70px;text-align:left;font-weight:500;color:var(--muted);font-variant-numeric:tabular-nums}
+.mx td:not(.empty):not(.tot):hover{outline:2px solid var(--text)}
+.mx .other th,.mx th.other{font-style:italic}
+.detail{border:1px solid var(--border);border-radius:var(--r);padding:12px;display:flex;flex-direction:column;gap:8px;position:sticky;top:12px;font-size:13px}
+.legend{display:flex;flex-wrap:wrap;gap:10px;font-size:12px;color:var(--muted);align-items:center}
+.sw{display:inline-block;width:12px;height:12px;border-radius:3px;vertical-align:-2px;margin-right:4px}
+
+/* C: feed */
+.feed-wrap{display:grid;grid-template-columns:190px minmax(0,1fr) 280px;gap:16px;align-items:start}
+.rail{display:flex;flex-direction:column;gap:6px}
+.rail label{display:flex;gap:8px;align-items:center;font-size:13px;cursor:pointer}
+.rail label .num{margin-left:auto;color:var(--faint)}
+.finding{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:6px 14px;padding:12px 4px;border-bottom:1px solid var(--border)}
+.finding:last-child{border-bottom:0}
+.finding .top{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.finding .title{font-weight:600}
+.path{display:flex;flex-wrap:wrap;gap:4px;align-items:center;font-size:12px;grid-column:1}
+.path .seg-e{--c:var(--svc);border:1px solid var(--border);border-radius:4px;padding:0 6px;font-family:var(--mono);font-size:11px;max-width:260px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--c)}
+.path .arr{color:var(--faint)}
+.finding .nums{grid-row:1 / span 2;grid-column:2;display:flex;flex-direction:column;align-items:flex-end;gap:4px;font-size:12px;color:var(--muted)}
+.cmp{display:grid;grid-template-columns:auto 80px auto;gap:2px 6px;align-items:center;font-variant-numeric:tabular-nums}
+.cmp i{display:block;height:5px;border-radius:2px}
+.gtable{width:100%;border-collapse:collapse;font-size:12px}
+.gtable th{text-align:left;font-weight:600;color:var(--muted);padding:4px;border-bottom:1px solid var(--border)}
+.gtable td{padding:5px 4px;border-bottom:1px solid var(--border);font-variant-numeric:tabular-nums}
+.gtable tr.click{cursor:pointer}
+.gtable tr.click:hover td{background:var(--surface-2)}
+.gtable tr.on td{background:var(--accent-soft)}
+.mbar{height:5px;background:var(--surface-2);border-radius:2px;overflow:hidden;min-width:40px}
+.mbar i{display:block;height:100%;background:var(--warn)}
+
+/* D: icicle */
+.ic-wrap{display:grid;grid-template-columns:230px minmax(0,1fr);gap:14px;align-items:start}
+.ulist{border:1px solid var(--border);border-radius:var(--r);max-height:600px;overflow:auto;padding:4px}
+.urow{display:flex;gap:8px;align-items:center;width:100%;background:none;border:0;border-radius:4px;padding:5px 8px;cursor:pointer;text-align:left;font-size:13px}
+.urow:hover{background:var(--surface-2)}
+.urow[aria-pressed="true"]{background:var(--accent-soft);font-weight:600}
+.urow .nm{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.urow .num{font-size:11px;color:var(--faint);font-weight:400}
+.ic svg{display:block;width:100%}
+.ic rect{stroke:var(--surface);stroke-width:1}
+.ic text{font-size:11px;fill:var(--text);pointer-events:none}
+.ic .hit{cursor:pointer}
+.ic-cols{display:grid;font-size:11px;color:var(--faint);margin-bottom:4px}
+
+/* compare */
+.cmp-scroll{overflow-x:auto}
+table.compare{border-collapse:collapse;width:100%;min-width:760px;font-size:13px}
+.compare th,.compare td{text-align:left;vertical-align:top;padding:10px;border-bottom:1px solid var(--border)}
+.compare thead th{font-size:12px;color:var(--muted);font-weight:600}
+.compare td:first-child{font-weight:600;white-space:nowrap}
+.verdict{display:inline-block;font-size:11px;font-weight:600;padding:1px 6px;border-radius:999px;background:var(--surface-2);border:1px solid var(--border)}
+.verdict.yes{background:var(--accent-soft);border-color:transparent;color:var(--accent)}
+
+@media (max-width:1100px){
+  .feed-wrap{grid-template-columns:minmax(0,1fr)}
+  .rail{flex-direction:row;flex-wrap:wrap;gap:12px}
+  .mx-wrap{grid-template-columns:minmax(0,1fr)}
+  .detail{position:static}
+}
+@media (max-width:820px){
+  .ego{grid-template-columns:minmax(0,1fr);gap:14px}
+  .ego .conn{display:none}
+  .ego .center{order:-1;align-self:stretch}
+  .ic-wrap{grid-template-columns:minmax(0,1fr)}
+  .ulist{max-height:200px}
+}
+@media (prefers-reduced-motion:no-preference){ .nrow,.urow,.pill{transition:background .12s} }
+</style>
+
+<div class="wrap">
+  <header class="head">
+    <div style="display:flex;flex-direction:column;gap:6px;min-width:0">
+      <span class="eyebrow">TraceScope · /workspace/map redesign</span>
+      <h1>Relationship map concepts</h1>
+      <p class="lede">Four ways to show who reaches what across 200+ services without drawing everything at once. Every prototype below runs on the same mocked estate, so you can compare them on equal terms. Click around: they are working views, not pictures.</p>
+    </div>
+    <div class="facts" id="facts"></div>
+  </header>
+
+  <section class="problem" aria-label="Why the current map fails">
+    <div class="pcell"><span class="eyebrow">Current map at "Show 60"</span><span class="big">244 nodes · 832 ribbons</span><span class="muted">Renders in 0.3 s, but no one can read it.</span></div>
+    <div class="pcell"><span class="eyebrow">Current map at "Show 15"</span><span class="big" id="hiddenShare">–</span><span class="muted">of services fold into "Other", which becomes the biggest node.</span></div>
+    <div class="pcell rec"><span class="eyebrow">Rule for every concept</span><span class="big">≤ 30 nodes on screen</span><span class="muted">Complexity is bounded by choosing a level or an anchor, never by cutting to the top N of everything.</span></div>
+  </section>
+
+  <nav class="tabs" role="tablist" aria-label="Concepts">
+    <button class="tab" role="tab" data-tab="anchor"><span class="ix">A</span>Anchor explorer</button>
+    <button class="tab" role="tab" data-tab="matrix"><span class="ix">B</span>Drill-down heatmap</button>
+    <button class="tab" role="tab" data-tab="feed"><span class="ix">C</span>Attention feed</button>
+    <button class="tab" role="tab" data-tab="reach"><span class="ix">D</span>Reach icicle</button>
+    <button class="tab" role="tab" data-tab="compare"><span class="ix">→</span>Compare</button>
+  </nav>
+
+  <!-- A -->
+  <section class="concept" id="tab-anchor" role="tabpanel">
+    <div class="brief">
+      <div><div class="eyebrow">Idea</div><p>One entity in the centre with one hop on each side. Clicking a neighbour moves the centre there. You walk the graph instead of looking at all of it.</p></div>
+      <div><div class="eyebrow">Answers</div><p>"What does this user reach?" "Who calls this API, and through which service?"</p></div>
+      <div><div class="eyebrow">Why it scales</div><p>The screen shows at most 10 neighbours per side. The rest sit in a searchable list, so nothing folds into "Other".</p></div>
+      <div><div class="eyebrow">Weak spot</div><p>No estate-wide picture. You need a starting point: search, a feed item or a heatmap cell.</p></div>
+    </div>
+    <div class="stage" id="pA"></div>
+  </section>
+
+  <!-- B -->
+  <section class="concept" id="tab-matrix" role="tabpanel" hidden>
+    <div class="brief">
+      <div><div class="eyebrow">Idea</div><p>A heatmap that follows the service catalog: group to group, then service to service inside one cell, then users × APIs for one service pair.</p></div>
+      <div><div class="eyebrow">Answers</div><p>"Which parts of the estate talk to each other?" "Where is the unknown traffic?" "What changed this week?"</p></div>
+      <div><div class="eyebrow">Why it scales</div><p>A matrix has no crossing lines. Each level shows at most about 20 × 20 cells, whatever the estate size.</p></div>
+      <div><div class="eyebrow">Weak spot</div><p>Needs real catalog groups. With one group (today's live data) the top level is a single cell.</p></div>
+    </div>
+    <div class="stage" id="pB"></div>
+  </section>
+
+  <!-- C -->
+  <section class="concept" id="tab-feed" role="tabpanel" hidden>
+    <div class="brief">
+      <div><div class="eyebrow">Idea</div><p>No graph on the landing page. A ranked list of relationship changes, each with its path written out, and an estate table by group beside it.</p></div>
+      <div><div class="eyebrow">Answers</div><p>"What needs my attention?" New reach, silent paths, surges, APIs dominated by unknown users.</p></div>
+      <div><div class="eyebrow">Why it scales</div><p>The number of changes grows far slower than the number of services. 200 or 2,000 services is still one list.</p></div>
+      <div><div class="eyebrow">Weak spot</div><p>Shows only what changed. A quiet but odd relationship stays invisible until you look for it.</p></div>
+    </div>
+    <div class="stage" id="pC"></div>
+  </section>
+
+  <!-- D -->
+  <section class="concept" id="tab-reach" role="tabpanel" hidden>
+    <div class="brief">
+      <div><div class="eyebrow">Idea</div><p>The whole estate as one icicle: Group → Service → API, sized by traffic. Pick a user and their reach lights up. Click a block to zoom in.</p></div>
+      <div><div class="eyebrow">Answers</div><p>"How much of the estate does this user touch?" "How is traffic spread across groups and services?"</p></div>
+      <div><div class="eyebrow">Why it scales</div><p>A partition has no edges at all. 240 services is a column of slices, readable after one zoom.</p></div>
+      <div><div class="eyebrow">Weak spot</div><p>Shows reach but not the path. Caller services are not drawn.</p></div>
+    </div>
+    <div class="stage" id="pD"></div>
+  </section>
+
+  <!-- Compare -->
+  <section class="concept" id="tab-compare" role="tabpanel" hidden>
+    <div class="stage cmp-scroll">
+      <table class="compare">
+        <thead><tr><th>Concept</th><th>Best question</th><th>On screen at 240 services</th><th>Breaks when</th><th>Backend work</th><th>Role</th></tr></thead>
+        <tbody>
+          <tr><td>A · Anchor explorer</td><td>What does this user / API connect to?</td><td>1 centre + ≤ 20 neighbours</td><td>You don't know where to start</td><td>None. <span class="mono">/relationships</span> with a scope already returns each side.</td><td><span class="verdict yes">Every click target</span></td></tr>
+          <tr><td>B · Drill-down heatmap</td><td>Which parts of the estate talk, and where is unknown traffic?</td><td>9 × 8 groups, then ≤ 20 × 20</td><td>Catalog groups are missing or all "Core"</td><td>Group-pair aggregate; caller-group filter</td><td><span class="verdict yes">Estate overview</span></td></tr>
+          <tr><td>C · Attention feed</td><td>What changed and needs a look?</td><td>A list of 20–40 findings</td><td>No history yet (first 7 days)</td><td>Findings query (new / silent / surge / unknown share)</td><td><span class="verdict yes">Landing page</span></td></tr>
+          <tr><td>D · Reach icicle</td><td>How far does one user reach?</td><td>8 groups → zoom → ≤ 40 services</td><td>You need caller paths</td><td>Group → service → API tree per user</td><td><span class="verdict">Tab on the User page</span></td></tr>
+        </tbody>
+      </table>
+    </div>
+    <div class="pcell rec">
+      <span class="eyebrow">Recommendation</span>
+      <p>Build one page from three of them. <b>C</b> opens the page, with <b>B</b>'s group heatmap at the top as the overview. Every item in the feed and every heatmap cell opens <b>A</b>, the anchor explorer, for the details. <b>D</b> moves to the User page as a "Reach" tab, where its question belongs. The current flow chart goes away.</p>
+    </div>
+  </section>
+
+  <p class="faint" style="font-size:12px">Mocked estate, generated in the page: 8 catalog groups, 240 services, about 1,700 APIs, 180 named users plus unknown traffic. "Now" is the last 7 days; "before" is the 7 days prior. Names are invented.</p>
+</div>
+
+<script>
+(function(){
+"use strict";
+const $ = (s, r = document) => r.querySelector(s);
+const esc = s => String(s).replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+function rng(seed){ return function(){ seed |= 0; seed = seed + 0x6D2B79F5 | 0; let t = Math.imul(seed ^ seed >>> 15, 1 | seed); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; }; }
+const R = rng(20261003);
+const pick = a => a[Math.floor(R() * a.length)];
+const ri = (a, b) => a + Math.floor(R() * (b - a + 1));
+function shuffle(a){ a = a.slice(); for (let i = a.length - 1; i > 0; i--) { const j = Math.floor(R() * (i + 1)); [a[i], a[j]] = [a[j], a[i]]; } return a; }
+function wpick(list){ let s = 0; list.forEach(x => s += x.w); let t = R() * s; for (const x of list) { t -= x.w; if (t <= 0) return x; } return list[list.length - 1]; }
+function fmt(n){ n = Math.round(n); if (n >= 1e6) return (n / 1e6).toFixed(1) + "M"; if (n >= 1e4) return Math.round(n / 1e3) + "K"; if (n >= 1e3) return (n / 1e3).toFixed(1) + "K"; return String(n); }
+const pct = (a, b) => b ? Math.round(a / b * 100) + "%" : "–";
+
+/* ---------------- mocked estate ---------------- */
+const GROUPS = [
+  ["Core", ["identity", "session", "config"]],
+  ["Billing", ["invoice", "rating", "collections"]],
+  ["Payments", ["gateway", "settlement", "wallet"]],
+  ["Customer", ["profile", "crm", "care"]],
+  ["Network", ["provisioning", "inventory", "oss"]],
+  ["Partner", ["b2b", "dealer", "apihub"]],
+  ["Commerce", ["catalog", "order", "cart", "promo"]],
+  ["Platform", ["notify", "audit", "search", "files"]],
+];
+const NOUNS = ["api", "svc", "worker", "gateway", "sync", "engine", "reader", "writer", "adapter", "bridge", "scheduler", "store", "router", "cache"];
+const RES = ["items", "{id}", "status", "search", "batch", "summary", "events", "export", "validate", "sync", "history", "limits"];
+const groups = GROUPS.map(([name, modules], id) => ({ id, name, modules }));
+const services = [];
+groups.forEach(g => {
+  for (let k = 0, n = 0; n < 30; k++) {
+    const m = g.modules[k % g.modules.length];
+    const noun = NOUNS[Math.floor(k / g.modules.length) % NOUNS.length];
+    services.push({ id: services.length, name: `${m}-${noun}`, g: g.id, m, w: 0, apis: [] });
+    n++;
+  }
+});
+shuffle(services.map(s => s.id)).forEach((id, rank) => services[id].w = 1 / Math.pow(rank + 1, 0.85));
+const apis = [];
+services.forEach(s => {
+  const used = new Set(), n = ri(3, 10);
+  for (let i = 0; i < n * 2 && s.apis.length < n; i++) {
+    const key = pick(["GET", "GET", "GET", "POST", "POST", "PUT", "DELETE"]) + " /api/v1/" + s.m + "/" + pick(RES);
+    if (used.has(key)) continue;
+    used.add(key);
+    s.apis.push(apis.length);
+    apis.push({ id: apis.length, s: s.id, name: key, w: R() + 0.2 });
+  }
+});
+const PRE = ["vtp", "pos", "sale", "crm", "mobile", "partner", "batch", "sys", "bank", "dealer", "care", "chatbot", "myviettel", "report", "etl", "kiosk", "ivr", "ussd"];
+const SUF = ["express", "terminal", "gateway", "sync", "reconcile", "portal", "app", "job", "client", "bot", "hub", "agent"];
+const users = [], uname = new Set();
+while (users.length < 179) {
+  let name = pick(PRE) + "_" + pick(SUF);
+  if (uname.has(name)) name += "_" + ri(2, 40);
+  if (uname.has(name)) continue;
+  uname.add(name);
+  users.push({ id: users.length, name, home: ri(0, 7), w: 0 });
+}
+users.forEach((u, i) => u.w = 1 / Math.pow(i + 1, 0.8));
+const front = shuffle(services.filter(s => [3, 5, 6, 7].includes(s.g))).slice(0, 24).map(s => s.id);
+
+const recs = [];
+function add(c, u, a, r, p){ recs.push({ c, u, a, s: apis[a].s, r: Math.max(0, Math.round(r)), p: Math.max(0, Math.round(p)) }); }
+function evolve(base){
+  const x = R();
+  if (x < 0.035) return [base, 0];
+  if (x < 0.06) return [0, base];
+  if (x < 0.072) return [base * 4, base];
+  return [base * (0.8 + R() * 0.4), base * (0.8 + R() * 0.4)];
+}
+users.forEach(u => {
+  const callers = R() < 0.25 ? [-1] : [pick(front)].concat(R() < 0.3 ? [pick(front)] : []);
+  const nS = ri(2, 12);
+  for (let i = 0; i < nS; i++) {
+    const g = R() < 0.7 ? u.home : ri(0, 7);
+    const s = wpick(services.filter(x => x.g === g));
+    const nA = ri(1, Math.min(4, s.apis.length));
+    for (let j = 0; j < nA; j++) {
+      const a = pick(s.apis);
+      const base = 1 + 60000 * Math.sqrt(u.w * s.w) * apis[a].w * (0.5 + R());
+      const [r, p] = evolve(base);
+      add(pick(callers), u.id, a, r, p);
+    }
+  }
+});
+services.forEach(s => {
+  const n = ri(0, 4);
+  for (let i = 0; i < n; i++) {
+    const t = wpick(services.filter(x => x.id !== s.id && (R() < 0.6 ? x.g === s.g : true)));
+    for (let j = 0, k = ri(1, 3); j < k; j++) {
+      const a = pick(t.apis);
+      const [r, p] = evolve(1 + 30000 * Math.sqrt(s.w * t.w) * apis[a].w);
+      add(s.id, -1, a, r, p);
+    }
+  }
+});
+front.forEach(f => services[f].apis.forEach(a => { const b = 1 + 20000 * services[f].w * apis[a].w * R(); add(-1, -1, a, b, b * (0.8 + R() * 0.4)); }));
+
+// Stories the feed should surface.
+const partner = { id: users.length, name: "partner_b2b_gateway", home: 5, w: 0.05 };
+users.push(partner);
+const partnerFront = front.find(f => services[f].g === 5) ?? services.find(s => s.g === 5).id;
+[services.find(s => s.g === 5 && s.id !== partnerFront)].forEach(s => s.apis.slice(0, 2).forEach(a => add(partnerFront, partner.id, a, 900, 850)));
+[2, 1, 4].forEach(g => shuffle(services.filter(s => s.g === g)).slice(0, 3).forEach(s => add(partnerFront, partner.id, s.apis[0], ri(400, 1500), 0)));
+const unkApi = services.filter(s => s.g === 2).sort((a, b) => b.w - a.w)[0].apis[0];
+add(-1, -1, unkApi, 42000, 9000);
+const heavy = users.slice(0, 5).map(u => u.id);
+const silentSvc = services.filter(s => s.g === 1).sort((a, b) => b.w - a.w)[1];
+add(front[0], heavy[1], silentSvc.apis[0], 0, 26000);
+
+/* ---------------- aggregation ---------------- */
+const KEY = {
+  caller: x => x.c,
+  service: x => x.s,
+  api: x => x.a,
+  user: x => x.u,
+  group: x => services[x.s].g,
+  callergroup: x => x.c < 0 ? -1 : services[x.c].g,
+};
+function agg(filter, keyFn){
+  const m = new Map();
+  for (const x of recs) {
+    if (filter && !filter(x)) continue;
+    const k = keyFn(x);
+    let e = m.get(k);
+    if (!e) { e = { k, r: 0, p: 0, unk: 0 }; m.set(k, e); }
+    e.r += x.r; e.p += x.p;
+    if (x.u < 0) e.unk += x.r;
+  }
+  return [...m.values()];
+}
+const stateOf = e => e.p === 0 && e.r > 0 ? "new" : e.r === 0 && e.p > 0 ? "silent" : e.p > 0 && e.r / e.p >= 2.5 ? "surge" : "";
+const STATE_LABEL = { new: "New", silent: "Silent", surge: "Surge" };
+const chip = st => st ? `<span class="chip ${st}">${STATE_LABEL[st]}</span>` : "";
+const COLOR = { user: "var(--user)", service: "var(--svc)", caller: "var(--svc)", api: "var(--api)", group: "var(--grp)", callergroup: "var(--grp)" };
+const KIND_LABEL = { user: "User", service: "Service", caller: "Caller service", api: "API", group: "Group", callergroup: "Caller group" };
+function label(kind, id){
+  if (kind === "caller") return id < 0 ? "No caller service" : services[id].name;
+  if (kind === "callergroup") return id < 0 ? "No caller service" : groups[id].name;
+  if (kind === "service") return services[id].name;
+  if (kind === "api") return apis[id].name;
+  if (kind === "user") return id < 0 ? "Unknown users" : users[id].name;
+  if (kind === "group") return groups[id].name;
+  return String(id);
+}
+function sub(kind, id){
+  if (id < 0) return "";
+  if (kind === "api") return services[apis[id].s].name;
+  if (kind === "service" || kind === "caller") return groups[services[id].g].name + " · " + services[id].m;
+  return "";
+}
+const anchorKind = k => k === "caller" ? "service" : k === "callergroup" ? "group" : k;
+function color(kind, id){ return id < 0 ? "var(--none)" : COLOR[kind]; }
+
+const totals = agg(null, () => 0)[0];
+$("#facts").innerHTML = [
+  ["Services", services.length], ["APIs", apis.length.toLocaleString()], ["Users", users.length],
+  ["Requests now", fmt(totals.r)], ["Unknown share", pct(totals.unk, totals.r)],
+].map(([k, v]) => `<span class="fact">${k} <b class="num">${v}</b></span>`).join("");
+(function(){
+  const bySvc = agg(null, KEY.service).sort((a, b) => b.r - a.r);
+  const top = bySvc.slice(0, 15).reduce((s, e) => s + e.r, 0);
+  $("#hiddenShare").textContent = `${services.length - 15} of ${services.length} (${pct(totals.r - top, totals.r)} of traffic)`;
+})();
+
+/* ---------------- shared entity search ---------------- */
+function searchEntities(q){
+  q = q.trim().toLowerCase();
+  if (!q) return [];
+  const out = [];
+  const push = (kind, id, name) => { if (out.length < 12 && name.toLowerCase().includes(q)) out.push({ kind, id, name }); };
+  groups.forEach(g => push("group", g.id, g.name));
+  users.forEach(u => push("user", u.id, u.name));
+  services.forEach(s => push("service", s.id, s.name));
+  apis.forEach(a => push("api", a.id, a.name));
+  return out;
+}
+
+/* =============== A: anchor explorer =============== */
+const SIDES = {
+  user:    { L: ["Comes through", "caller"], R: ["Reaches", "service"], extra: ["Top APIs", "api"] },
+  service: { L: ["Called by", "caller"], R: ["Serves", "api"], extra: ["Used by", "user"] },
+  api:     { L: ["Used by", "user"], R: ["Called through", "caller"], extra: null },
+  group:   { L: ["Called from groups", "callergroup"], R: ["Services", "service"], extra: ["Top users", "user"] },
+};
+const MATCH = {
+  user: (x, id) => x.u === id, service: (x, id) => x.s === id, api: (x, id) => x.a === id, group: (x, id) => services[x.s].g === id,
+};
+const A = { anchor: { kind: "user", id: partner.id }, scopeUser: null, trail: [], more: { L: false, R: false }, moreQ: { L: "", R: "" } };
+const ROW = 36, TOPN = 10;
+
+function goAnchor(kind, id, keepTrail = true){
+  if (keepTrail) A.trail.push({ anchor: A.anchor, scopeUser: A.scopeUser });
+  if (A.trail.length > 6) A.trail.shift();
+  if (kind === "user") A.scopeUser = null;
+  else if (A.anchor.kind === "user") A.scopeUser = A.anchor.id;
+  A.anchor = { kind, id };
+  A.more = { L: false, R: false }; A.moreQ = { L: "", R: "" };
+  renderAnchor();
+}
+function sideItems(filter, kind){
+  return agg(filter, KEY[kind]).map(e => ({ ...e, kind, id: e.k })).sort((a, b) => Math.max(b.r, b.p) - Math.max(a.r, a.p));
+}
+function rowHTML(it, max){
+  const ak = anchorKind(it.kind), dis = it.id < 0 ? "disabled" : "";
+  const w = max ? Math.max(2, Math.max(it.r, it.p) / max * 100) : 0;
+  return `<button class="nrow" ${dis} data-k="${ak}" data-id="${it.id}" style="--c:${color(it.kind, it.id)}" title="${esc(label(it.kind, it.id))}">
+    <span class="dot"></span>
+    <span class="nl"><span class="nm">${esc(label(it.kind, it.id))}</span>${sub(it.kind, it.id) ? `<span class="sub">${esc(sub(it.kind, it.id))}</span>` : ""}</span>
+    <span class="bar"><i style="width:${w}%"></i></span>
+    <span class="nv">${fmt(it.r)}</span>${chip(stateOf(it)) || "<span></span>"}</button>`;
+}
+function connector(items, H, off, max, side){
+  const yc = H / 2;
+  const paths = items.map((it, i) => {
+    const y = off + i * ROW + ROW / 2, st = stateOf(it);
+    const w = 1.2 + 7 * (max ? Math.max(it.r, it.p) / max : 0);
+    const stroke = st === "new" ? "var(--accent)" : st === "surge" ? "var(--warn)" : st === "silent" ? "var(--bad)" : "var(--border-strong)";
+    const d = side === "L" ? `M0,${y} C28,${y} 28,${yc} 56,${yc}` : `M0,${yc} C28,${yc} 28,${y} 56,${y}`;
+    return `<path d="${d}" stroke="${stroke}" stroke-width="${w.toFixed(1)}" stroke-opacity="${st ? 0.9 : 0.7}" ${st === "silent" ? 'stroke-dasharray="4 3"' : ""}/>`;
+  }).join("");
+  return `<svg class="conn" width="56" height="${H}" viewBox="0 0 56 ${H}" aria-hidden="true">${paths}</svg>`;
+}
+function sideHTML(side, title, items, H){
+  const shown = items.slice(0, TOPN), rest = items.length - shown.length;
+  const max = shown.length ? Math.max(shown[0].r, shown[0].p) : 0;
+  const off = (H - shown.length * ROW) / 2;
+  let more = "";
+  if (rest > 0) {
+    more = `<button class="btn link more" data-more="${side}">${A.more[side] ? "Hide" : `+ ${rest} more`}</button>`;
+    if (A.more[side]) {
+      const q = A.moreQ[side].toLowerCase();
+      const list = items.slice(TOPN).filter(it => !q || label(it.kind, it.id).toLowerCase().includes(q)).slice(0, 200);
+      more += `<div class="morelist"><input class="input" id="more-${side}" data-moreq="${side}" placeholder="Filter ${rest} more" value="${esc(A.moreQ[side])}">${list.map(it => rowHTML(it, max)).join("") || '<p class="faint" style="padding:6px">No match</p>'}</div>`;
+    }
+  }
+  return `<div class="side"><h4><span>${title}</span><span class="num">${items.length}</span></h4>
+    <div class="rows" style="height:${H}px"><div style="position:absolute;top:${off}px;left:0;right:0">${shown.map(it => rowHTML(it, max)).join("") || '<p class="faint">Nothing</p>'}</div></div>${more}</div>`;
+}
+function renderAnchor(){
+  const el = $("#pA"), { anchor } = A;
+  const f = x => MATCH[anchor.kind](x, anchor.id) && (A.scopeUser == null || x.u === A.scopeUser);
+  const sd = SIDES[anchor.kind];
+  const L = sideItems(f, sd.L[1]), Rt = sideItems(f, sd.R[1]);
+  const tot = agg(f, () => 0)[0] || { r: 0, p: 0, unk: 0 };
+  const H = Math.max(260, Math.min(TOPN, Math.max(L.length, Rt.length)) * ROW);
+  const maxL = L.length ? Math.max(L[0].r, L[0].p) : 0, maxR = Rt.length ? Math.max(Rt[0].r, Rt[0].p) : 0;
+  const shownL = L.slice(0, TOPN), shownR = Rt.slice(0, TOPN);
+  const offL = (H - shownL.length * ROW) / 2, offR = (H - shownR.length * ROW) / 2;
+  const change = tot.p ? Math.round((tot.r - tot.p) / tot.p * 100) : null;
+  let extra = "";
+  if (sd.extra) {
+    const ex = sideItems(f, sd.extra[1]).filter(e => e.id >= 0).slice(0, 6);
+    extra = `<div><div class="eyebrow" style="margin-bottom:4px">${sd.extra[0]}</div><div class="chips">${ex.map(e => `<button class="pill" style="--c:${color(e.kind, e.id)}" data-k="${anchorKind(e.kind)}" data-id="${e.id}" title="${esc(label(e.kind, e.id))}">${esc(label(e.kind, e.id))}</button>`).join("")}</div></div>`;
+  }
+  const crumbs = A.trail.map((t, i) => `<button data-crumb="${i}">${esc(label(t.anchor.kind, t.anchor.id))}</button><span>›</span>`).join("");
+  el.innerHTML = `
+    <div class="toolbar">
+      <div class="search"><input class="input" id="a-search" placeholder="Start from a user, service, API or group" autocomplete="off" aria-label="Search the estate"><div class="results" id="a-results" hidden></div></div>
+      <span class="faint" style="font-size:12px">Try:</span>
+      <button class="pill" style="--c:var(--user)" data-k="user" data-id="${partner.id}">${esc(partner.name)}</button>
+      <button class="pill" style="--c:var(--grp)" data-k="group" data-id="1">Billing group</button>
+      <button class="pill" style="--c:var(--api)" data-k="api" data-id="${unkApi}">${esc(apis[unkApi].name)}</button>
+    </div>
+    <div class="toolbar" style="justify-content:space-between">
+      <nav class="crumbs" aria-label="Path">${crumbs}<span class="cur">${esc(label(anchor.kind, anchor.id))}</span></nav>
+      ${A.scopeUser != null ? `<span class="scope">Only traffic from <b>${esc(users[A.scopeUser].name)}</b><button data-unscope aria-label="Show all users">×</button></span>` : ""}
+    </div>
+    <div class="ego">
+      ${sideHTML("L", sd.L[0], L, H)}
+      <div style="padding-top:27px">${connector(shownL, H, offL, maxL, "L")}</div>
+      <div class="center" style="--c:${COLOR[anchor.kind]};min-height:${Math.min(H, 220)}px;margin-top:27px">
+        <div class="eyebrow" style="color:var(--c)">${KIND_LABEL[anchor.kind]}${anchor.kind === "api" ? " · " + esc(services[apis[anchor.id].s].name) : ""}</div>
+        <h3>${esc(label(anchor.kind, anchor.id))}</h3>
+        <dl class="kv">
+          <dt>Requests, 7 d</dt><dd>${fmt(tot.r)}</dd>
+          <dt>vs previous 7 d</dt><dd style="color:${change == null ? "var(--accent)" : change < -30 ? "var(--bad)" : "inherit"}">${change == null ? "new" : (change > 0 ? "+" : "") + change + "%"}</dd>
+          ${anchor.kind !== "user" ? `<dt>Unknown users</dt><dd style="color:${tot.r && tot.unk / tot.r > .4 ? "var(--warn)" : "inherit"}">${pct(tot.unk, tot.r)}</dd>` : ""}
+          <dt>${sd.L[0]}</dt><dd>${L.length}</dd>
+          <dt>${sd.R[0]}</dt><dd>${Rt.length}</dd>
+        </dl>
+        ${extra}
+        <span class="faint" style="font-size:11px">Opens the ${KIND_LABEL[anchor.kind]} page in the real app</span>
+      </div>
+      <div style="padding-top:27px">${connector(shownR, H, offR, maxR, "R")}</div>
+      ${sideHTML("R", sd.R[0], Rt, H)}
+    </div>
+    <div class="legend" style="margin-top:12px">
+      <span><span class="sw" style="background:var(--accent)"></span>New this week</span>
+      <span><span class="sw" style="background:var(--warn)"></span>Surge (≥ 2.5×)</span>
+      <span><span class="sw" style="background:var(--bad)"></span>Silent (dashed)</span>
+      <span>Line width = requests. Click any row to move the centre there.</span>
+    </div>`;
+  wireSearch($("#a-search"), $("#a-results"), (k, id) => goAnchor(k, id));
+  const mq = el.querySelector("[data-moreq]");
+  if (mq) mq.addEventListener("input", e => { const s = e.target.dataset.moreq; A.moreQ[s] = e.target.value; renderAnchor(); const n = $("#more-" + s); n.focus(); n.setSelectionRange(n.value.length, n.value.length); });
+}
+$("#pA").addEventListener("click", e => {
+  const b = e.target.closest("[data-k]");
+  if (b && !b.disabled) return goAnchor(b.dataset.k, Number(b.dataset.id));
+  const m = e.target.closest("[data-more]");
+  if (m) { A.more[m.dataset.more] = !A.more[m.dataset.more]; return renderAnchor(); }
+  const c = e.target.closest("[data-crumb]");
+  if (c) { const i = Number(c.dataset.crumb); const t = A.trail[i]; A.trail = A.trail.slice(0, i); A.anchor = t.anchor; A.scopeUser = t.scopeUser; return renderAnchor(); }
+  if (e.target.closest("[data-unscope]")) { A.scopeUser = null; renderAnchor(); }
+});
+function wireSearch(input, box, onPick){
+  let items = [], on = 0;
+  const draw = () => {
+    box.hidden = !items.length;
+    box.innerHTML = items.map((it, i) => `<button class="${i === on ? "on" : ""}" data-i="${i}"><span class="chip kind" style="--c:${COLOR[it.kind]}">${KIND_LABEL[it.kind]}</span><span class="nm">${esc(it.name)}</span>${it.kind === "api" ? `<span class="faint" style="font-size:11px">${esc(services[apis[it.id].s].name)}</span>` : ""}</button>`).join("");
+  };
+  input.addEventListener("input", () => { items = searchEntities(input.value); on = 0; draw(); });
+  input.addEventListener("keydown", e => {
+    if (e.key === "ArrowDown") { on = Math.min(items.length - 1, on + 1); draw(); e.preventDefault(); }
+    else if (e.key === "ArrowUp") { on = Math.max(0, on - 1); draw(); e.preventDefault(); }
+    else if (e.key === "Enter" && items[on]) onPick(items[on].kind, items[on].id);
+    else if (e.key === "Escape") { items = []; draw(); }
+  });
+  box.addEventListener("mousedown", e => { const b = e.target.closest("[data-i]"); if (b) { e.preventDefault(); const it = items[Number(b.dataset.i)]; onPick(it.kind, it.id); } });
+  input.addEventListener("blur", () => setTimeout(() => { box.hidden = true; }, 120));
+}
+
+/* =============== B: drill-down heatmap =============== */
+const B = { level: 0, cg: null, tg: null, r1: null, ts: null, metric: "req", hover: null };
+const MTOP = 18;
+function matrixSpec(){
+  if (B.level === 0) return { rowKind: "callergroup", colKind: "group", filt: null };
+  const rk1 = B.cg < 0 ? "user" : "caller";
+  const base = x => KEY.callergroup(x) === B.cg && services[x.s].g === B.tg;
+  if (B.level === 1) return { rowKind: rk1, colKind: "service", filt: base };
+  return { rowKind: rk1 === "user" ? "caller" : "user", colKind: "api", filt: x => base(x) && KEY[rk1](x) === B.r1 && x.s === B.ts, rk1 };
+}
+function topKeys(list, ordered){
+  if (ordered) return { keys: list.map(e => e.k), other: false };
+  list.sort((a, b) => Math.max(b.r, b.p) - Math.max(a.r, a.p));
+  return { keys: list.slice(0, MTOP).map(e => e.k), other: list.length > MTOP, hidden: Math.max(0, list.length - MTOP) };
+}
+function cellStyle(e){
+  if (!e || (e.r === 0 && e.p === 0)) return ["empty", "", ""];
+  if (B.metric === "req") { const v = Math.log1p(e.r) / Math.log1p(B.max); return ["", `background:color-mix(in srgb, var(--accent) ${Math.round(6 + v * 74)}%, var(--surface))`, ""]; }
+  if (B.metric === "unk") { if (!e.r) return ["", "background:var(--surface-2)", ""]; const s = e.unk / e.r; return ["", `background:color-mix(in srgb, var(--warn) ${Math.round(4 + s * 76)}%, var(--surface))`, ""]; }
+  const st = stateOf(e);
+  if (st === "new") return ["", "background:var(--accent);color:var(--surface)", "+"];
+  if (st === "silent") return ["", "background:var(--bad-soft);color:var(--bad)", "×"];
+  const lr = Math.max(-2, Math.min(2, Math.log2((e.r || 1) / (e.p || 1))));
+  if (Math.abs(lr) < 0.2) return ["", "background:var(--surface-2)", ""];
+  return ["", `background:color-mix(in srgb, ${lr > 0 ? "var(--accent)" : "var(--bad)"} ${Math.round(Math.abs(lr) / 2 * 70 + 8)}%, var(--surface))`, ""];
+}
+function renderMatrix(){
+  const el = $("#pB"), spec = matrixSpec();
+  const ordered = B.level === 0;
+  const rowsAgg = agg(spec.filt, KEY[spec.rowKind]), colsAgg = agg(spec.filt, KEY[spec.colKind]);
+  let rows, cols;
+  if (ordered) {
+    rows = { keys: [...groups.map(g => g.id).filter(id => rowsAgg.some(e => e.k === id)), ...(rowsAgg.some(e => e.k === -1) ? [-1] : [])], other: false };
+    cols = { keys: groups.map(g => g.id), other: false };
+  } else { rows = topKeys(rowsAgg); cols = topKeys(colsAgg); }
+  const rset = new Set(rows.keys), cset = new Set(cols.keys);
+  const cells = new Map();
+  for (const x of recs) {
+    if (spec.filt && !spec.filt(x)) continue;
+    let rk = KEY[spec.rowKind](x), ck = KEY[spec.colKind](x);
+    if (!rset.has(rk)) rk = "o"; if (!cset.has(ck)) ck = "o";
+    const key = rk + "|" + ck;
+    let e = cells.get(key);
+    if (!e) { e = { r: 0, p: 0, unk: 0, rk, ck }; cells.set(key, e); }
+    e.r += x.r; e.p += x.p; if (x.u < 0) e.unk += x.r;
+  }
+  B.cells = cells; B.spec = spec;
+  B.max = Math.max(1, ...[...cells.values()].map(e => e.r));
+  const rowKeys = rows.keys.concat(rows.other ? ["o"] : []), colKeys = cols.keys.concat(cols.other ? ["o"] : []);
+  const rowTot = new Map(rowsAgg.map(e => [e.k, e]));
+  const otherLabel = (n, kind) => `Other ${n} ${kind === "user" ? "users" : kind === "api" ? "APIs" : "services"}`;
+  const rl = k => k === "o" ? otherLabel(rows.hidden, spec.rowKind) : label(spec.rowKind, k);
+  const cl = k => k === "o" ? otherLabel(cols.hidden, spec.colKind) : label(spec.colKind, k);
+  B.rl = rl; B.cl = cl;
+  const maxRow = Math.max(1, ...rowsAgg.map(e => e.r));
+  const head = `<tr><th></th>${colKeys.map(k => `<th class="${k === "o" ? "other" : ""}" title="${esc(cl(k))}"><span class="vl" style="color:${k === "o" ? "var(--faint)" : color(spec.colKind, k)}">${esc(cl(k))}</span></th>`).join("")}<th><span class="vl">Total</span></th></tr>`;
+  const body = rowKeys.map(rk => {
+    const tot = rk === "o" ? rowsAgg.filter(e => !rset.has(e.k)).reduce((s, e) => s + e.r, 0) : (rowTot.get(rk) || { r: 0 }).r;
+    return `<tr class="${rk === "o" ? "other" : ""}"><th title="${esc(rl(rk))}" style="color:${rk === "o" ? "var(--faint)" : "var(--text)"}">${esc(rl(rk))}</th>${colKeys.map(ck => {
+      const e = cells.get(rk + "|" + ck);
+      const [cls, style, glyph] = cellStyle(e);
+      return `<td class="${cls}" style="${style}" data-c="${rk}|${ck}" ${cls ? "" : 'tabindex="0"'}>${glyph}</td>`;
+    }).join("")}<td class="tot"><div class="mbar" style="width:60px"><i style="width:${tot / maxRow * 100}%;background:var(--accent)"></i></div>${fmt(tot)}</td></tr>`;
+  }).join("");
+  const crumbs = [`<button data-lv="0">Estate</button>`];
+  if (B.level >= 1) crumbs.push(`<span>›</span>${B.level === 1 ? `<span class="cur">` : `<button data-lv="1">`}${esc(label("callergroup", B.cg))} → ${esc(groups[B.tg].name)}${B.level === 1 ? "</span>" : "</button>"}`);
+  if (B.level === 2) crumbs.push(`<span>›</span><span class="cur">${esc(label(B.spec.rk1, B.r1))} → ${esc(services[B.ts].name)}</span>`);
+  if (B.level === 0) crumbs[0] = `<span class="cur">Estate</span>`;
+  const axis = { callergroup: "Caller group", caller: "Caller service", user: "User", group: "Target group", service: "Target service", api: "API" };
+  el.innerHTML = `
+    <div class="toolbar" style="justify-content:space-between">
+      <nav class="crumbs" aria-label="Level">${crumbs.join("")}</nav>
+      <div class="seg" role="group" aria-label="Colour by">${[["req", "Requests"], ["unk", "Unknown share"], ["chg", "Change"]].map(([k, l]) => `<button data-metric="${k}" aria-pressed="${B.metric === k}">${l}</button>`).join("")}</div>
+    </div>
+    <div class="mx-wrap">
+      <div style="min-width:0;display:flex;flex-direction:column;gap:8px">
+        <span class="faint" style="font-size:12px">Rows: ${axis[spec.rowKind]} · Columns: ${axis[spec.colKind]} · ${rowsAgg.length} × ${colsAgg.length}${rows.other || cols.other ? `, showing the busiest ${MTOP}` : ""}</span>
+        <div class="mx-scroll"><table class="mx"><thead>${head}</thead><tbody>${body}</tbody></table></div>
+        <div class="legend">${B.metric === "req" ? `<span><span class="sw" style="background:color-mix(in srgb,var(--accent) 10%,var(--surface))"></span>Few</span><span><span class="sw" style="background:var(--accent)"></span>Many requests (log scale)</span>`
+          : B.metric === "unk" ? `<span><span class="sw" style="background:color-mix(in srgb,var(--warn) 10%,var(--surface))"></span>Mostly known users</span><span><span class="sw" style="background:var(--warn)"></span>Mostly unknown users</span>`
+          : `<span><span class="sw" style="background:var(--accent)"></span>+ New</span><span><span class="sw" style="background:var(--bad-soft)"></span>× Silent</span><span><span class="sw" style="background:color-mix(in srgb,var(--accent) 50%,var(--surface))"></span>Grew</span><span><span class="sw" style="background:color-mix(in srgb,var(--bad) 50%,var(--surface))"></span>Shrank</span>`}
+          <span>${B.level < 2 ? "Click a cell to open it." : "Click a cell to open it in the anchor explorer."}</span></div>
+      </div>
+      <aside class="detail" id="b-detail" aria-live="polite"></aside>
+    </div>`;
+  drawDetail();
+}
+function drawDetail(){
+  const d = $("#b-detail"); if (!d) return;
+  const e = B.hover && B.cells.get(B.hover);
+  if (!e) {
+    const all = [...B.cells.values()].reduce((s, x) => ({ r: s.r + x.r, p: s.p + x.p, unk: s.unk + x.unk }), { r: 0, p: 0, unk: 0 });
+    d.innerHTML = `<span class="eyebrow">This level</span><dl class="kv"><dt>Requests, 7 d</dt><dd>${fmt(all.r)}</dd><dt>Previous 7 d</dt><dd>${fmt(all.p)}</dd><dt>Unknown users</dt><dd>${pct(all.unk, all.r)}</dd><dt>Cells with traffic</dt><dd>${B.cells.size}</dd><dt>New cells</dt><dd>${[...B.cells.values()].filter(x => stateOf(x) === "new").length}</dd><dt>Silent cells</dt><dd>${[...B.cells.values()].filter(x => stateOf(x) === "silent").length}</dd></dl><span class="faint" style="font-size:12px">Hover or focus a cell for its numbers.</span>`;
+    return;
+  }
+  const st = stateOf(e);
+  d.innerHTML = `<span class="eyebrow">Cell</span><div style="font-weight:600;word-break:break-word">${esc(B.rl(e.rk))} <span class="faint">→</span> ${esc(B.cl(e.ck))}</div>${chip(st)}
+    <dl class="kv"><dt>Requests, 7 d</dt><dd>${fmt(e.r)}</dd><dt>Previous 7 d</dt><dd>${fmt(e.p)}</dd><dt>Change</dt><dd>${e.p ? Math.round((e.r - e.p) / e.p * 100) + "%" : "new"}</dd><dt>Unknown users</dt><dd>${pct(e.unk, e.r)}</dd></dl>`;
+}
+$("#pB").addEventListener("click", e => {
+  const m = e.target.closest("[data-metric]"); if (m) { B.metric = m.dataset.metric; return renderMatrix(); }
+  const lv = e.target.closest("[data-lv]"); if (lv) { B.level = Number(lv.dataset.lv); B.hover = null; return renderMatrix(); }
+  const td = e.target.closest("td[data-c]"); if (!td || td.classList.contains("empty")) return;
+  const [rk, ck] = td.dataset.c.split("|");
+  if (rk === "o" || ck === "o") return;
+  if (B.level === 0) { B.level = 1; B.cg = Number(rk); B.tg = Number(ck); }
+  else if (B.level === 1) { B.level = 2; B.r1 = Number(rk); B.ts = Number(ck); }
+  else {
+    const rowKind = B.spec.rowKind, id = Number(rk);
+    A.trail = []; A.scopeUser = rowKind === "user" && id >= 0 ? id : null;
+    A.anchor = { kind: "api", id: Number(ck) }; A.more = { L: false, R: false };
+    showTab("anchor"); return renderAnchor();
+  }
+  B.hover = null; renderMatrix();
+});
+["mouseover", "focusin"].forEach(t => $("#pB").addEventListener(t, e => { const td = e.target.closest("td[data-c]"); const k = td && !td.classList.contains("empty") ? td.dataset.c : null; if (k !== B.hover) { B.hover = k; drawDetail(); } }));
+$("#pB").addEventListener("keydown", e => { if (e.key === "Enter" && e.target.matches("td[data-c]")) e.target.click(); });
+
+/* =============== C: attention feed =============== */
+const KINDS = { reach: ["New reach", "new"], silent: ["Went silent", "silent"], surge: ["Surge", "surge"], unknown: ["Unknown users", "unk"], pair: ["New group link", "new"] };
+function quantile(arr, q){ const a = arr.slice().sort((x, y) => x - y); return a.length ? a[Math.floor((a.length - 1) * q)] : 0; }
+const findings = (function(){
+  const out = [];
+  const ua = agg(x => x.u >= 0, x => x.u + "|" + x.a);
+  const perUser = new Map();
+  ua.forEach(e => { if (stateOf(e) !== "new") return; const [u, a] = e.k.split("|").map(Number); const l = perUser.get(u) || []; l.push({ a, r: e.r }); perUser.set(u, l); });
+  perUser.forEach((list, u) => {
+    if (list.length < 3) return;
+    const svcs = new Set(list.map(x => apis[x.a].s)), gs = new Set([...svcs].map(s => services[s].g));
+    const r = list.reduce((s, x) => s + x.r, 0);
+    const caller = agg(x => x.u === u, KEY.caller).sort((a, b) => b.r - a.r)[0];
+    out.push({ kind: "reach", score: 60 + list.length * 4 + gs.size * 6, title: `${users[u].name} reached ${list.length} new APIs`, detail: `in ${svcs.size} services across ${gs.size} groups (${[...gs].map(g => groups[g].name).join(", ")})`,
+      path: [["caller", caller ? caller.k : -1], ["user", u], ["service", apis[list[0].a].s], ["api", list[0].a]], r, p: 0, groups: gs, open: ["user", u] });
+  });
+  const us = agg(x => x.u >= 0, x => x.u + "|" + x.s);
+  const pBig = quantile(us.map(e => e.p).filter(Boolean), 0.9), rBig = quantile(us.map(e => e.r).filter(Boolean), 0.75);
+  us.forEach(e => {
+    const [u, s] = e.k.split("|").map(Number), st = stateOf(e);
+    if (st === "silent" && e.p >= pBig) out.push({ kind: "silent", score: 50 + Math.log10(e.p) * 8, title: `${users[u].name} stopped calling ${services[s].name}`, detail: `${fmt(e.p)} requests the week before, none this week`, path: [["user", u], ["service", s]], r: e.r, p: e.p, groups: new Set([services[s].g]), open: ["service", s], scope: u });
+    if (st === "surge" && e.r >= rBig) out.push({ kind: "surge", score: 35 + Math.log2(e.r / e.p) * 6, title: `${users[u].name} → ${services[s].name} up ${(e.r / e.p).toFixed(1)}×`, detail: `${fmt(e.p)} → ${fmt(e.r)} requests`, path: [["user", u], ["service", s]], r: e.r, p: e.p, groups: new Set([services[s].g]), open: ["service", s], scope: u });
+  });
+  const ap = agg(null, KEY.api), rMed = quantile(ap.map(e => e.r).filter(Boolean), 0.75);
+  ap.forEach(e => {
+    if (e.r < rMed || e.unk / e.r < 0.6) return;
+    const s = apis[e.k].s;
+    out.push({ kind: "unknown", score: 30 + e.unk / e.r * 30 + Math.log10(e.r) * 3, title: `${pct(e.unk, e.r)} of calls to ${apis[e.k].name} have no user`, detail: `${services[s].name} · ${fmt(e.unk)} of ${fmt(e.r)} requests`, path: [["service", s], ["api", e.k]], r: e.r, p: e.p, groups: new Set([services[s].g]), open: ["api", e.k] });
+  });
+  agg(x => x.c >= 0, x => KEY.callergroup(x) + "|" + KEY.group(x)).forEach(e => {
+    if (stateOf(e) !== "new") return;
+    const [cg, tg] = e.k.split("|").map(Number);
+    out.push({ kind: "pair", score: 70, title: `${groups[cg].name} started calling ${groups[tg].name}`, detail: `first traffic between these groups`, path: [["group", cg], ["group", tg]], r: e.r, p: 0, groups: new Set([cg, tg]), open: ["group", tg] });
+  });
+  return out.sort((a, b) => b.score - a.score);
+})();
+const C = { kinds: new Set(Object.keys(KINDS)), group: -1, all: false };
+function renderFeed(){
+  const el = $("#pC");
+  const counts = {}; Object.keys(KINDS).forEach(k => counts[k] = findings.filter(f => f.kind === k && (C.group < 0 || f.groups.has(C.group))).length);
+  const list = findings.filter(f => C.kinds.has(f.kind) && (C.group < 0 || f.groups.has(C.group)));
+  const shown = C.all ? list : list.slice(0, 25);
+  const gs = groups.map(g => {
+    const e = agg(x => services[x.s].g === g.id, () => 0)[0] || { r: 0, p: 0, unk: 0 };
+    const n = findings.filter(f => f.groups.has(g.id)).length;
+    return { g, ...e, n };
+  });
+  const maxN = Math.max(1, ...gs.map(x => x.n));
+  el.innerHTML = `<div class="feed-wrap">
+    <div class="rail" role="group" aria-label="Show">
+      <span class="eyebrow">Show</span>
+      ${Object.entries(KINDS).map(([k, [l, c]]) => `<label><input type="checkbox" id="k-${k}" data-kind="${k}" ${C.kinds.has(k) ? "checked" : ""}><span class="chip ${c}">${l}</span><span class="num">${counts[k]}</span></label>`).join("")}
+      ${C.group >= 0 ? `<span class="scope" style="margin-top:6px">${esc(groups[C.group].name)} only<button data-g="-1" aria-label="All groups">×</button></span>` : ""}
+    </div>
+    <div style="min-width:0">
+      <div class="toolbar" style="justify-content:space-between;margin-bottom:0"><h3>${list.length} relationship changes this week</h3><span class="faint" style="font-size:12px">Ranked by how unusual they are</span></div>
+      <div>${shown.map(f => `<article class="finding">
+        <div class="top"><span class="chip ${KINDS[f.kind][1]}">${KINDS[f.kind][0]}</span><span class="title">${esc(f.title)}</span></div>
+        <div class="path"><span class="faint" style="margin-right:2px">${esc(f.detail)}</span></div>
+        <div class="path">${f.path.map(([k, id]) => `<span class="seg-e" style="--c:${color(k, id)}" title="${esc(label(k, id))}">${esc(label(k, id))}</span>`).join('<span class="arr">→</span>')}</div>
+        <div class="nums"><div class="cmp"><span>before</span><i style="width:${f.p ? Math.max(4, f.p / Math.max(f.p, f.r) * 80) : 0}px;background:var(--border-strong)"></i><span>${fmt(f.p)}</span><span>now</span><i style="width:${f.r ? Math.max(4, f.r / Math.max(f.p, f.r) * 80) : 0}px;background:var(--accent)"></i><span>${fmt(f.r)}</span></div>
+          <button class="btn" data-open="${f.open[0]}:${f.open[1]}:${f.scope ?? ""}">Explore →</button></div>
+      </article>`).join("") || '<p class="faint" style="padding:12px 0">No changes match.</p>'}</div>
+      ${list.length > 25 ? `<button class="btn link" data-all style="margin-top:8px">${C.all ? "Show the top 25" : `Show all ${list.length}`}</button>` : ""}
+    </div>
+    <aside style="min-width:0">
+      <span class="eyebrow">Estate by group</span>
+      <table class="gtable" style="margin-top:6px"><thead><tr><th>Group</th><th>Requests</th><th>Unknown</th><th>Changes</th></tr></thead><tbody>
+      ${gs.map(x => `<tr class="click ${C.group === x.g.id ? "on" : ""}" data-g="${x.g.id}" tabindex="0"><td>${esc(x.g.name)}</td><td>${fmt(x.r)}</td><td><div style="display:flex;gap:6px;align-items:center"><div class="mbar" style="flex:1"><i style="width:${x.r ? x.unk / x.r * 100 : 0}%"></i></div>${pct(x.unk, x.r)}</div></td><td><div style="display:flex;gap:6px;align-items:center"><div class="mbar" style="flex:1"><i style="width:${x.n / maxN * 100}%;background:var(--accent)"></i></div>${x.n}</div></td></tr>`).join("")}
+      </tbody></table>
+      <p class="faint" style="font-size:12px;margin-top:8px">Click a group to filter the feed. In the real page this table is replaced by concept B's group heatmap.</p>
+    </aside></div>`;
+}
+$("#pC").addEventListener("change", e => { const k = e.target.dataset.kind; if (!k) return; e.target.checked ? C.kinds.add(k) : C.kinds.delete(k); renderFeed(); });
+$("#pC").addEventListener("click", e => {
+  const g = e.target.closest("[data-g]"); if (g) { const id = Number(g.dataset.g); C.group = C.group === id ? -1 : id; return renderFeed(); }
+  if (e.target.closest("[data-all]")) { C.all = !C.all; return renderFeed(); }
+  const o = e.target.closest("[data-open]");
+  if (o) { const [k, id, scope] = o.dataset.open.split(":"); A.trail = []; A.anchor = { kind: k, id: Number(id) }; A.scopeUser = scope ? Number(scope) : null; A.more = { L: false, R: false }; showTab("anchor"); renderAnchor(); window.scrollTo({ top: $("#pA").getBoundingClientRect().top + scrollY - 80 }); }
+});
+$("#pC").addEventListener("keydown", e => { if (e.key === "Enter" && e.target.matches("tr[data-g]")) e.target.click(); });
+
+/* =============== D: reach icicle =============== */
+const D = { user: partner.id, focus: null, q: "", colour: "unk" };
+const tree = (function(){
+  const svc = agg(null, KEY.service), api = agg(null, KEY.api);
+  const sv = new Map(svc.map(e => [e.k, e])), av = new Map(api.map(e => [e.k, e]));
+  return groups.map(g => {
+    const ss = services.filter(s => s.g === g.id).map(s => ({ kind: "service", id: s.id, v: (sv.get(s.id) || { r: 0 }).r, unk: (sv.get(s.id) || { unk: 0 }).unk,
+      kids: s.apis.map(a => ({ kind: "api", id: a, v: (av.get(a) || { r: 0 }).r, unk: (av.get(a) || { unk: 0 }).unk })).filter(x => x.v > 0).sort((a, b) => b.v - a.v) })).filter(x => x.v > 0).sort((a, b) => b.v - a.v);
+    return { kind: "group", id: g.id, v: ss.reduce((s, x) => s + x.v, 0), unk: ss.reduce((s, x) => s + x.unk, 0), kids: ss };
+  }).sort((a, b) => b.v - a.v);
+})();
+const userReach = (function(){
+  const m = new Map();
+  users.forEach(u => m.set(u.id, { services: new Set(), apis: new Set(), groups: new Set(), r: 0 }));
+  recs.forEach(x => { if (x.u < 0 || !x.r) return; const e = m.get(x.u); e.services.add(x.s); e.apis.add(x.a); e.groups.add(services[x.s].g); e.r += x.r; });
+  return m;
+})();
+function reachMap(){
+  if (D.user === "all") return null;
+  const m = new Map();
+  const f = D.user === "unk" ? x => x.u < 0 : x => x.u === D.user;
+  recs.forEach(x => { if (!f(x) || !x.r) return; [["api", x.a], ["service", x.s], ["group", services[x.s].g]].forEach(([k, id]) => m.set(k + id, (m.get(k + id) || 0) + x.r)); });
+  return m;
+}
+function renderReach(){
+  const el = $("#pD");
+  const q = D.q.toLowerCase();
+  const ulist = users.map(u => ({ u, e: userReach.get(u.id) })).filter(x => x.e.r > 0 && (!q || x.u.name.toLowerCase().includes(q))).sort((a, b) => b.e.services.size - a.e.services.size || b.e.r - a.e.r).slice(0, 80);
+  const reach = reachMap();
+  const sel = D.user === "all" ? null : D.user === "unk" ? null : userReach.get(D.user);
+  let summary;
+  if (D.user === "all") summary = `All traffic, coloured by ${D.colour === "unk" ? "unknown-user share" : "group"}`;
+  else if (D.user === "unk") summary = `Where unknown users go: ${new Set([...reach.keys()].filter(k => k.startsWith("service"))).size} of ${services.length} services`;
+  else summary = `<b>${esc(users[D.user].name)}</b> reaches ${sel.groups.size} of ${groups.length} groups · ${sel.services.size} of ${services.length} services · ${sel.apis.size} APIs`;
+  const fpath = [];
+  if (D.focus) { fpath.push(D.focus.g); if (D.focus.s != null) fpath.push(D.focus.s); }
+  const crumbs = [`<button data-zoom="root">Estate</button>`];
+  if (D.focus) crumbs.push(`<span>›</span><button data-zoom="g:${D.focus.g}">${esc(groups[D.focus.g].name)}</button>`);
+  if (D.focus && D.focus.s != null) crumbs.push(`<span>›</span><span class="cur">${esc(services[D.focus.s].name)}</span>`);
+  el.innerHTML = `<div class="ic-wrap">
+    <div style="display:flex;flex-direction:column;gap:6px;min-width:0">
+      <input class="input" id="d-q" placeholder="Find a user" value="${esc(D.q)}" aria-label="Find a user">
+      <div class="ulist">
+        <button class="urow" data-u="all" aria-pressed="${D.user === "all"}"><span class="nm">All traffic</span></button>
+        <button class="urow" data-u="unk" aria-pressed="${D.user === "unk"}" style="color:var(--warn)"><span class="nm">Unknown users</span></button>
+        ${ulist.map(({ u, e }) => `<button class="urow" data-u="${u.id}" aria-pressed="${D.user === u.id}"><span class="nm" style="color:var(--user)">${esc(u.name)}</span><span class="num">${e.services.size} svc</span></button>`).join("")}
+      </div>
+      <span class="faint" style="font-size:11px">Sorted by number of services reached</span>
+    </div>
+    <div style="min-width:0">
+      <div class="toolbar" style="justify-content:space-between"><nav class="crumbs" aria-label="Zoom">${crumbs.join("")}</nav>
+        ${D.user === "all" ? `<div class="seg" role="group" aria-label="Colour by"><button data-colour="unk" aria-pressed="${D.colour === "unk"}">Unknown share</button><button data-colour="grp" aria-pressed="${D.colour === "grp"}">Plain</button></div>` : ""}</div>
+      <p style="margin-bottom:8px">${summary}</p>
+      <div class="ic" id="d-ic"></div>
+      <div class="legend" style="margin-top:8px">${D.user === "all" ? (D.colour === "unk" ? `<span><span class="sw" style="background:color-mix(in srgb,var(--warn) 12%,var(--surface-2))"></span>Known users</span><span><span class="sw" style="background:var(--warn)"></span>Unknown users</span>` : "") : `<span><span class="sw" style="background:var(--user)"></span>Reached (darker = bigger share of that block's traffic)</span><span><span class="sw" style="background:var(--surface-2);border:1px solid var(--border)"></span>Not reached</span>`}<span>Block height = all requests. Click a group or service to zoom.</span></div>
+    </div></div>`;
+  drawIcicle(reach);
+  const qi = $("#d-q");
+  qi.addEventListener("input", () => { D.q = qi.value; renderReach(); const n = $("#d-q"); n.focus(); n.setSelectionRange(n.value.length, n.value.length); });
+}
+function drawIcicle(reach){
+  const host = $("#d-ic"); if (!host) return;
+  const W = Math.max(320, host.clientWidth), H = 560;
+  const narrow = W < 560;
+  const xs = narrow ? [0, 0.22, 0.56, 1] : [0, 0.18, 0.5, 1];
+  let roots = tree;
+  if (D.focus) { roots = tree.filter(g => g.id === D.focus.g); if (D.focus.s != null) roots = roots.map(g => ({ ...g, kids: g.kids.filter(s => s.id === D.focus.s) })); }
+  const total = roots.reduce((s, g) => s + (D.focus && D.focus.s != null ? g.kids.reduce((a, x) => a + x.v, 0) : g.v), 0) || 1;
+  const parts = [];
+  const fillFor = (n, depth) => {
+    if (reach) {
+      const v = reach.get(n.kind + n.id) || 0;
+      if (!v) return "var(--surface-2)";
+      const share = Math.min(1, v / n.v);
+      return `color-mix(in srgb, ${D.user === "unk" ? "var(--warn)" : "var(--user)"} ${Math.round(35 + share * 65)}%, var(--surface))`;
+    }
+    if (D.colour === "unk") return `color-mix(in srgb, var(--warn) ${Math.round(8 + (n.unk / n.v) * 80)}%, var(--surface-2))`;
+    return `color-mix(in srgb, var(--grp) ${depth === 0 ? 30 : depth === 1 ? 18 : 10}%, var(--surface-2))`;
+  };
+  const textCol = n => reach && reach.get(n.kind + n.id) && Math.min(1, reach.get(n.kind + n.id) / n.v) > 0.5 ? "var(--surface)" : "var(--text)";
+  let y0 = 0;
+  roots.forEach(g => {
+    const gv = D.focus && D.focus.s != null ? g.kids.reduce((a, x) => a + x.v, 0) : g.v;
+    const gh = gv / total * H;
+    parts.push({ n: g, d: 0, x: xs[0] * W, y: y0, w: (xs[1] - xs[0]) * W, h: gh });
+    let sy = y0;
+    g.kids.forEach(s => {
+      const sh = s.v / total * H;
+      parts.push({ n: s, d: 1, x: xs[1] * W, y: sy, w: (xs[2] - xs[1]) * W, h: sh });
+      let ay = sy;
+      s.kids.forEach(a => { const ah = a.v / total * H; parts.push({ n: a, d: 2, x: xs[2] * W, y: ay, w: (xs[3] - xs[2]) * W, h: ah }); ay += ah; });
+      sy += sh;
+    });
+    y0 += gh;
+  });
+  const svg = parts.filter(p => p.h >= 0.5).map(p => {
+    const nm = label(p.n.kind, p.n.id), zoom = p.d === 0 ? `g:${p.n.id}` : p.d === 1 ? `s:${services[p.n.id].g}:${p.n.id}` : "";
+    const txt = p.h >= 15 ? `<text x="${p.x + 6}" y="${p.y + Math.min(p.h / 2, 13) + 4}" style="fill:${textCol(p.n)}">${esc(nm.length > Math.floor(p.w / 6.6) - 6 ? nm.slice(0, Math.max(4, Math.floor(p.w / 6.6) - 7)) + "…" : nm)} <tspan style="opacity:.7">${fmt(p.n.v)}</tspan></text>` : "";
+    return `<g class="${zoom ? "hit" : ""}" ${zoom ? `data-zoom="${zoom}"` : ""}><rect x="${p.x}" y="${p.y}" width="${Math.max(0, p.w - 2)}" height="${Math.max(0.5, p.h)}" style="fill:${fillFor(p.n, p.d)}"><title>${esc(KIND_LABEL[p.n.kind])}: ${esc(nm)} · ${fmt(p.n.v)} requests · unknown ${pct(p.n.unk, p.n.v)}${reach ? ` · selected: ${fmt(reach.get(p.n.kind + p.n.id) || 0)}` : ""}</title></rect>${txt}</g>`;
+  }).join("");
+  host.innerHTML = `<div class="ic-cols" style="grid-template-columns:${(xs[1] - xs[0]) * 100}% ${(xs[2] - xs[1]) * 100}% 1fr"><span>Group</span><span>Service</span><span>API</span></div><svg viewBox="0 0 ${W} ${H}" height="${H}" role="img" aria-label="Estate icicle">${svg}</svg>`;
+}
+$("#pD").addEventListener("click", e => {
+  const u = e.target.closest("[data-u]"); if (u) { const v = u.dataset.u; D.user = v === "all" || v === "unk" ? v : Number(v); return renderReach(); }
+  const c = e.target.closest("[data-colour]"); if (c) { D.colour = c.dataset.colour; return renderReach(); }
+  const z = e.target.closest("[data-zoom]"); if (!z) return;
+  const v = z.dataset.zoom;
+  if (v === "root") D.focus = null;
+  else if (v.startsWith("g:")) { const g = Number(v.slice(2)); D.focus = D.focus && D.focus.g === g && D.focus.s == null ? null : { g, s: null }; }
+  else { const [, g, s] = v.split(":").map(Number); D.focus = D.focus && D.focus.s === s ? { g, s: null } : { g, s }; }
+  renderReach();
+});
+
+/* ---------------- tabs ---------------- */
+const RENDER = { anchor: renderAnchor, matrix: renderMatrix, feed: renderFeed, reach: renderReach, compare: () => {} };
+let current = null;
+function showTab(name){
+  if (!RENDER[name]) name = "anchor";
+  current = name;
+  document.querySelectorAll(".tab").forEach(t => t.setAttribute("aria-selected", String(t.dataset.tab === name)));
+  document.querySelectorAll("[role=tabpanel]").forEach(p => p.hidden = p.id !== "tab-" + name);
+  RENDER[name]();
+  try { history.replaceState(null, "", "#" + name); } catch (e) { /* ignore */ }
+}
+document.querySelectorAll(".tab").forEach(t => t.addEventListener("click", () => showTab(t.dataset.tab)));
+let rt; addEventListener("resize", () => { clearTimeout(rt); rt = setTimeout(() => { if (current === "reach") drawIcicle(reachMap()); }, 150); });
+showTab((location.hash || "").slice(1) || "anchor");
+})();
+</script>
+
+</body>
+</html>

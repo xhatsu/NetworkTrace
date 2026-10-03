@@ -166,12 +166,13 @@ def list_apis(
           ROUND(MAX(latency_p95), 2) AS p95_latency,
           uniqExactIf(caller_service, caller_service != '') AS caller_count,
           uniqExactIf(principal_name, NOT has(?, principal_name)) AS principal_count,
+          SUM(if(has(?, principal_name), request_count, 0)) AS anonymous_requests,
           MIN(bucket_start) * 1000 AS first_seen_ms,
           (MAX(bucket_start) + 60) * 1000 AS last_seen_ms
         FROM metric_buckets FINAL
         WHERE bucket_size = 60 AND bucket_start >= ? AND bucket_start < ? AND operation != ''
     """
-    params: List[Any] = [list(ANONYMOUS_PRINCIPALS), start_sec, end_sec]
+    params: List[Any] = [list(ANONYMOUS_PRINCIPALS), list(ANONYMOUS_PRINCIPALS), start_sec, end_sec]
     if service:
         query += " AND target_service = ?"
         params.append(service)

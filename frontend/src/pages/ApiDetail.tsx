@@ -31,6 +31,7 @@ type ApiRow = {
   p95_latency: number;
   caller_count: number;
   principal_count: number;
+  anonymous_requests?: number;
   first_seen_ms: number;
   last_seen_ms: number;
   rps: number;
@@ -99,6 +100,7 @@ function ApiDirectory({ rows, search }: { rows: ApiRow[]; search: string }) {
       if (sort === "traffic") return b.total_requests - a.total_requests || byName;
       if (sort === "latency") return b.p95_latency - a.p95_latency || byName;
       if (sort === "users") return b.principal_count - a.principal_count || byName;
+      if (sort === "unknown") return (b.anonymous_requests || 0) - (a.anonymous_requests || 0) || byName;
       return (sort === "priority" ? Number(b.anomaly_status === "abnormal") - Number(a.anomaly_status === "abnormal") : 0)
         || b.error_rate - a.error_rate || b.total_requests - a.total_requests || byName;
     });
@@ -128,14 +130,15 @@ function ApiDirectory({ rows, search }: { rows: ApiRow[]; search: string }) {
           <option value="traffic">{t("Requests: highest first", "Request: nhiều nhất trước")}</option>
           <option value="latency">{t("Max bucket P95: highest first", "P95 bucket lớn nhất: cao nhất trước")}</option>
           <option value="users">{t("Users: most first", "User: nhiều nhất trước")}</option>
+          <option value="unknown">{t("Unknown-user requests: most first", "Request user chưa xác định: nhiều nhất trước")}</option>
           <option value="name">{t("API: A–Z", "API: A–Z")}</option>
         </select>
       </div>
       <div className="overflow-x-auto">
-        <table className="w-full min-w-[860px] text-left text-xs">
+        <table className="w-full min-w-[960px] text-left text-xs">
           <caption className="sr-only">{t("Observed API metrics; no anomaly does not imply healthy or available.", "Chỉ số API đã quan sát; không có bất thường không đồng nghĩa hoạt động tốt hay sẵn sàng.")}</caption>
           <thead><tr className="border-b border-line">
-            {["API", t("Signal", "Tín hiệu"), t("Requests"), t("Avg TPS", "TPS TB"), t("Error rate"), t("Max bucket P95", "P95 bucket lớn nhất"), t("Callers", "Caller"), t("Users"), t("Last seen")].map((label, index) => <th scope="col" key={label} className={`table-head px-3 py-2 ${index > 1 ? "text-right" : ""}`}>{label}</th>)}
+            {["API", t("Signal", "Tín hiệu"), t("Requests"), t("Avg TPS", "TPS TB"), t("Error rate"), t("Max bucket P95", "P95 bucket lớn nhất"), t("Callers", "Caller"), t("Users"), t("Unknown users", "User chưa xác định"), t("Last seen")].map((label, index) => <th scope="col" key={label} className={`table-head px-3 py-2 ${index > 1 ? "text-right" : ""}`}>{label}</th>)}
           </tr></thead>
           <tbody className="divide-y divide-line">{visible.map(row => <tr key={`${row.service}|${row.name}`} className="hover:bg-hover">
             <td className="max-w-[340px] px-3 py-2.5">
@@ -149,6 +152,9 @@ function ApiDirectory({ rows, search }: { rows: ApiRow[]; search: string }) {
             <td className="px-3 py-2 text-right font-mono tabular-nums">{n(row.p95_latency || 0, 0)} ms</td>
             <td className="px-3 py-2 text-right font-mono tabular-nums">{n(row.caller_count, 0)}</td>
             <td className="px-3 py-2 text-right font-mono tabular-nums">{n(row.principal_count, 0)}</td>
+            <td className="px-3 py-2 text-right font-mono tabular-nums" title={t("Requests without an identified credential", "Request không có credential xác định")}>
+              {row.anonymous_requests ? <>{n(row.anonymous_requests, 0)} <span className="text-muted">({pct(row.total_requests ? row.anonymous_requests / row.total_requests : 0)})</span></> : <span className="text-muted">—</span>}
+            </td>
             <td className="px-3 py-2 text-right text-muted">{row.last_seen_ms ? new Date(row.last_seen_ms).toLocaleString([], { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" }) : "—"}</td>
           </tr>)}</tbody>
         </table>
@@ -183,7 +189,12 @@ type Relationship = {
   request_count?: number;
   error_count?: number;
   p95_latency_ms?: number;
+  first_seen_ms?: number;
   last_seen_ms?: number;
+  is_load_balancer?: boolean;
+  source_ip_role?: string;
+  role_label?: string;
+  is_new_ip?: boolean;
 };
 
 type Party = { name: string; requests: number; errorRate: number; p95: number; ips: number; partners: number; lastSeen: number };
@@ -191,6 +202,36 @@ type Party = { name: string; requests: number; errorRate: number; p95: number; i
 const RELATIONSHIP_PAGES = 20;
 // Anonymous traffic stays in API volume but is never listed as a user (see the Unknown Users page).
 const ANONYMOUS = new Set(["-anonymous-", "anonymous", "unknown"]);
+
+type UnknownIp = {
+  ip: string; requests: number; errorRate: number; p95: number; callers: string[];
+  firstSeen: number; lastSeen: number; role: string; roleLabel: string; isLoadBalancer: boolean; isNew: boolean;
+};
+
+/** Source IPs of the API's unauthenticated (anonymous) requests, one row per IP. */
+function unknownIps(rows: Relationship[]): UnknownIp[] {
+  const groups = new Map<string, UnknownIp & { errors: number; callerSet: Set<string> }>();
+  rows.forEach(row => {
+    if (!ANONYMOUS.has(row.principal ?? "")) return;
+    const ip = row.source_ip || "unknown";
+    const g = groups.get(ip) || {
+      ip, requests: 0, errors: 0, errorRate: 0, p95: 0, callers: [], callerSet: new Set<string>(), firstSeen: 0, lastSeen: 0,
+      role: row.source_ip_role || "", roleLabel: row.role_label || "", isLoadBalancer: false, isNew: false,
+    };
+    g.requests += row.request_count || 0;
+    g.errors += row.error_count || 0;
+    g.p95 = Math.max(g.p95, row.p95_latency_ms || 0);
+    if (row.caller_service) g.callerSet.add(row.caller_service);
+    if (row.first_seen_ms) g.firstSeen = g.firstSeen ? Math.min(g.firstSeen, row.first_seen_ms) : row.first_seen_ms;
+    g.lastSeen = Math.max(g.lastSeen, row.last_seen_ms || 0);
+    g.isLoadBalancer ||= Boolean(row.is_load_balancer);
+    g.isNew ||= Boolean(row.is_new_ip);
+    groups.set(ip, g);
+  });
+  return [...groups.values()].map(({ errors, callerSet, ...g }) => ({
+    ...g, errorRate: g.requests ? errors / g.requests : 0, callers: [...callerSet].sort(),
+  })).sort((a, b) => b.requests - a.requests || a.ip.localeCompare(b.ip));
+}
 
 /** Users or callers of the API, from the rows that name it (the rollup spells APIs "service/operation"). */
 function parties(rows: Relationship[], key: "principal" | "caller_service", partner: "principal" | "caller_service"): Party[] {
@@ -288,6 +329,8 @@ export function ApiDetailPage() {
   const relationshipRows = relationshipQuery.data?.rows || [];
   const users = parties(relationshipRows, "principal", "caller_service");
   const callers = parties(relationshipRows, "caller_service", "principal");
+  const unknown = unknownIps(relationshipRows);
+  const relationshipRequests = relationshipRows.reduce((sum, row) => sum + (row.request_count || 0), 0);
   const traces = tracesQuery.data?.items || [];
   const search = `?${qs}`;
 
@@ -308,7 +351,7 @@ export function ApiDetailPage() {
         </EntityLink>
         <span className="text-muted">/</span>
         <span className="font-mono text-entity-api">{apiName}</span>
-        <span className="ml-2 font-mono text-[11px]">{n(callers.length, 0)} {t("callers", "caller")} · {n(users.length, 0)} {t("users")}</span>
+        <span className="ml-2 font-mono text-[11px]">{n(callers.length, 0)} {t("callers", "caller")} · {n(users.length, 0)} {t("users")} · {n(unknown.length, 0)} {t("unknown-user IPs", "IP user chưa xác định")}</span>
       </div>
 
       <ServicePerformancePanel
@@ -344,7 +387,7 @@ export function ApiDetailPage() {
       </Panel>
 
       <div className="mt-5 flex flex-wrap gap-2 border-b border-line pb-3" role="group" aria-label={t("API detail views", "Góc nhìn API")}>
-        {[["users", t("Users"), users.length], ["callers", t("Caller services"), callers.length], ["traces", t("Traces"), traces.length]].map(([value, label, count]) => (
+        {[["users", t("Users"), users.length], ["unknown", t("Unknown users", "User chưa xác định"), unknown.length], ["callers", t("Caller services"), callers.length], ["traces", t("Traces"), traces.length]].map(([value, label, count]) => (
           <button key={value} aria-pressed={detailTab === value} className={`rounded border px-3 py-2 text-xs ${detailTab === value ? "border-accent bg-accent-soft text-ink font-semibold" : "border-line-strong text-muted hover:text-ink"}`} onClick={() => setDetailTab(String(value))}>
             {label} <span className="ml-2 font-mono">{count}</span>
           </button>
@@ -363,6 +406,10 @@ export function ApiDetailPage() {
           empty={t("No users observed for this API")}
           search={search}
         />
+      )}
+
+      {detailTab === "unknown" && (
+        <UnknownIpTable query={relationshipQuery} rows={unknown} totalRequests={relationshipRequests} durationSec={durationSec} search={search} />
       )}
 
       {detailTab === "callers" && (
@@ -461,6 +508,80 @@ function PartyTable({ title, subtitle, query, rows, durationSec, kind, partnerLa
           </table>
           {query.data?.truncated && <p className="border-t border-line px-3 py-2 text-[11px] text-muted">{t(`Only the first ${RELATIONSHIP_PAGES * 500} relationship rows of this Service were read.`, `Chỉ đọc ${RELATIONSHIP_PAGES * 500} dòng quan hệ đầu tiên của Service.`)}</p>}
         </div>
+      )}
+    </Panel>
+  );
+}
+
+function UnknownIpTable({ query, rows, totalRequests, durationSec, search }: {
+  query: { isLoading: boolean; isError: boolean; error: Error | null; data?: { truncated: boolean } };
+  rows: UnknownIp[];
+  totalRequests: number;
+  durationSec: number;
+  search: string;
+}) {
+  const { t } = useI18n();
+  const requests = rows.reduce((sum, row) => sum + row.requests, 0);
+  const behindLb = rows.filter(row => row.isLoadBalancer).length;
+  const uncaptured = rows.some(row => row.ip === "unknown");
+  const time = (ms: number) => ms ? new Date(ms).toLocaleString([], { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" }) : "—";
+  return (
+    <Panel
+      title={t("Unknown users of this API", "User chưa xác định của API này")}
+      subtitle={t(
+        "Requests without an identified credential, grouped by source IP · worker five-minute IP rollup",
+        "Request không có credential xác định, nhóm theo IP nguồn · rollup IP năm phút của worker",
+      )}
+      className="mt-4"
+      action={<Link to={`/unknown-users${search}`} className="text-[11px] font-semibold text-ink hover:underline">{t("All unknown traffic", "Toàn bộ lưu lượng chưa xác định")} <ArrowRight size={12} className="inline" /></Link>}
+    >
+      {query.isLoading ? <Loading /> : query.isError ? <ErrorState message={query.error?.message || ""} /> : (
+        <>
+          <dl className="grid grid-cols-2 border-b border-line text-xs sm:grid-cols-4">
+            {[
+              [t("Unknown requests", "Request chưa xác định"), n(requests, 0)],
+              [t("Share of API requests", "Tỷ lệ trên request của API"), pct(totalRequests ? requests / totalRequests : 0)],
+              [t("Source IPs", "IP nguồn"), n(rows.length, 0)],
+              [t("Infrastructure IPs (LB/proxy)", "IP hạ tầng (LB/proxy)"), n(behindLb, 0)],
+            ].map(([label, value]) => <div key={label} className="border-l border-line px-3 py-2 first:border-l-0 max-sm:[&:nth-child(3)]:border-l-0">
+              <dt className="text-muted">{label}</dt>
+              <dd className="mt-0.5 font-mono text-base tabular-nums text-ink">{value}</dd>
+            </div>)}
+          </dl>
+          <div className="overflow-x-auto">
+            <table className="w-full min-w-[760px] text-left text-xs">
+              <thead><tr className="border-b border-line">
+                {[t("Source IP", "IP nguồn"), t("IP role", "Vai trò IP"), t("Caller services"), t("Requests"), t("Avg TPS", "TPS TB"), t("Error rate"), t("Max bucket P95", "P95 bucket lớn nhất"), t("First seen", "Lần đầu"), t("Last seen")].map((heading, i) => <th className={`table-head px-3 py-2 ${i > 2 ? "text-right" : ""}`} key={heading}>{heading}</th>)}
+              </tr></thead>
+              <tbody className="divide-y divide-line">
+                {rows.map(row => (
+                  <tr key={row.ip} className="hover:bg-hover">
+                    <td className="px-3 py-2 font-mono text-entity-ip">
+                      {row.ip === "unknown" ? <span className="text-muted">{t("not captured", "không ghi nhận")}</span> : row.ip}
+                      {row.isNew && <span className="ml-2 rounded-[2px] border border-warn px-1 text-[10px] font-semibold uppercase text-warn">{t("New", "Mới")}</span>}
+                    </td>
+                    <td className={`px-3 ${row.isLoadBalancer ? "text-warn" : "text-muted"}`}>{row.roleLabel || row.role || "—"}</td>
+                    <td className="px-3 font-mono">
+                      {row.callers.length ? row.callers.map((caller, i) => <span key={caller}>{i > 0 && ", "}<EntityLink entity={{ kind: "service", name: caller }} search={search} className="hover:underline">{caller}</EntityLink></span>) : <span className="text-muted">{t("none observed", "không quan sát")}</span>}
+                    </td>
+                    <td className="px-3 text-right font-mono tabular-nums text-ink">{n(row.requests, 0)}</td>
+                    <td className="px-3 text-right font-mono tabular-nums text-ink">{n(row.requests / durationSec, 4)}</td>
+                    <td className={`px-3 text-right font-mono tabular-nums ${row.errorRate > 0 ? "text-bad" : "text-muted"}`}>{pct(row.errorRate)}</td>
+                    <td className="px-3 text-right font-mono tabular-nums">{n(row.p95, 1)} ms</td>
+                    <td className="px-3 text-right text-muted">{time(row.firstSeen)}</td>
+                    <td className="px-3 text-right text-muted">{time(row.lastSeen)}</td>
+                  </tr>
+                ))}
+                {!rows.length && <tr><td colSpan={9} className="px-3 py-8 text-center text-muted">{t("No unauthenticated requests observed for this API", "Không có request chưa xác thực tới API này")}</td></tr>}
+              </tbody>
+            </table>
+          </div>
+          {(behindLb > 0 || uncaptured) && <p className="border-t border-line px-3 py-2 text-[11px] text-muted">{t(
+            "Load balancer, proxy and NAT addresses hide the real client; requests marked \"not captured\" carried no source IP.",
+            "Địa chỉ load balancer, proxy và NAT che IP client thật; request \"không ghi nhận\" không mang IP nguồn.",
+          )}</p>}
+          {query.data?.truncated && <p className="border-t border-line px-3 py-2 text-[11px] text-muted">{t(`Only the first ${RELATIONSHIP_PAGES * 500} relationship rows of this Service were read.`, `Chỉ đọc ${RELATIONSHIP_PAGES * 500} dòng quan hệ đầu tiên của Service.`)}</p>}
+        </>
       )}
     </Panel>
   );
